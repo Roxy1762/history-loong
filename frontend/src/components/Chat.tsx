@@ -15,9 +15,8 @@ export default function Chat({ messages, me, gameFinished }: Props) {
   const [mode, setMode] = useState<'concept' | 'chat'>('concept');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const validating = useGameStore((s) => s.validating);
+  const validating = useGameStore(s => s.validating);
 
-  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -26,65 +25,55 @@ export default function Chat({ messages, me, gameFinished }: Props) {
     e.preventDefault();
     const text = input.trim();
     if (!text || submitting) return;
-    setError('');
-    setSubmitting(true);
-
+    setError(''); setSubmitting(true);
     try {
-      if (mode === 'concept') {
-        const res = await submitConcept(text);
-        if (res.error) setError(res.error);
-      } else {
-        const res = await sendMessage(text);
-        if (res.error) setError(res.error);
-      }
-      setInput('');
-    } catch {
-      setError('发送失败，请重试');
-    } finally {
-      setSubmitting(false);
-    }
+      const res = mode === 'concept' ? await submitConcept(text) : await sendMessage(text);
+      if (res.error) setError(res.error);
+      else setInput('');
+    } catch { setError('发送失败，请重试'); }
+    finally { setSubmitting(false); }
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-slate-50/50">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.length === 0 && (
-          <div className="text-center text-slate-400 text-sm py-8">
-            还没有消息，快开始接龙吧！
+          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+            <div className="text-5xl opacity-40 mb-3">💬</div>
+            <p className="text-sm font-medium">游戏刚刚开始</p>
+            <p className="text-xs mt-1">切换到「提交概念」模式，开始历史接龙！</p>
           </div>
         )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} isMe={msg.player_id === me?.id} />
+
+        {messages.map(msg => (
+          <MessageRow key={msg.id} msg={msg} isMe={msg.player_id === me?.id} />
         ))}
 
-        {/* Validating indicator */}
         {validating && (
-          <div className="flex items-center gap-2 text-sm text-slate-500 pl-2 animate-pulse">
-            <div className="flex gap-1">
-              <span className="w-1.5 h-1.5 bg-brand-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 bg-brand-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 bg-brand-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+          <div className="flex items-center gap-2 ml-2 animate-fade-in">
+            <div className="flex gap-1 items-center">
+              {[0, 150, 300].map(d => (
+                <span key={d} className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+              ))}
             </div>
-            AI 正在验证「{validating.rawInput}」...
+            <span className="text-xs text-slate-400 italic">
+              AI 正在验证「{validating.rawInput}」...
+            </span>
           </div>
         )}
-
         <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      {!gameFinished && (
-        <div className="border-t border-slate-100 p-3 space-y-2">
-          {/* Mode toggle */}
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5 text-xs">
-            {(['concept', 'chat'] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`flex-1 py-1 rounded-md font-medium transition-colors
-                  ${mode === m ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              >
+      {/* Input area */}
+      {!gameFinished ? (
+        <div className="border-t border-slate-100 bg-white px-4 py-3 space-y-2.5">
+          {/* Mode tabs */}
+          <div className="flex gap-1 bg-slate-100 p-0.5 rounded-xl text-xs">
+            {(['concept', 'chat'] as const).map(m => (
+              <button key={m} onClick={() => setMode(m)}
+                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all
+                  ${mode === m ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {m === 'concept' ? '📚 提交历史概念' : '💬 聊天'}
               </button>
             ))}
@@ -92,49 +81,56 @@ export default function Chat({ messages, me, gameFinished }: Props) {
 
           <form onSubmit={handleSubmit} className="flex gap-2">
             <input
-              className="input flex-1 text-sm"
-              placeholder={mode === 'concept' ? '输入历史概念/事件/人物...' : '发送消息...'}
+              className="input flex-1"
+              placeholder={mode === 'concept' ? '输入历史概念、事件、人物...' : '发送消息...'}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value)}
               disabled={submitting}
               maxLength={100}
             />
-            <button
-              type="submit"
-              className="btn-primary px-3 py-2 text-sm"
-              disabled={submitting || !input.trim()}
-            >
-              {submitting ? '...' : '发送'}
+            <button type="submit" disabled={submitting || !input.trim()}
+              className="btn-primary px-4 shrink-0">
+              {submitting
+                ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                  </svg>
+              }
             </button>
           </form>
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
-
-          {mode === 'concept' && (
-            <p className="text-xs text-slate-400">
-              提交后 AI 将自动验证并归入时间轴
-            </p>
+          {error && (
+            <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5">
+              {error}
+            </div>
+          )}
+          {mode === 'concept' && !error && (
+            <p className="text-xs text-slate-400">AI 验证通过后自动归入时间轴</p>
           )}
         </div>
-      )}
-
-      {gameFinished && (
-        <div className="border-t border-slate-100 p-3 text-center text-sm text-slate-400">
-          游戏已结束，可在上方导出结果
+      ) : (
+        <div className="border-t border-slate-100 bg-white px-4 py-4 text-center">
+          <span className="text-sm text-slate-400">游戏已结束 — 可在顶部导出成果</span>
         </div>
       )}
     </div>
   );
 }
 
-// ── MessageBubble ─────────────────────────────────────────────────────────────
+// ── MessageRow ────────────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, isMe }: { msg: Message; isMe: boolean }) {
+function MessageRow({ msg, isMe }: { msg: Message; isMe: boolean }) {
   if (msg.type === 'system') {
+    const isRejected = (msg.meta as Record<string, unknown>)?.rejected;
     return (
-      <div className="flex justify-center">
-        <span className={`text-xs px-3 py-1 rounded-full
-          ${(msg.meta as Record<string, unknown>)?.rejected ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-500'}`}>
+      <div className="flex justify-center animate-fade-in">
+        <span className={`text-xs px-3 py-1.5 rounded-full border
+          ${isRejected
+            ? 'bg-red-50 text-red-500 border-red-100'
+            : (msg.meta as Record<string, unknown>)?.concept
+              ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+              : 'bg-slate-100 text-slate-500 border-slate-200'
+          }`}>
           {msg.content}
         </span>
       </div>
@@ -142,25 +138,23 @@ function MessageBubble({ msg, isMe }: { msg: Message; isMe: boolean }) {
   }
 
   return (
-    <div className={`flex gap-2 animate-fade-in ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+    <div className={`flex gap-2.5 animate-slide-up ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
-      <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white bg-brand-500">
-        {(msg.player_name || '?').slice(0, 1)}
+      <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow-sm
+        ${isMe ? 'bg-indigo-500' : 'bg-gradient-to-br from-slate-400 to-slate-600'}`}>
+        {(msg.player_name || '?')[0]}
       </div>
 
-      <div className={`max-w-[72%] ${isMe ? 'items-end' : 'items-start'} flex flex-col gap-0.5`}>
+      <div className={`max-w-[76%] flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
         {!isMe && (
-          <span className="text-xs text-slate-400 ml-1">{msg.player_name}</span>
+          <span className="text-xs text-slate-400 ml-1 font-medium">{msg.player_name}</span>
         )}
-        <div
-          className={`px-3 py-2 rounded-2xl text-sm break-words
-            ${msg.type === 'concept_attempt' ? 'font-medium italic' : ''}
-            ${isMe
-              ? 'bg-brand-500 text-white rounded-tr-sm'
-              : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm shadow-sm'
-            }`}
-        >
-          {msg.type === 'concept_attempt' && !isMe && '📚 '}
+        <div className={`px-3.5 py-2 text-sm leading-relaxed break-words
+          ${msg.type === 'concept_attempt' ? 'font-medium' : ''}
+          ${isMe ? 'bubble-me' : 'bubble-other'}`}>
+          {msg.type === 'concept_attempt' && !isMe && (
+            <span className="mr-1 text-xs">📚</span>
+          )}
           {msg.content}
         </div>
       </div>

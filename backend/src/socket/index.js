@@ -5,7 +5,8 @@
 
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { getAIService } = require('../services/aiService');
+const ai = require('../services/aiService');
+const { getContextForConcept } = require('../services/knowledgeService');
 const { TimelineService } = require('../services/timelineService');
 const { pluginEvents } = require('../plugins');
 
@@ -136,16 +137,17 @@ module.exports = function setupSocket(io) {
       io.to(currentGameId).emit('message:new', chatMsg);
 
       try {
-        const ai = getAIService();
         const existingConcepts = db.getConceptsByGame.all(currentGameId)
           .filter((c) => c.validated)
           .map((c) => ({ name: c.name, period: c.period }));
 
         const gameSettings = JSON.parse(game.settings || '{}');
+        const knowledgeContext = getContextForConcept(input, game.topic);
+
         const result = await ai.validateConcept(input, game.topic, existingConcepts, {
           mode: game.mode,
           ...gameSettings,
-        });
+        }, knowledgeContext);
 
         const conceptId = uuidv4();
 
@@ -250,7 +252,6 @@ module.exports = function setupSocket(io) {
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
       try {
         const game = db.getGame.get(currentGameId);
-        const ai = getAIService();
         const existing = db.getConceptsByGame.all(currentGameId).filter((c) => c.validated);
         const hints = await ai.suggestConcepts(game.topic, existing);
         callback?.({ ok: true, hints });

@@ -6,17 +6,17 @@ interface Props {
   onClose: () => void;
 }
 
-const FORMAT_LABELS: Record<string, { label: string; icon: string; desc: string }> = {
-  json:     { label: 'JSON',     icon: '📄', desc: '结构化数据，适合二次开发' },
-  markdown: { label: 'Markdown', icon: '📝', desc: '带格式的文本，适合笔记工具' },
-  csv:      { label: 'CSV',      icon: '📊', desc: '表格数据，适合 Excel 分析' },
+const FORMAT_INFO: Record<string, { label: string; icon: string; desc: string; color: string }> = {
+  json:     { label: 'JSON',     icon: '{}',  desc: '结构化数据，适合二次开发', color: 'bg-blue-50 text-blue-600 border-blue-200' },
+  markdown: { label: 'Markdown', icon: '#',   desc: '带格式文本，适合 Notion / Obsidian', color: 'bg-purple-50 text-purple-600 border-purple-200' },
+  csv:      { label: 'CSV',      icon: '≡',   desc: '表格数据，适合 Excel 分析', color: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
 };
 
 export default function ExportPanel({ gameId, onClose }: Props) {
-  const [formats, setFormats] = useState<string[]>(['json', 'markdown', 'csv']);
-  const [selected, setSelected] = useState('json');
+  const [formats, setFormats] = useState(['json', 'markdown', 'csv']);
+  const [selected, setSelected] = useState('markdown');
   const [exporting, setExporting] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [done, setDone] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -24,80 +24,79 @@ export default function ExportPanel({ gameId, onClose }: Props) {
   }, []);
 
   async function handleExport() {
-    setExporting(true);
-    setError('');
-    setSuccess(false);
+    setExporting(true); setError(''); setDone(false);
     try {
       await exportGame(gameId, selected);
-      setSuccess(true);
-    } catch {
-      setError('导出失败，请重试');
-    } finally {
-      setExporting(false);
-    }
+      setDone(true);
+    } catch { setError('导出失败，请重试'); }
+    finally { setExporting(false); }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm animate-slide-up">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm animate-slide-up">
+        {/* Handle bar */}
+        <div className="flex justify-center pt-4 sm:hidden">
+          <div className="w-10 h-1 bg-slate-200 rounded-full" />
+        </div>
+
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <h2 className="text-lg font-semibold text-slate-800">导出成果</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+          <div>
+            <h2 className="text-lg font-bold text-slate-800">导出成果</h2>
+            <p className="text-xs text-slate-400 mt-0.5">时间轴 + 完整聊天记录</p>
+          </div>
+          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* Format picker */}
-        <div className="p-5 space-y-3">
-          <p className="text-sm text-slate-500 mb-3">选择导出格式：</p>
-          {formats.map((fmt) => {
-            const info = FORMAT_LABELS[fmt] || { label: fmt.toUpperCase(), icon: '📁', desc: '' };
+        <div className="p-5 space-y-2.5">
+          {formats.map(fmt => {
+            const info = FORMAT_INFO[fmt] || { label: fmt.toUpperCase(), icon: '📁', desc: '', color: 'bg-slate-50 text-slate-600 border-slate-200' };
             return (
-              <label
-                key={fmt}
-                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors
-                  ${selected === fmt ? 'border-brand-400 bg-brand-50' : 'border-slate-200 hover:border-slate-300'}`}
-              >
-                <input
-                  type="radio"
-                  name="format"
-                  value={fmt}
-                  checked={selected === fmt}
-                  onChange={() => setSelected(fmt)}
-                  className="accent-brand-500"
-                />
-                <span className="text-xl">{info.icon}</span>
-                <div>
-                  <div className="font-medium text-sm text-slate-800">{info.label}</div>
-                  {info.desc && <div className="text-xs text-slate-500">{info.desc}</div>}
+              <label key={fmt}
+                className={`flex items-center gap-4 p-3.5 rounded-2xl border-2 cursor-pointer transition-all
+                  ${selected === fmt ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-100 hover:border-slate-200'}`}>
+                <input type="radio" name="fmt" value={fmt} checked={selected === fmt}
+                  onChange={() => setSelected(fmt)} className="accent-indigo-500 sr-only" />
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-mono font-bold text-sm border ${info.color}`}>
+                  {info.icon}
                 </div>
+                <div className="flex-1">
+                  <div className="font-semibold text-sm text-slate-800">{info.label}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">{info.desc}</div>
+                </div>
+                {selected === fmt && (
+                  <div className="w-5 h-5 bg-indigo-500 rounded-full flex items-center justify-center shrink-0">
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                )}
               </label>
             );
           })}
         </div>
 
-        {/* Export includes */}
-        <div className="px-5 pb-3">
-          <p className="text-xs text-slate-400">导出内容包括：时间轴（已验证概念）+ 完整聊天记录</p>
-        </div>
-
         {/* Actions */}
-        <div className="p-5 pt-2 space-y-2">
-          {error && <p className="text-sm text-red-500 text-center">{error}</p>}
-          {success && <p className="text-sm text-green-600 text-center">✓ 文件已下载</p>}
-          <button
-            className="btn-primary w-full"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? '导出中...' : `下载 ${(FORMAT_LABELS[selected]?.label || selected).toUpperCase()}`}
+        <div className="px-5 pb-6 space-y-2">
+          {error && <p className="text-sm text-red-500 text-center bg-red-50 rounded-xl py-2 border border-red-100">{error}</p>}
+          {done  && <p className="text-sm text-emerald-600 text-center bg-emerald-50 rounded-xl py-2 border border-emerald-100">✅ 文件已下载到本地</p>}
+          <button className="btn-primary w-full py-3 text-sm" onClick={handleExport} disabled={exporting}>
+            {exporting ? (
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                导出中...
+              </span>
+            ) : (
+              `下载 ${(FORMAT_INFO[selected]?.label || selected)} 文件`
+            )}
           </button>
-          <button className="btn-secondary w-full" onClick={onClose}>
-            关闭
-          </button>
+          <button className="btn-secondary w-full py-2.5 text-sm" onClick={onClose}>取消</button>
         </div>
       </div>
     </div>
