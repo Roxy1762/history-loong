@@ -15,6 +15,7 @@ export default function Home() {
   // Create form
   const [topic, setTopic] = useState('');
   const [mode, setMode] = useState('free');
+  const [validationMode, setValidationMode] = useState<'realtime' | 'deferred'>('realtime');
   const [modes, setModes] = useState<Record<string, GameModeConfig>>({});
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
@@ -31,7 +32,7 @@ export default function Home() {
     if (!topic.trim()) return setCreateError('请输入游戏主题');
     setCreating(true); setCreateError('');
     try {
-      const game = await createGame(topic.trim(), mode);
+      const game = await createGame(topic.trim(), mode, { validationMode });
       navigate(`/game/${game.id}`);
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : '创建失败，请重试');
@@ -142,6 +143,32 @@ export default function Home() {
                           <div>
                             <div className="font-semibold text-sm text-slate-800">{cfg.label}</div>
                             <div className="text-xs text-slate-500 mt-0.5">{cfg.description}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Validation mode */}
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">验证时机</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        { value: 'realtime', icon: '⚡', label: '实时验证', desc: '每次提交立即 AI 验证' },
+                        { value: 'deferred', icon: '🎯', label: '结算验证', desc: '游戏结束时批量验证' },
+                      ] as const).map(opt => (
+                        <label key={opt.value}
+                          className={`flex items-start gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all
+                            ${validationMode === opt.value
+                              ? 'border-indigo-400 bg-indigo-50/80'
+                              : 'border-slate-100 bg-white hover:border-slate-200'}`}>
+                          <input type="radio" name="validationMode" value={opt.value}
+                            checked={validationMode === opt.value}
+                            onChange={() => setValidationMode(opt.value)}
+                            className="mt-0.5 accent-indigo-500" />
+                          <div>
+                            <div className="font-semibold text-xs text-slate-800">{opt.icon} {opt.label}</div>
+                            <div className="text-xs text-slate-400 mt-0.5">{opt.desc}</div>
                           </div>
                         </label>
                       ))}

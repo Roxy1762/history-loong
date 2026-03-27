@@ -1,0 +1,9 @@
+node_modules
+*/node_modules
+frontend/dist
+data
+*.db
+*.log
+.env
+.git
+.gitignore

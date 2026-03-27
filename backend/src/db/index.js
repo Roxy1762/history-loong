@@ -131,7 +131,13 @@ module.exports = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getConceptsByGame: stmt(`SELECT * FROM concepts WHERE game_id = ? ORDER BY year ASC, created_at ASC`),
+  getPendingConcepts:stmt(`SELECT * FROM concepts WHERE game_id = ? AND validated = 0 AND rejected = 0 ORDER BY created_at ASC`),
   getConceptCount:   stmt(`SELECT COUNT(*) as count FROM concepts WHERE game_id = ? AND validated = 1`),
+  acceptConcept: stmt(`
+    UPDATE concepts SET validated=1, rejected=0, name=?, period=?, year=?, dynasty=?,
+      description=?, tags=?, extra=? WHERE id=?
+  `),
+  rejectConcept: stmt(`UPDATE concepts SET validated=0, rejected=1, reject_reason=? WHERE id=?`),
 
   // Messages
   insertMessage:    stmt(`INSERT INTO messages (id, game_id, player_id, player_name, type, content, meta) VALUES (?, ?, ?, ?, ?, ?, ?)`),

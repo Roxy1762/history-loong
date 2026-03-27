@@ -1,0 +1,30 @@
+# 生产环境 — 单容器，前后端合并，含自动重启
+# 使用方法：docker compose -f docker-compose.prod.yml up -d
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: history-loong:latest
+    container_name: history-loong
+    restart: unless-stopped
+    ports:
+      - "3001:3001"          # 改为 "80:3001" 可直接用 80 端口
+    volumes:
+      - history_data:/app/data  # 数据持久化（数据库、知识库）
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      FRONTEND_URL: "http://localhost:3001"   # 改为你的域名
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  history_data:
+    driver: local

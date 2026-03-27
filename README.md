@@ -26,6 +26,19 @@
 | **关联接龙** | 每个新概念需与上一个有历史关联 | 考察历史因果关系 |
 | **时序接龙** | 概念必须按时间先后顺序提交 | 考察时间感知 |
 
+### 验证时机（可选）
+| 模式 | 说明 | 优点 |
+|------|------|------|
+| ⚡ **实时验证** | 每次提交立即 AI 验证（默认） | 即时反馈，错误立刻知道 |
+| 🎯 **结算验证** | 游戏结束时 AI 批量验证 | 游戏节奏更流畅，减少等待 |
+
+**结算模式流程：**
+1. 玩家随意提交概念（无需等待 AI）→ 显示"⏳ 待验证"
+2. 游戏结束时点击"⚖️ 结算"按钮
+3. AI 批量验证所有待验证概念（一次 API 调用，高效）
+4. 弹出结算结果：X 个通过，Y 个淘汰
+5. 时间轴自动更新
+
 ### 后台管理功能
 - **🔧 AI 配置管理**：可配置多个 AI 接口，随时切换
   - Anthropic Claude（原生支持）
@@ -47,7 +60,25 @@
 
 ---
 
-## 🚀 快速开始
+## ⚡ 最简部署（三行命令）
+
+```bash
+git clone <repo-url> && cd history-loong
+cp .env.example .env && nano .env   # 填入 API Key
+make setup && npm run dev           # 安装 + 启动
+```
+
+或者用脚本：
+
+```bash
+bash setup.sh         # 开发模式
+bash setup.sh --prod  # 生产模式（自动构建）
+bash setup.sh --docker# Docker 一键部署
+```
+
+---
+
+## 🚀 快速开始（详细）
 
 ### 第 1 步：前置要求
 
@@ -252,21 +283,57 @@ npm run dev
 
 ---
 
-## 🛠️ 生产部署
+## 🐳 Docker 部署（推荐）
+
+最简单的部署方式，**不需要手动安装 Node.js 依赖**。
+
+### 前提
+- 安装 Docker Desktop（[下载](https://www.docker.com/products/docker-desktop)）
+- 准备好 `.env` 文件
+
+### 生产部署（一条命令）
+```bash
+# 1. 准备配置
+cp .env.example .env
+nano .env   # 填入 API Key
+
+# 2. 一键启动（构建 + 运行）
+make docker
+# 或者：bash setup.sh --docker
+
+# 访问 http://localhost:3001
+```
+
+### 开发模式（热重载）
+```bash
+docker compose up           # 前后端都有热重载
+docker compose logs -f      # 查看日志
+docker compose down         # 停止
+```
+
+### 修改端口
+编辑 `docker-compose.prod.yml`：
+```yaml
+ports:
+  - "80:3001"   # 改为 80 端口，可直接用 http://your-ip
+```
+
+---
+
+## 🛠️ 传统部署
 
 ### 本地生产构建 & 运行
 
 ```bash
-# 1. 构建前端（生成静态文件）
-npm run build
+bash setup.sh --prod  # 自动安装 + 构建
+npm run start         # 启动
+# 访问：http://localhost:3001
+```
 
-# 输出：frontend/dist 目录包含所有静态文件
-
-# 2. 启动生产服务器
-npm run start
-
-# 服务器运行在单一端口（默认 3001）
-# 访问：http://localhost:3001 或 http://<your-ip>:3001
+或手动操作：
+```bash
+npm run build    # 构建前端
+npm run start    # 启动生产服务器（内含静态文件服务）
 ```
 
 ### 部署到云服务器（示例：AWS/阿里云/DigitalOcean）
@@ -595,23 +662,25 @@ nc -zv localhost 3001
 
 ## 🔧 开发指南
 
-### 项目脚本
+### 常用命令（Makefile）
 
 ```bash
-# 开发模式（自动重启前后端）
-npm run dev
+make help          # 查看所有命令
+make setup         # 初始化（安装依赖）
+make dev           # 启动开发服务器
+make build         # 构建前端
+make start         # 启动生产服务器
+make docker        # Docker 生产部署
+make docker-dev    # Docker 开发模式
+make logs          # 查看 Docker 日志
+make clean         # 清理构建产物
+```
 
-# 仅启动前端开发服务器（Vite）
-npm run dev:frontend
-
-# 仅启动后端（需手动重启）
-npm run dev:backend
-
-# 生产构建前端
-npm run build
-
-# 生产模式运行（需先 npm run build）
-npm run start
+### npm 脚本
+```bash
+npm run dev        # 同时启动前后端（开发）
+npm run build      # 构建前端
+npm run start      # 生产服务器
 ```
 
 ### 添加新 AI 提供商

@@ -7,6 +7,14 @@ interface ValidatingState {
   rawInput: string;
 }
 
+export interface SettleState {
+  running: boolean;
+  total: number;
+  done: number;
+  accepted: number;
+  rejected: number;
+}
+
 interface GameState {
   // Connection
   connected: boolean;
@@ -24,19 +32,31 @@ interface GameState {
   players: Player[];
   setPlayers: (p: Player[]) => void;
 
-  // Timeline
+  // Validated timeline
   timeline: Concept[];
   setTimeline: (t: Concept[]) => void;
   addConcept: (c: Concept) => void;
+
+  // Pending concepts (deferred mode)
+  pendingConcepts: Concept[];
+  setPendingConcepts: (p: Concept[]) => void;
+  addPendingConcept: (c: Concept) => void;
+  removePendingConcept: (id: string) => void;
 
   // Messages
   messages: Message[];
   setMessages: (m: Message[]) => void;
   addMessage: (m: Message) => void;
 
-  // Validating indicator
+  // Real-time validating indicator
   validating: ValidatingState | null;
   setValidating: (v: ValidatingState | null) => void;
+
+  // Settlement state
+  settle: SettleState;
+  setSettleRunning: (total: number) => void;
+  incrementSettleDone: (accepted: boolean) => void;
+  resetSettle: () => void;
 
   // UI
   activeTab: 'chat' | 'timeline';
@@ -46,45 +66,63 @@ interface GameState {
   reset: () => void;
 }
 
+const sortByYear = (a: Concept, b: Concept) => {
+  if (a.year == null && b.year == null) return 0;
+  if (a.year == null) return 1;
+  if (b.year == null) return -1;
+  return a.year - b.year;
+};
+
+const INITIAL_SETTLE: SettleState = { running: false, total: 0, done: 0, accepted: 0, rejected: 0 };
+
 export const useGameStore = create<GameState>((set) => ({
   connected: false,
-  setConnected: (v) => set({ connected: v }),
+  setConnected: v => set({ connected: v }),
 
   me: null,
-  setMe: (p) => set({ me: p }),
+  setMe: p => set({ me: p }),
 
   game: null,
-  setGame: (g) => set({ game: g }),
+  setGame: g => set({ game: g }),
 
   players: [],
-  setPlayers: (p) => set({ players: p }),
+  setPlayers: p => set({ players: p }),
 
   timeline: [],
-  setTimeline: (t) => set({ timeline: t }),
-  addConcept: (c) =>
-    set((s) => ({
-      timeline: [...s.timeline, c].sort((a, b) => {
-        if (a.year == null && b.year == null) return 0;
-        if (a.year == null) return 1;
-        if (b.year == null) return -1;
-        return a.year - b.year;
-      }),
-    })),
+  setTimeline: t => set({ timeline: t }),
+  addConcept: c => set(s => ({ timeline: [...s.timeline, c].sort(sortByYear) })),
+
+  pendingConcepts: [],
+  setPendingConcepts: p => set({ pendingConcepts: p }),
+  addPendingConcept: c => set(s => ({ pendingConcepts: [...s.pendingConcepts, c] })),
+  removePendingConcept: id => set(s => ({ pendingConcepts: s.pendingConcepts.filter(c => c.id !== id) })),
 
   messages: [],
-  setMessages: (m) => set({ messages: m }),
-  addMessage: (m) => set((s) => ({ messages: [...s.messages, m] })),
+  setMessages: m => set({ messages: m }),
+  addMessage: m => set(s => ({ messages: [...s.messages, m] })),
 
   validating: null,
-  setValidating: (v) => set({ validating: v }),
+  setValidating: v => set({ validating: v }),
+
+  settle: INITIAL_SETTLE,
+  setSettleRunning: total => set({ settle: { ...INITIAL_SETTLE, running: true, total } }),
+  incrementSettleDone: accepted => set(s => ({
+    settle: {
+      ...s.settle,
+      done: s.settle.done + 1,
+      accepted: s.settle.accepted + (accepted ? 1 : 0),
+      rejected: s.settle.rejected + (accepted ? 0 : 1),
+    },
+  })),
+  resetSettle: () => set({ settle: INITIAL_SETTLE }),
 
   activeTab: 'chat',
-  setActiveTab: (t) => set({ activeTab: t }),
+  setActiveTab: t => set({ activeTab: t }),
 
-  reset: () =>
-    set({
-      me: null, game: null, players: [],
-      timeline: [], messages: [],
-      validating: null, activeTab: 'chat',
-    }),
+  reset: () => set({
+    me: null, game: null, players: [],
+    timeline: [], pendingConcepts: [],
+    messages: [], validating: null,
+    settle: INITIAL_SETTLE, activeTab: 'chat',
+  }),
 }));
