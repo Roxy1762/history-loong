@@ -1,52 +1,113 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;900&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --brand: #6366f1;
+    --brand-dark: #4f46e5;
+  }
+  html { scroll-behavior: smooth; }
   body {
     @apply bg-slate-50 text-slate-800 antialiased;
+    font-family: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   }
-  * {
-    @apply box-border;
-  }
+  * { @apply box-border; }
 }
 
 @layer components {
+  /* Buttons */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium text-sm
            transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1
-           disabled:opacity-50 disabled:cursor-not-allowed;
+           disabled:opacity-50 disabled:cursor-not-allowed select-none;
   }
   .btn-primary {
-    @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500;
+    @apply btn bg-indigo-500 text-white hover:bg-indigo-600 active:bg-indigo-700
+           focus:ring-indigo-400 shadow-sm shadow-indigo-200;
   }
   .btn-secondary {
-    @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 focus:ring-slate-300;
+    @apply btn bg-white text-slate-700 border border-slate-200 hover:bg-slate-50
+           active:bg-slate-100 focus:ring-slate-300 shadow-sm;
   }
   .btn-danger {
-    @apply btn bg-red-500 text-white hover:bg-red-600 focus:ring-red-500;
+    @apply btn bg-red-500 text-white hover:bg-red-600 focus:ring-red-400 shadow-sm;
   }
+  .btn-ghost {
+    @apply btn text-slate-500 hover:text-slate-700 hover:bg-slate-100 focus:ring-slate-300;
+  }
+
+  /* Cards */
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-slate-100 p-4;
+    @apply bg-white rounded-2xl shadow-sm border border-slate-100/80;
   }
+
+  /* Inputs */
   .input {
-    @apply w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-800
-           placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent
-           transition-all duration-150;
+    @apply w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800
+           placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400
+           focus:border-transparent transition-all duration-150 text-sm;
+  }
+
+  /* Glass card */
+  .glass {
+    @apply bg-white/10 backdrop-blur-xl border border-white/20;
   }
 }
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { @apply bg-transparent; }
-::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
-::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }
+::-webkit-scrollbar-thumb { @apply bg-slate-200 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-slate-300; }
 
-/* Timeline dot pulse */
-@keyframes dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(99,102,241,0); }
+/* Animations */
+@keyframes fadeIn       { from { opacity: 0; }                              to { opacity: 1; } }
+@keyframes slideUp      { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes slideInRight { from { transform: translateX(12px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes shimmer      { from { background-position: -200% 0; }            to { background-position: 200% 0; } }
+@keyframes dotPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0.5); }
+  60%       { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
 }
-.timeline-dot-new { animation: dot-pulse 1s ease-in-out 3; }
+
+.animate-fade-in        { animation: fadeIn        0.25s ease-out; }
+.animate-slide-up       { animation: slideUp       0.25s ease-out; }
+.animate-slide-in-right { animation: slideInRight  0.2s ease-out; }
+
+/* Timeline pulse for new concepts */
+.timeline-dot-new { animation: dotPulse 1.2s ease-in-out 3; }
+
+/* Gradient text */
+.gradient-text {
+  @apply bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent;
+}
+
+/* Era color bands */
+.era-ancient   { @apply border-l-amber-400  bg-amber-50;  }
+.era-medieval  { @apply border-l-purple-400 bg-purple-50; }
+.era-imperial  { @apply border-l-red-400    bg-red-50;    }
+.era-song-yuan { @apply border-l-blue-400   bg-blue-50;   }
+.era-ming-qing { @apply border-l-emerald-400 bg-emerald-50; }
+.era-modern    { @apply border-l-indigo-400 bg-indigo-50; }
+.era-unknown   { @apply border-l-slate-300  bg-slate-50;  }
+
+/* Chat bubbles */
+.bubble-me {
+  @apply bg-indigo-500 text-white rounded-2xl rounded-tr-sm;
+}
+.bubble-other {
+  @apply bg-white border border-slate-100 text-slate-800 rounded-2xl rounded-tl-sm shadow-sm;
+}
+
+/* Noise texture overlay for hero */
+.noise::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+}

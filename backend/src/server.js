@@ -8,7 +8,8 @@ const path = require('path');
 
 const gamesRouter = require('./routes/games');
 const exportRouter = require('./routes/export');
-const setupSocket = require('./socket');
+const adminRouter  = require('./routes/admin');
+const setupSocket  = require('./socket');
 const { loadPlugins, GAME_MODES } = require('./plugins');
 
 // ── App setup ─────────────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ if (process.env.NODE_ENV === 'production') {
 
 app.use('/api/games', gamesRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/admin', adminRouter);
 
 app.get('/api/modes', (_req, res) => res.json({ modes: GAME_MODES }));
 
@@ -66,10 +68,13 @@ loadPlugins();
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 server.listen(PORT, () => {
+  const adminKey = process.env.ADMIN_KEY || 'admin';
   console.log(`
-  ╔══════════════════════════════════════╗
-  ║   历史接龙 History-Loong Server      ║
-  ║   http://localhost:${PORT}              ║
-  ╚══════════════════════════════════════╝
+  ╔══════════════════════════════════════════╗
+  ║   历史接龙 History-Loong Server          ║
+  ║   App:   http://localhost:${PORT}           ║
+  ║   Admin: http://localhost:${PORT}/admin     ║
+  ║   Key:   ${adminKey.padEnd(30)} ║
+  ╚══════════════════════════════════════════╝
   `);
 });

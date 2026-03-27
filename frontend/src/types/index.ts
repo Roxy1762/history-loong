@@ -10,7 +10,7 @@ export interface Game {
   updated_at: string;
 }
 
-export type GameMode = 'free' | 'chain' | 'ordered' | string; // extensible
+export type GameMode = 'free' | 'chain' | 'ordered' | string;
 
 export interface Player {
   id: string;

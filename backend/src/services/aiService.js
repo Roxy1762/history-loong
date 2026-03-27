@@ -1,69 +1,139 @@
 /**
- * AI Service — adapter pattern.
- * Add new providers by implementing the same interface and registering below.
+ * AI Service — multi-provider, DB-driven configuration.
+ *
+ * Supported provider types:
+ *   'anthropic'        — Anthropic Claude (native SDK)
+ *   'openai-compatible' — Any OpenAI-compatible API (OpenAI, DeepSeek, Qwen, Ollama, etc.)
+ *
+ * Resolution order for active config:
+ *   1. Active row in ai_configs table
+ *   2. Environment variables (ANTHROPIC_API_KEY / OPENAI_BASE_URL)
  */
 
 const Anthropic = require('@anthropic-ai/sdk');
+const db = require('../db');
 
-// ── Provider: Claude ──────────────────────────────────────────────────────────
+// ── Provider implementations ──────────────────────────────────────────────────
 
-class ClaudeProvider {
-  constructor() {
-    this.client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    this.model = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
-  }
+async function callAnthropic(config, prompt, maxTokens) {
+  const client = new Anthropic({ apiKey: config.api_key });
+  const resp = await client.messages.create({
+    model: config.model,
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return resp.content[0].text.trim();
+}
 
-  async complete(prompt, maxTokens = 800) {
-    const response = await this.client.messages.create({
-      model: this.model,
+async function callOpenAICompatible(config, prompt, maxTokens) {
+  const base = (config.base_url || '').replace(/\/$/, '');
+  const url = `${base}/chat/completions`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${config.api_key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.model,
       max_tokens: maxTokens,
       messages: [{ role: 'user', content: prompt }],
-    });
-    return response.content[0].text.trim();
+    }),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`API ${resp.status}: ${body.slice(0, 200)}`);
   }
+  const data = await resp.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Empty response from API');
+  return content.trim();
 }
 
 // ── Provider registry (extension point) ──────────────────────────────────────
 
-const PROVIDERS = {
-  claude: ClaudeProvider,
-  // openai: OpenAIProvider,   // future
-  // mock:   MockProvider,     // for testing
+const PROVIDER_HANDLERS = {
+  anthropic: callAnthropic,
+  'openai-compatible': callOpenAICompatible,
 };
 
-// ── AIService ─────────────────────────────────────────────────────────────────
+/** Register a custom provider handler (for plugins) */
+function registerProviderHandler(type, fn) {
+  PROVIDER_HANDLERS[type] = fn;
+}
 
-class AIService {
-  constructor() {
-    const name = process.env.AI_PROVIDER || 'claude';
-    const Cls = PROVIDERS[name];
-    if (!Cls) throw new Error(`Unknown AI provider: ${name}`);
-    this.provider = new Cls();
-    this.name = name;
+// ── Config resolution ─────────────────────────────────────────────────────────
+
+function resolveConfig() {
+  // 1. DB active config
+  try {
+    const row = db.getActiveAIConfig.get();
+    if (row) {
+      return { ...row, extra: JSON.parse(row.extra || '{}') };
+    }
+  } catch { /* DB may not be ready yet */ }
+
+  // 2. Environment fallback
+  if (process.env.ANTHROPIC_API_KEY) {
+    return {
+      provider_type: 'anthropic',
+      api_key: process.env.ANTHROPIC_API_KEY,
+      model: process.env.CLAUDE_MODEL || 'claude-sonnet-4-6',
+    };
   }
+  if (process.env.OPENAI_API_KEY || process.env.AI_API_KEY) {
+    return {
+      provider_type: 'openai-compatible',
+      base_url: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+      api_key: process.env.OPENAI_API_KEY || process.env.AI_API_KEY,
+      model: process.env.AI_MODEL || 'gpt-4o',
+    };
+  }
+  return null;
+}
 
-  /**
-   * Validate a submitted concept and extract timeline metadata.
-   *
-   * @param {string} concept   Raw player input
-   * @param {string} topic     Game topic
-   * @param {Array}  existing  Already-validated concepts [{name, period}]
-   * @param {object} gameMode  Game mode settings
-   * @returns {object}  { valid, reason, name, period, year, dynasty, description, tags, extra }
-   */
-  async validateConcept(concept, topic, existing = [], gameMode = {}) {
-    const existingText = existing.length
-      ? existing.map((c) => `- ${c.name}（${c.period || '年代不明'}）`).join('\n')
-      : '（暂无）';
+// ── Core call ─────────────────────────────────────────────────────────────────
 
-    const modeHint = gameMode.mode === 'ordered'
-      ? '注意：本局为时间顺序模式，新概念必须晚于已有概念中最新的时间。'
-      : gameMode.mode === 'chain'
-      ? '注意：本局为接龙模式，新概念应与上一个概念有明确的历史关联。'
-      : '';
+async function complete(prompt, maxTokens = 800) {
+  const config = resolveConfig();
+  if (!config) {
+    throw new Error('未配置 AI 服务，请在后台管理界面添加 AI 配置');
+  }
+  const handler = PROVIDER_HANDLERS[config.provider_type];
+  if (!handler) {
+    throw new Error(`未知的 AI 提供商类型: ${config.provider_type}`);
+  }
+  return handler(config, prompt, maxTokens);
+}
 
-    const prompt = `你是一位严谨的历史学专家，正在主持一场历史知识接龙游戏。
+// ── Test connection ───────────────────────────────────────────────────────────
 
+async function testConfig(configRow) {
+  const handler = PROVIDER_HANDLERS[configRow.provider_type];
+  if (!handler) throw new Error(`未知类型: ${configRow.provider_type}`);
+  const text = await handler(configRow, '请回复"连接成功"四个字，不要其他内容。', 50);
+  return text;
+}
+
+// ── Game AI methods ───────────────────────────────────────────────────────────
+
+async function validateConcept(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
+  const existingText = existing.length
+    ? existing.map((c) => `- ${c.name}（${c.period || '年代不明'}）`).join('\n')
+    : '（暂无）';
+
+  const modeHint = gameMode.mode === 'ordered'
+    ? '注意：本局为时间顺序模式，新概念必须晚于已有概念中最新的时间。'
+    : gameMode.mode === 'chain'
+    ? '注意：本局为接龙模式，新概念应与上一个概念有明确的历史关联。'
+    : '';
+
+  const knowledgeSection = knowledgeContext
+    ? `\n【参考资料】\n${knowledgeContext}\n`
+    : '';
+
+  const prompt = `你是一位严谨的历史学专家，正在主持一场历史知识接龙游戏。
+${knowledgeSection}
 游戏主题：${topic}
 游戏已有概念列表：
 ${existingText}
@@ -77,10 +147,10 @@ ${modeHint}
 
 {
   "valid": true,
-  "name": "标准化名称（如：商鞅变法）",
+  "name": "标准化名称",
   "period": "时间描述（如：公元前356年—公元前350年）",
   "year": -356,
-  "dynasty": "所属朝代/时期（如：战国·秦）",
+  "dynasty": "所属朝代/时期",
   "description": "一句话简介，不超过60字",
   "tags": ["政治", "改革"],
   "extra": {}
@@ -89,58 +159,39 @@ ${modeHint}
 若无效，则返回：
 {
   "valid": false,
-  "reason": "说明原因（如：与主题无关、不是真实历史概念等）"
+  "reason": "说明原因"
 }
 
-year 字段规则：公元前用负数（如公元前356年 → -356），公元后用正数。
-若为时间段，取起始年。若无法确定，填 null。`;
+year 字段：公元前用负数，公元后用正数，若为时间段取起始年，无法确定填 null。`;
 
-    try {
-      const text = await this.provider.complete(prompt, 600);
-      const json = this._extractJSON(text);
-      return json;
-    } catch (err) {
-      console.error('[AIService] validateConcept error:', err.message);
-      throw new Error('AI 服务暂时不可用，请稍后重试');
-    }
-  }
+  const text = await complete(prompt, 600);
+  return extractJSON(text);
+}
 
-  /**
-   * Generate a hint or suggest related concepts for a topic.
-   * Extension point for richer game features.
-   */
-  async suggestConcepts(topic, existing = [], count = 3) {
-    const existingNames = existing.map((c) => c.name).join('、') || '无';
-    const prompt = `历史接龙游戏主题：${topic}。
-已出现的概念：${existingNames}。
+async function suggestConcepts(topic, existing = [], count = 3) {
+  const existingNames = existing.map((c) => c.name).join('、') || '无';
+  const prompt = `历史接龙游戏主题：${topic}。已出现的概念：${existingNames}。
 请推荐 ${count} 个尚未出现的、与主题相关的历史概念，每行一个，只写名称，不要编号或解释。`;
-
-    const text = await this.provider.complete(prompt, 200);
-    return text.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, count);
-  }
-
-  // ── private ─────────────────────────────────────────────────────────────────
-
-  _extractJSON(text) {
-    // Remove markdown code fences if present
-    const clean = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-    // Try direct parse
-    try {
-      return JSON.parse(clean);
-    } catch {
-      // Extract first {...} block
-      const m = clean.match(/\{[\s\S]*\}/);
-      if (m) return JSON.parse(m[0]);
-      throw new Error('Cannot parse AI response as JSON');
-    }
-  }
+  const text = await complete(prompt, 200);
+  return text.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, count);
 }
 
-// Singleton
-let _instance = null;
-function getAIService() {
-  if (!_instance) _instance = new AIService();
-  return _instance;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function extractJSON(text) {
+  const clean = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+  try { return JSON.parse(clean); } catch { /* fall through */ }
+  const m = clean.match(/\{[\s\S]*\}/);
+  if (m) return JSON.parse(m[0]);
+  throw new Error('Cannot parse AI response as JSON');
 }
 
-module.exports = { getAIService, PROVIDERS };
+module.exports = {
+  complete,
+  validateConcept,
+  suggestConcepts,
+  testConfig,
+  resolveConfig,
+  registerProviderHandler,
+  PROVIDER_HANDLERS,
+};
