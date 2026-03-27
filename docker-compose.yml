@@ -1,0 +1,32 @@
+# 开发环境 — 热重载，前后端分开运行
+# 使用方法：docker compose up
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./backend/src:/app/src          # 热重载：修改代码自动生效
+      - ./data:/app/data                # 数据库持久化
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      FRONTEND_URL: "http://localhost:5173"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src         # 热重载
+      - ./frontend/public:/app/public
+    environment:
+      VITE_API_URL: "http://localhost:3001"

@@ -168,6 +168,65 @@ year 字段：公元前用负数，公元后用正数，若为时间段取起始
   return extractJSON(text);
 }
 
+/**
+ * Batch validate multiple concepts in a single AI call.
+ * concepts: [{ id, raw_input }]
+ * Returns: [{ id, valid, name?, year?, dynasty?, period?, description?, tags?, reason? }]
+ */
+async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
+  if (!concepts.length) return [];
+
+  const BATCH = 8; // concepts per AI call
+  const results = [];
+
+  for (let i = 0; i < concepts.length; i += BATCH) {
+    const slice = concepts.slice(i, i + BATCH);
+    const list = slice.map((c, idx) => `${idx + 1}. ${c.raw_input}`).join('\n');
+
+    const knowledgeSection = knowledgeContext
+      ? `\n【参考资料】\n${knowledgeContext}\n` : '';
+
+    const prompt = `你是历史学专家，正在批量验证历史接龙游戏中的概念提交。
+游戏主题：${topic}
+${knowledgeSection}
+请依次验证以下 ${slice.length} 个提交内容，判断每项是否为与主题相关的真实历史概念：
+
+${list}
+
+以 JSON 数组返回（不要 markdown 代码块），数组长度必须与上方条目数相同：
+[
+  {
+    "index": 1,
+    "valid": true,
+    "name": "标准化名称",
+    "year": -356,
+    "dynasty": "战国·秦",
+    "period": "公元前356年",
+    "description": "一句话简介，不超过50字",
+    "tags": ["政治"]
+  },
+  {
+    "index": 2,
+    "valid": false,
+    "reason": "拒绝原因"
+  }
+]
+
+year 规则：公元前用负数，公元后用正数，若为时间段取起始年，无法确定填 null。`;
+
+    const text = await complete(prompt, 1200);
+    const arr = extractJSON(text);
+    if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
+
+    for (let j = 0; j < slice.length; j++) {
+      const r = arr.find(x => x.index === j + 1) || arr[j] || { valid: false, reason: 'AI未返回结果' };
+      results.push({ id: slice[j].id, ...r });
+    }
+  }
+
+  return results;
+}
+
 async function suggestConcepts(topic, existing = [], count = 3) {
   const existingNames = existing.map((c) => c.name).join('、') || '无';
   const prompt = `历史接龙游戏主题：${topic}。已出现的概念：${existingNames}。
@@ -189,6 +248,7 @@ function extractJSON(text) {
 module.exports = {
   complete,
   validateConcept,
+  batchValidateConcepts,
   suggestConcepts,
   testConfig,
   resolveConfig,

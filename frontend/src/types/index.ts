@@ -5,12 +5,19 @@ export interface Game {
   topic: string;
   mode: GameMode;
   status: 'waiting' | 'playing' | 'finished';
-  settings: Record<string, unknown>;
+  settings: GameSettings;
   created_at: string;
   updated_at: string;
 }
 
 export type GameMode = 'free' | 'chain' | 'ordered' | string;
+
+export type ValidationMode = 'realtime' | 'deferred';
+
+export interface GameSettings {
+  validationMode?: ValidationMode;
+  [key: string]: unknown; // extensible
+}
 
 export interface Player {
   id: string;
@@ -31,8 +38,8 @@ export interface Concept {
   description: string;
   tags: string[];
   extra: Record<string, unknown>;
-  validated: number;
-  rejected: number;
+  validated: number;  // 1 = accepted
+  rejected: number;   // 1 = rejected
   eraLabel?: string;
   created_at: string;
 }
@@ -55,10 +62,7 @@ export interface GameModeConfig {
 
 // ── Socket event payloads ─────────────────────────────────────────────────────
 
-export interface JoinPayload {
-  gameId: string;
-  playerName: string;
-}
+export interface JoinPayload { gameId: string; playerName: string; }
 
 export interface JoinResponse {
   ok?: boolean;
@@ -66,18 +70,26 @@ export interface JoinResponse {
   game?: Game;
   player?: Player;
   timeline?: Concept[];
+  pendingConcepts?: Concept[];
   messages?: Message[];
 }
 
-export interface ConceptNewEvent {
-  concept: Concept;
+export interface ConceptNewEvent     { concept: Concept; }
+export interface ConceptPendingEvent { concept: Concept; }
+export interface ConceptValidatingEvent { playerId: string; playerName: string; rawInput: string; }
+
+export interface ConceptSettledEvent {
+  conceptId: string;
+  accepted: boolean;
+  concept?: Concept;       // present when accepted
+  reason?: string;         // present when rejected
+  playerName?: string;
+  rawInput?: string;
 }
 
-export interface ConceptValidatingEvent {
-  playerId: string;
-  playerName: string;
-  rawInput: string;
-}
+export interface SettleStartEvent { total: number; }
+export interface SettleDoneEvent  { accepted: number; rejected: number; }
+export interface SettleProgressEvent { done: number; total: number; }
 
 // ── Export ────────────────────────────────────────────────────────────────────
 

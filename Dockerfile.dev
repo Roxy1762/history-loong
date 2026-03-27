@@ -1,0 +1,17 @@
+# ── Backend dev ───────────────────────────────────────────────────────────────
+FROM node:20-alpine AS backend
+WORKDIR /app
+COPY backend/package.json ./
+RUN npm install
+COPY backend/src ./src
+RUN mkdir -p /app/data
+CMD ["node_modules/.bin/nodemon", "src/server.js"]
+
+
+# ── Frontend dev ──────────────────────────────────────────────────────────────
+FROM node:20-alpine AS frontend
+WORKDIR /app
+COPY frontend/package.json ./
+RUN npm install
+COPY frontend/ ./
+CMD ["node_modules/.bin/vite", "--host", "0.0.0.0"]
