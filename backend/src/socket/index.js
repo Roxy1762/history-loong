@@ -109,6 +109,15 @@ module.exports = function setupSocket(io) {
       const input = (rawInput || '').trim();
       if (!input) return callback?.({ error: '请输入内容' });
 
+      // Duplicate detection: reject if concept name already accepted (case-insensitive)
+      const existingValidated = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
+      const isDuplicate = existingValidated.some(
+        c => (c.name || c.raw_input).toLowerCase() === input.toLowerCase()
+      );
+      if (isDuplicate) {
+        return callback?.({ error: `「${input}」已在时间轴中，请提交新的历史概念` });
+      }
+
       const settings = JSON.parse(game.settings || '{}');
       const isDeferred = settings.validationMode === 'deferred';
 
@@ -196,8 +205,12 @@ module.exports = function setupSocket(io) {
 
       } catch (err) {
         console.error('[Socket] concept:submit error:', err);
-        sysMessage(io, currentGameId, `验证出错：${err.message}`);
-        callback?.({ error: err.message });
+        const isAINotConfigured = err.message.includes('未配置 AI');
+        const msg = isAINotConfigured
+          ? 'AI 未配置，请前往后台管理（/admin）添加 API Key 后再使用实时验证，或切换为"结算模式"继续游戏'
+          : `验证出错：${err.message}`;
+        sysMessage(io, currentGameId, msg);
+        callback?.({ error: msg });
       }
     });
 
@@ -305,8 +318,9 @@ module.exports = function setupSocket(io) {
         const existing = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
         const hints    = await ai.suggestConcepts(game.topic, existing);
         callback?.({ ok: true, hints });
-      } catch {
-        callback?.({ error: '获取提示失败' });
+      } catch (err) {
+        const isAINotConfigured = err.message && err.message.includes('未配置 AI');
+        callback?.({ error: isAINotConfigured ? 'AI 未配置，请在 /admin 添加 API Key' : '获取提示失败' });
       }
     });
 

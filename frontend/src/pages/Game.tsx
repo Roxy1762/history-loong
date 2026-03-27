@@ -11,10 +11,18 @@ import PlayerList from '../components/PlayerList';
 import ExportPanel from '../components/ExportPanel';
 import type { Concept } from '../types';
 
+const PLAYER_NAME_KEY = 'history_loong_player_name';
+
 // ── Name dialog ───────────────────────────────────────────────────────────────
 
 function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => localStorage.getItem(PLAYER_NAME_KEY) || '');
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const finalName = name.trim() || '匿名玩家';
+    localStorage.setItem(PLAYER_NAME_KEY, finalName);
+    onConfirm(finalName);
+  }
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-7 animate-slide-up">
@@ -23,13 +31,35 @@ function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
           <h2 className="text-xl font-bold text-slate-800">加入游戏</h2>
           <p className="text-sm text-slate-500 mt-1">请输入你的昵称</p>
         </div>
-        <form onSubmit={e => { e.preventDefault(); onConfirm(name.trim() || '匿名玩家'); }} className="space-y-3">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <input className="input text-center text-lg py-3 font-medium" placeholder="你的昵称..."
             value={name} onChange={e => setName(e.target.value)} autoFocus maxLength={20} />
           <button type="submit" className="btn-primary w-full py-3">加入游戏</button>
         </form>
       </div>
     </div>
+  );
+}
+
+// ── Share button ──────────────────────────────────────────────────────────────
+
+function ShareButton({ gameId }: { gameId: string }) {
+  const [copied, setCopied] = useState(false);
+  function handleShare() {
+    const url = `${window.location.origin}/game/${gameId}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+  return (
+    <button
+      onClick={handleShare}
+      title="复制房间链接"
+      className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+    >
+      {copied ? '✅ 已复制' : '🔗 分享'}
+    </button>
   );
 }
 
@@ -290,6 +320,8 @@ export default function Game() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 flex-shrink-0">
+              {game && <ShareButton gameId={game.id} />}
+
               <button onClick={handleHint} disabled={hintLoading}
                 className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
                 {hintLoading ? '...' : '💡'}

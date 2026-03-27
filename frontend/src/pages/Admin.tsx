@@ -263,7 +263,39 @@ function AIConfigPanel() {
       )}
 
       {configs.length === 0 ? (
-        <EmptyState icon="🤖" title="暂无 AI 配置" desc="点击「添加配置」接入 Claude、DeepSeek、Qwen、本地 Ollama 等任意接口" />
+        <div className="space-y-4">
+          {/* First-run setup wizard */}
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-2xl p-6">
+            <div className="flex items-start gap-4">
+              <div className="text-4xl shrink-0">🚀</div>
+              <div className="flex-1">
+                <h3 className="font-bold text-indigo-900 text-lg mb-1">配置 AI 接口，开启完整功能</h3>
+                <p className="text-indigo-700 text-sm mb-4">
+                  游戏现在可以正常运行，添加 API Key 后可启用：<strong>实时概念验证</strong>、<strong>AI 提示建议</strong>、<strong>批量结算验证</strong>。
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                  {[
+                    { name: 'Anthropic Claude', icon: '🔶', key: 'ANTHROPIC_API_KEY', url: 'https://console.anthropic.com/', model: 'claude-sonnet-4-6' },
+                    { name: 'DeepSeek（推荐·便宜）', icon: '💎', key: 'sk-...', url: 'https://platform.deepseek.com/', model: 'deepseek-chat' },
+                    { name: 'OpenAI GPT', icon: '🟢', key: 'sk-...', url: 'https://platform.openai.com/', model: 'gpt-4o' },
+                    { name: 'Ollama（本地免费）', icon: '🦙', key: '（无需 Key）', url: 'https://ollama.ai/', model: 'llama3' },
+                  ].map(p => (
+                    <div key={p.name} className="bg-white rounded-xl p-3 border border-indigo-100 text-sm">
+                      <div className="font-semibold text-slate-800">{p.icon} {p.name}</div>
+                      <div className="text-slate-400 text-xs mt-0.5">模型：{p.model}</div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="btn-primary"
+                  onClick={() => { setEditing(null); setShowForm(true); }}
+                >
+                  + 立即添加 AI 配置
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         <div className="space-y-3">
           {configs.map(cfg => (

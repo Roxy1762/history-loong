@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { createGame, getGameModes } from '../services/api';
+import { createGame, getGameModes, getSetupStatus } from '../services/api';
 import type { GameModeConfig } from '../types';
 
 const EXAMPLE_TOPICS = [
   '中国古代史', '唐朝政治制度', '欧洲文艺复兴',
   '工业革命', '二战历史', '丝绸之路', '明清经济',
 ];
+
+const PLAYER_NAME_KEY = 'history_loong_player_name';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -23,8 +25,12 @@ export default function Home() {
   // Join form
   const [roomCode, setRoomCode] = useState('');
 
+  // Setup status
+  const [aiConfigured, setAiConfigured] = useState<boolean | null>(null);
+
   useEffect(() => {
     getGameModes().then(setModes).catch(() => {});
+    getSetupStatus().then(s => setAiConfigured(s.aiConfigured)).catch(() => setAiConfigured(true));
   }, []);
 
   async function handleCreate(e: React.FormEvent) {
@@ -71,6 +77,21 @@ export default function Home() {
           后台管理
         </Link>
       </nav>
+
+      {/* AI not configured banner */}
+      {aiConfigured === false && (
+        <div className="relative z-10 mx-auto w-full max-w-md px-4 pt-2">
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-start gap-3">
+            <span className="text-xl shrink-0 mt-0.5">⚠️</span>
+            <div className="flex-1 text-sm text-amber-800">
+              <span className="font-semibold">AI 功能未配置</span> — 游戏可正常进行，但实时验证和提示暂不可用。
+              <Link to="/admin" className="ml-1 underline font-semibold hover:text-amber-900">
+                前往后台配置 API Key →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hero */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">

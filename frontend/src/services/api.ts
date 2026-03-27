@@ -18,6 +18,13 @@ function adminHeaders() {
   return { 'x-admin-key': _adminKey };
 }
 
+// ── Setup status ──────────────────────────────────────────────────────────────
+
+export async function getSetupStatus(): Promise<{ aiConfigured: boolean; version: string }> {
+  const { data } = await api.get<{ ok: boolean; aiConfigured: boolean; version: string }>('/status');
+  return data;
+}
+
 // ── Games ─────────────────────────────────────────────────────────────────────
 
 export async function createGame(topic: string, mode = 'free', settings = {}) {
