@@ -10,7 +10,7 @@ import type {
 let socket: Socket | null = null;
 
 function getSocket(): Socket {
-  if (!socket || !socket.connected) {
+  if (!socket) {
     socket = io('/', { transports: ['websocket', 'polling'] });
   }
   return socket;
