@@ -61,63 +61,74 @@ module.exports = function setupSocket(io) {
     let currentGameId = null;
     let currentPlayer = null;
 
-    console.log(`[Socket] new connection socketId=${socket.id}`);
+    console.log(`[Socket] new connection socketId=${socket.id} transport=${socket.conn?.transport?.name} remoteAddress=${socket.handshake?.address}`);
 
     // ── join ──────────────────────────────────────────────────────────────────
     socket.on('game:join', ({ gameId, playerName }, callback) => {
       const id = (gameId || '').toUpperCase();
-      console.log(`[Socket] game:join socketId=${socket.id} gameId=${id} playerName=${playerName}`);
+      const ts_start = Date.now();
+      console.log(`[Socket] game:join START socketId=${socket.id} gameId=${id} playerName=${playerName} transport=${socket.conn?.transport?.name}`);
 
-      const game = db.getGame.get(id);
-      if (!game) {
-        console.warn(`[Socket] game:join FAILED — room not found gameId=${id}`);
-        return callback?.({ error: '房间不存在' });
+      try {
+        const game = db.getGame.get(id);
+        if (!game) {
+          console.warn(`[Socket] game:join FAILED — room not found gameId=${id}`);
+          return callback?.({ error: '房间不存在' });
+        }
+        console.log(`[Socket] game:join DB lookup OK gameId=${id} status=${game.status}`);
+
+        const room    = getRoom(id);
+        const color   = pickColor(room);
+        const playerId = socket.id;
+
+        currentGameId  = id;
+        currentPlayer  = { id: playerId, name: playerName || '匿名玩家', color };
+
+        room.players.set(playerId, currentPlayer);
+        socket.join(id);
+        console.log(`[Socket] game:join socket.join OK gameId=${id} roomSize=${io.sockets.adapter.rooms.get(id)?.size ?? 0}`);
+
+        db.upsertPlayer.run(playerId, id, currentPlayer.name, color);
+        console.log(`[Socket] game:join player upserted playerId=${playerId} gameId=${id}`);
+
+        // Transition game status from 'waiting' to 'playing' on first join
+        if (game.status === 'waiting') {
+          db.updateGameStatus.run('playing', id);
+          game.status = 'playing';
+          console.log(`[Socket] game status updated to 'playing' gameId=${id}`);
+        }
+
+        const settings = JSON.parse(game.settings || '{}');
+        const ts       = new TimelineService();
+
+        // Validated concepts → timeline
+        const allConcepts    = db.getConceptsByGame.all(id).map(parseConcept);
+        const timeline       = ts.buildTimeline(allConcepts);
+
+        // Pending concepts (deferred mode)
+        const pendingConcepts = db.getPendingConcepts.all(id).map(parseConcept);
+
+        const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+
+        const elapsed = Date.now() - ts_start;
+        console.log(`[Socket] game:join OK socketId=${socket.id} gameId=${id} player=${currentPlayer.name} timeline=${timeline.length} pending=${pendingConcepts.length} messages=${messages.length} elapsed=${elapsed}ms`);
+
+        callback?.({
+          ok: true,
+          game: { ...game, settings },
+          player: currentPlayer,
+          timeline,
+          pendingConcepts,
+          messages,
+        });
+
+        broadcastPlayers(io, id);
+        sysMessage(io, id, `${currentPlayer.name} 加入了游戏`);
+        pluginEvents.emit('player:join', { game, player: currentPlayer });
+      } catch (err) {
+        console.error(`[Socket] game:join ERROR socketId=${socket.id} gameId=${id}:`, err);
+        callback?.({ error: `加入失败：${err.message}` });
       }
-
-      const room    = getRoom(id);
-      const color   = pickColor(room);
-      const playerId = socket.id;
-
-      currentGameId  = id;
-      currentPlayer  = { id: playerId, name: playerName || '匿名玩家', color };
-
-      room.players.set(playerId, currentPlayer);
-      socket.join(id);
-      db.upsertPlayer.run(playerId, id, currentPlayer.name, color);
-
-      // Transition game status from 'waiting' to 'playing' on first join
-      if (game.status === 'waiting') {
-        db.updateGameStatus.run('playing', id);
-        game.status = 'playing';
-        console.log(`[Socket] game status updated to 'playing' gameId=${id}`);
-      }
-
-      const settings = JSON.parse(game.settings || '{}');
-      const ts       = new TimelineService();
-
-      // Validated concepts → timeline
-      const allConcepts    = db.getConceptsByGame.all(id).map(parseConcept);
-      const timeline       = ts.buildTimeline(allConcepts);
-
-      // Pending concepts (deferred mode)
-      const pendingConcepts = db.getPendingConcepts.all(id).map(parseConcept);
-
-      const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
-
-      console.log(`[Socket] game:join OK socketId=${socket.id} gameId=${id} player=${currentPlayer.name} timeline=${timeline.length} pending=${pendingConcepts.length} messages=${messages.length}`);
-
-      callback?.({
-        ok: true,
-        game: { ...game, settings },
-        player: currentPlayer,
-        timeline,
-        pendingConcepts,
-        messages,
-      });
-
-      broadcastPlayers(io, id);
-      sysMessage(io, id, `${currentPlayer.name} 加入了游戏`);
-      pluginEvents.emit('player:join', { game, player: currentPlayer });
     });
 
     // ── submit concept ────────────────────────────────────────────────────────
@@ -376,12 +387,16 @@ module.exports = function setupSocket(io) {
 
     // ── disconnect ────────────────────────────────────────────────────────────
     socket.on('disconnect', (reason) => {
-      console.log(`[Socket] disconnect socketId=${socket.id} gameId=${currentGameId} reason=${reason}`);
+      console.log(`[Socket] disconnect socketId=${socket.id} gameId=${currentGameId} player=${currentPlayer?.name} reason=${reason}`);
       if (!currentGameId || !currentPlayer) return;
-      getRoom(currentGameId).players.delete(currentPlayer.id);
-      broadcastPlayers(io, currentGameId);
-      sysMessage(io, currentGameId, `${currentPlayer.name} 离开了游戏`);
-      pluginEvents.emit('player:leave', { gameId: currentGameId, player: currentPlayer });
+      try {
+        getRoom(currentGameId).players.delete(currentPlayer.id);
+        broadcastPlayers(io, currentGameId);
+        sysMessage(io, currentGameId, `${currentPlayer.name} 离开了游戏`);
+        pluginEvents.emit('player:leave', { gameId: currentGameId, player: currentPlayer });
+      } catch (err) {
+        console.error(`[Socket] disconnect cleanup ERROR socketId=${socket.id} gameId=${currentGameId}:`, err);
+      }
     });
   });
 };

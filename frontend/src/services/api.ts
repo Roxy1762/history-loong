@@ -159,6 +159,7 @@ export interface AdminGame extends Game {
   conceptCount: number;
   playerCount: number;
   pendingCount: number;
+  onlineCount: number;  // live connected players (in-memory)
 }
 
 export interface AdminGameDetail {

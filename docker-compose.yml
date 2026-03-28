@@ -29,4 +29,7 @@ services:
       - ./frontend/src:/app/src         # 热重载
       - ./frontend/public:/app/public
     environment:
-      VITE_API_URL: "http://localhost:3001"
+      # API_TARGET_URL: server-side proxy target (Docker service name, not localhost)
+      API_TARGET_URL: "http://backend:3001"
+    depends_on:
+      - backend

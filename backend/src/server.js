@@ -30,6 +30,11 @@ const corsOrigins = process.env.NODE_ENV === 'production'
 
 const io = new Server(server, {
   cors: { origin: corsOrigins, methods: ['GET', 'POST'] },
+  // Keep connections alive: ping every 25s, disconnect if no pong within 20s
+  pingInterval: 25000,
+  pingTimeout: 20000,
+  // Allow up to 1 MB per message
+  maxHttpBufferSize: 1e6,
 });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
@@ -78,6 +83,16 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
+
+// Log total connected clients on connect/disconnect
+io.on('connection', (socket) => {
+  const clientCount = io.engine.clientsCount;
+  console.log(`[IO] client connected  id=${socket.id} total=${clientCount} transport=${socket.conn?.transport?.name}`);
+  socket.on('disconnect', (reason) => {
+    const remaining = io.engine.clientsCount;
+    console.log(`[IO] client disconnected id=${socket.id} reason=${reason} remaining=${remaining}`);
+  });
+});
 
 setupSocket(io);
 

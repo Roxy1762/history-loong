@@ -54,13 +54,21 @@ router.get('/games', (req, res) => {
   } else {
     games = db.listAllGames.all();
   }
+
+  // Get in-memory rooms for live connected player count
+  const setupSocket = require('../socket');
+  const rooms = setupSocket._rooms;
+
   // Enrich with concept counts and player counts
   const enriched = games.map(g => {
     const conceptCount = db.getConceptCount.get(g.id)?.count || 0;
-    const playerCount = db.getPlayerCount.get(g.id)?.count || 0;
+    const playerCount  = db.getPlayerCount.get(g.id)?.count || 0;
     const pendingCount = db.getPendingConceptCount.get(g.id)?.count || 0;
-    return { ...g, settings: JSON.parse(g.settings || '{}'), conceptCount, playerCount, pendingCount };
+    // Live connected players from in-memory room (more accurate than DB count)
+    const onlineCount  = rooms?.get(g.id)?.players?.size ?? 0;
+    return { ...g, settings: JSON.parse(g.settings || '{}'), conceptCount, playerCount, pendingCount, onlineCount };
   });
+  console.log(`[Admin] GET /games enriched ${enriched.length} games`);
   res.json({ games: enriched });
 });
 
