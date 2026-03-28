@@ -189,3 +189,21 @@ export async function adminDeleteGame(id: string) {
   const { data } = await api.delete(`/admin/games/${id}`, { headers: adminHeaders() });
   return data;
 }
+
+// ── Admin: Server Logs ───────────────────────────────────────────────────────
+
+export interface LogEntry {
+  ts: string;
+  level: 'info' | 'warn' | 'error';
+  msg: string;
+}
+
+export async function adminGetLogs(limit = 200, level?: string) {
+  const params: Record<string, string | number> = { limit };
+  if (level) params.level = level;
+  const { data } = await api.get<{ count: number; logs: LogEntry[] }>('/admin/logs', {
+    headers: adminHeaders(),
+    params,
+  });
+  return data;
+}

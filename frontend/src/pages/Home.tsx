@@ -221,7 +221,7 @@ export default function Home() {
           ))}
         </div>
 
-        <p className="mt-6 text-xs text-slate-300 select-none">v0.1.0</p>
+        <p className="mt-6 text-xs text-slate-300 select-none">dev 0.1.1</p>
       </div>
     </div>
   );

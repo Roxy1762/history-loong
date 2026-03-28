@@ -1,4 +1,6 @@
 require('dotenv').config();
+// Install console interceptors first so every log line is captured
+require('./logger');
 
 const express = require('express');
 const http = require('http');
@@ -84,13 +86,30 @@ if (process.env.NODE_ENV === 'production') {
 
 // ── Socket.io ─────────────────────────────────────────────────────────────────
 
-// Log total connected clients on connect/disconnect
+// Log every low-level engine connection for diagnostics
+io.engine.on('connection', (rawSocket) => {
+  console.log(`[Engine] raw connect  sid=${rawSocket.id} transport=${rawSocket.transport?.name} remoteAddr=${rawSocket.remoteAddress}`);
+  rawSocket.on('upgrading', (transport) => {
+    console.log(`[Engine] upgrading     sid=${rawSocket.id}  to=${transport.name}`);
+  });
+  rawSocket.on('upgrade', (transport) => {
+    console.log(`[Engine] upgraded      sid=${rawSocket.id}  to=${transport.name}`);
+  });
+  rawSocket.on('upgradeError', (err) => {
+    console.warn(`[Engine] upgradeError  sid=${rawSocket.id}  err="${err?.message}"`);
+  });
+  rawSocket.on('close', (reason, desc) => {
+    console.log(`[Engine] raw close     sid=${rawSocket.id}  reason=${reason}${desc ? ' desc=' + desc : ''}`);
+  });
+});
+
+// Log Socket.IO namespace-level connect/disconnect
 io.on('connection', (socket) => {
-  const clientCount = io.engine.clientsCount;
-  console.log(`[IO] client connected  id=${socket.id} total=${clientCount} transport=${socket.conn?.transport?.name}`);
+  const total = io.engine.clientsCount;
+  console.log(`[IO] client connected     id=${socket.id}  total=${total}  transport=${socket.conn?.transport?.name}`);
   socket.on('disconnect', (reason) => {
     const remaining = io.engine.clientsCount;
-    console.log(`[IO] client disconnected id=${socket.id} reason=${reason} remaining=${remaining}`);
+    console.log(`[IO] client disconnected  id=${socket.id}  reason=${reason}  remaining=${remaining}`);
   });
 });
 
