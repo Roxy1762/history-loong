@@ -233,7 +233,7 @@ module.exports = function setupSocket(io) {
           year: result.year ?? null, dynasty: result.dynasty,
           description: result.description, tags: Array.isArray(result.tags) ? result.tags : [],
           extra: result.extra || {}, validated: 1, rejected: 0,
-          eraLabel: ts.getEraLabel(result.year ?? null), created_at: new Date().toISOString(),
+          eraLabel: ts.getEraLabel(result.year ?? null, result.dynasty), created_at: new Date().toISOString(),
         };
 
         const confirmContent = `✓ 「${result.name}」已加入时间轴（${result.dynasty || result.period || '年代不详'}）`;
@@ -286,7 +286,7 @@ module.exports = function setupSocket(io) {
 
       try {
         const settings = JSON.parse(game.settings || '{}');
-        const knowledgeContext = searchContext(game.topic, 3);
+        const knowledgeContext = searchContext(game.topic, 2);
 
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
@@ -311,7 +311,7 @@ module.exports = function setupSocket(io) {
               period: r.period, year: r.year ?? null, dynasty: r.dynasty,
               description: r.description, tags: Array.isArray(r.tags) ? r.tags : [],
               extra: {}, validated: 1, rejected: 0,
-              eraLabel: ts.getEraLabel(r.year ?? null), created_at: row.created_at,
+              eraLabel: ts.getEraLabel(r.year ?? null, r.dynasty), created_at: row.created_at,
             };
             io.to(currentGameId).emit('concept:settled', { conceptId: r.id, accepted: true, concept });
             accepted++;

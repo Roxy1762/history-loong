@@ -28,26 +28,40 @@ async function callAnthropic(config, prompt, maxTokens) {
 async function callOpenAICompatible(config, prompt, maxTokens) {
   const base = (config.base_url || '').replace(/\/$/, '');
   const url = `${base}/chat/completions`;
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${config.api_key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: maxTokens,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => '');
-    throw new Error(`API ${resp.status}: ${body.slice(0, 200)}`);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.api_key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`API ${resp.status}: ${body.slice(0, 200)}`);
+    }
+    const data = await resp.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Empty response from API');
+    return content.trim();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('AI 请求超时（30秒），请检查网络连接或 API 地址是否正确');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  const data = await resp.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Empty response from API');
-  return content.trim();
 }
 
 // ── Provider registry (extension point) ──────────────────────────────────────
@@ -118,53 +132,32 @@ async function testConfig(configRow) {
 // ── Game AI methods ───────────────────────────────────────────────────────────
 
 async function validateConcept(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
-  const existingText = existing.length
-    ? existing.map((c) => `- ${c.name}（${c.period || '年代不明'}）`).join('\n')
-    : '（暂无）';
+  // Limit existing list to last 10, compact format
+  const recentExisting = existing.slice(-10);
+  const existingText = recentExisting.length
+    ? recentExisting.map((c) => `${c.name}(${c.year ?? '?'})`).join('、')
+    : '无';
 
   const modeHint = gameMode.mode === 'ordered'
-    ? '注意：本局为时间顺序模式，新概念必须晚于已有概念中最新的时间。'
+    ? '时间顺序模式：新概念须晚于已有最新时间。'
     : gameMode.mode === 'chain'
-    ? '注意：本局为接龙模式，新概念应与上一个概念有明确的历史关联。'
+    ? '接龙模式：新概念须与上一概念有明确历史关联。'
     : '';
 
   const knowledgeSection = knowledgeContext
-    ? `\n【参考资料】\n${knowledgeContext}\n`
+    ? `【参考资料】\n${knowledgeContext}\n`
     : '';
 
-  const prompt = `你是一位严谨的历史学专家，正在主持一场历史知识接龙游戏。
+  const prompt = `历史接龙游戏验证。主题：${topic}。已有：${existingText}。${modeHint}
 ${knowledgeSection}
-游戏主题：${topic}
-游戏已有概念列表：
-${existingText}
+玩家提交：「${concept}」
 
-${modeHint}
+判断是否为与主题相关的有效历史概念，返回JSON（禁止markdown）：
+有效：{"valid":true,"name":"标准名","period":"时间描述","year":-356,"dynasty":"朝代","description":"简介不超40字","tags":["标签"],"extra":{}}
+无效：{"valid":false,"reason":"原因"}
+year：公元前负数，公元后正数，时间段取起始年，不确定填null。`;
 
-玩家新提交的内容：「${concept}」
-
-请判断该内容是否为与主题相关的有效历史概念/事件/人物/制度/思想流派，并提取其时间信息。
-返回严格的 JSON（不要 markdown 代码块，不要额外文字）：
-
-{
-  "valid": true,
-  "name": "标准化名称",
-  "period": "时间描述（如：公元前356年—公元前350年）",
-  "year": -356,
-  "dynasty": "所属朝代/时期",
-  "description": "一句话简介，不超过60字",
-  "tags": ["政治", "改革"],
-  "extra": {}
-}
-
-若无效，则返回：
-{
-  "valid": false,
-  "reason": "说明原因"
-}
-
-year 字段：公元前用负数，公元后用正数，若为时间段取起始年，无法确定填 null。`;
-
-  const text = await complete(prompt, 600);
+  const text = await complete(prompt, 400);
   return extractJSON(text);
 }
 
@@ -184,37 +177,16 @@ async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
     const list = slice.map((c, idx) => `${idx + 1}. ${c.raw_input}`).join('\n');
 
     const knowledgeSection = knowledgeContext
-      ? `\n【参考资料】\n${knowledgeContext}\n` : '';
+      ? `【参考资料】\n${knowledgeContext}\n` : '';
 
-    const prompt = `你是历史学专家，正在批量验证历史接龙游戏中的概念提交。
-游戏主题：${topic}
-${knowledgeSection}
-请依次验证以下 ${slice.length} 个提交内容，判断每项是否为与主题相关的真实历史概念：
-
+    const prompt = `批量验证历史接龙概念。主题：${topic}。
+${knowledgeSection}验证以下${slice.length}项，返回等长JSON数组（禁止markdown）：
 ${list}
 
-以 JSON 数组返回（不要 markdown 代码块），数组长度必须与上方条目数相同：
-[
-  {
-    "index": 1,
-    "valid": true,
-    "name": "标准化名称",
-    "year": -356,
-    "dynasty": "战国·秦",
-    "period": "公元前356年",
-    "description": "一句话简介，不超过50字",
-    "tags": ["政治"]
-  },
-  {
-    "index": 2,
-    "valid": false,
-    "reason": "拒绝原因"
-  }
-]
+格式：[{"index":1,"valid":true,"name":"标准名","year":-356,"dynasty":"朝代","period":"时间","description":"简介不超40字","tags":["标签"]},{"index":2,"valid":false,"reason":"原因"}]
+year：公元前负数，公元后正数，时间段取起始年，不确定填null。`;
 
-year 规则：公元前用负数，公元后用正数，若为时间段取起始年，无法确定填 null。`;
-
-    const text = await complete(prompt, 1200);
+    const text = await complete(prompt, 700);
     const arr = extractJSON(text);
     if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
 

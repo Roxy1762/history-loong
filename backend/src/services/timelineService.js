@@ -66,13 +66,23 @@ class TimelineService {
       ...c,
       tags: this._parseTags(c.tags),
       extra: this._parseJSON(c.extra, {}),
-      eraLabel: this.getEraLabel(c.year),
+      eraLabel: this.getEraLabel(c.year, c.dynasty),
     }));
 
     return enriched;
   }
 
-  getEraLabel(year) {
+  /**
+   * @param {number|null} year
+   * @param {string} [dynasty] - AI-supplied dynasty string (e.g. "清朝"); matched first
+   */
+  getEraLabel(year, dynasty = '') {
+    // Prefer dynasty field: find the first era whose name appears in the dynasty string
+    if (dynasty) {
+      for (const era of this.eras) {
+        if (dynasty.includes(era.name)) return era.name;
+      }
+    }
     if (year == null) return '年代不详';
     for (const era of this.eras) {
       if (year >= era.start && year < era.end) return era.name;
