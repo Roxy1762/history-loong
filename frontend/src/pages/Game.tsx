@@ -113,6 +113,7 @@ export default function Game() {
   const [hints,       setHints]       = useState<string[]>([]);
   const [newestId,    setNewestId]    = useState<string | undefined>();
   const [joinError,   setJoinError]   = useState('');
+  const [connError,   setConnError]   = useState('');
   const [hintLoading, setHintLoading] = useState(false);
   const [settling,    setSettling]    = useState(false);
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
@@ -131,18 +132,25 @@ export default function Game() {
     const offs = [
       onSocket('connect', async () => {
         setConnected(true);
+        setConnError('');
         // If the socket reconnected while we were already in a room, re-join so
         // the backend can restore currentGameId / currentPlayer for this socket.
         const gid = gameIdRef.current;
         const player = meRef.current;
         if (gid && player) {
           const res = await joinGame({ gameId: gid, playerName: player.name });
+          if (res.error) return; // reconnect join failure is non-fatal
           if (res.game)            setGame(res.game);
           if (res.player)          setMe(res.player);
           if (res.timeline)        setTimeline(res.timeline);
           if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
           if (res.messages)        setMessages(res.messages);
         }
+      }),
+      onSocket('connect_error', () => {
+        // Only surface the error before the user has joined; after joining,
+        // the disconnect indicator in the header is sufficient feedback.
+        if (!meRef.current) setConnError('无法连接到服务器，请检查网络或刷新页面重试');
       }),
       onSocket('disconnect', () => setConnected(false)),
       onSocket('message:new', msg => addMessage(msg)),
@@ -233,13 +241,16 @@ export default function Game() {
     await finishGame();
   }
 
-  if (joinError) {
+  if (joinError || connError) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="text-center space-y-4">
-          <div className="text-5xl">⚠️</div>
-          <p className="text-xl text-red-500">{joinError}</p>
-          <button className="btn-secondary" onClick={() => navigate('/')}>返回首页</button>
+          <div className="text-5xl">{connError ? '📡' : '⚠️'}</div>
+          <p className="text-xl text-red-500">{joinError || connError}</p>
+          {connError
+            ? <button className="btn-primary" onClick={() => window.location.reload()}>刷新重试</button>
+            : <button className="btn-secondary" onClick={() => navigate('/')}>返回首页</button>
+          }
         </div>
       </div>
     );

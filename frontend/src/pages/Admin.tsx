@@ -104,13 +104,14 @@ export default function Admin() {
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700">
+        <div className="p-4 border-t border-slate-700 space-y-2">
           <button
             onClick={() => { setAdminKey(''); setAuthed(false); }}
             className="w-full text-xs text-slate-500 hover:text-slate-300 transition-colors"
           >
             退出登录
           </button>
+          <p className="text-center text-xs text-slate-600 select-none">v0.1.0</p>
         </div>
       </aside>
 
