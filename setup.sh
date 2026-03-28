@@ -2,7 +2,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 #  history-loong setup script
 #  一键安装并启动，适用于 macOS / Linux
-#  用法：bash setup.sh [--dev | --prod | --docker]
+#  用法：bash setup.sh [--dev | --prod | --docker | --quick]
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -22,25 +22,65 @@ header "🐉 历史接龙 History-Loong Setup"
 echo "模式：$MODE"
 echo "───────────────────────────────────"
 
-# ── 检查 .env ─────────────────────────────────────────────────────────────────
+# ── 交互式配置 .env ───────────────────────────────────────────────────────────
 setup_env() {
   if [ ! -f .env ]; then
     cp .env.example .env
-    warn ".env 文件已创建，请填入 API Key 后重新运行"
-    echo ""
-    echo "  编辑命令：nano .env  或  open .env（macOS）"
-    echo ""
-    echo "  至少需要以下其一："
-    echo "    ANTHROPIC_API_KEY=sk_ant_xxxxx   # Claude"
-    echo "    OPENAI_API_KEY=sk-xxxxx           # OpenAI 或兼容接口"
-    echo ""
-    exit 0
+    info ".env 已从模板创建"
   fi
 
-  # 检查是否已填写 API Key
+  # 如果 API Key 还是占位符，尝试交互式询问
   if grep -q "your_anthropic_api_key_here" .env 2>/dev/null; then
-    warn "检测到 .env 中的 API Key 未替换，请先编辑 .env 文件"
-    warn "也可在后台 /admin 页面配置 AI 接口"
+    # 只有在终端交互时才提示
+    if [ -t 0 ]; then
+      echo ""
+      echo -e "${BOLD}配置 AI 接口${NC}（也可跳过，稍后在 /admin 页面设置）"
+      echo ""
+      echo "  支持的 AI 提供商："
+      echo "    [1] Anthropic Claude（推荐）"
+      echo "    [2] OpenAI / 兼容接口（DeepSeek、Qwen、Ollama 等）"
+      echo "    [3] 跳过，稍后在后台配置"
+      echo ""
+      read -rp "  请选择 [1/2/3]（默认 3）: " AI_CHOICE
+      AI_CHOICE="${AI_CHOICE:-3}"
+
+      case "$AI_CHOICE" in
+        1)
+          read -rp "  Anthropic API Key (sk_ant_...): " ANTHROPIC_KEY
+          if [ -n "$ANTHROPIC_KEY" ]; then
+            sed -i.bak "s|ANTHROPIC_API_KEY=your_anthropic_api_key_here|ANTHROPIC_API_KEY=${ANTHROPIC_KEY}|" .env
+            rm -f .env.bak
+            success "Anthropic API Key 已写入 .env"
+          fi
+          ;;
+        2)
+          read -rp "  OpenAI Base URL（默认 https://api.openai.com/v1）: " OAI_URL
+          OAI_URL="${OAI_URL:-https://api.openai.com/v1}"
+          read -rp "  API Key: " OAI_KEY
+          if [ -n "$OAI_KEY" ]; then
+            sed -i.bak \
+              -e "s|# OPENAI_BASE_URL=.*|OPENAI_BASE_URL=${OAI_URL}|" \
+              -e "s|# OPENAI_API_KEY=.*|OPENAI_API_KEY=${OAI_KEY}|" .env
+            rm -f .env.bak
+            success "OpenAI 配置已写入 .env"
+          fi
+          ;;
+        *)
+          warn "跳过 API Key 配置，请在 /admin 页面完成设置"
+          ;;
+      esac
+
+      # 可选：修改管理员密钥
+      echo ""
+      read -rp "  设置管理后台密钥（默认 admin，建议修改）: " NEW_ADMIN_KEY
+      if [ -n "$NEW_ADMIN_KEY" ] && [ "$NEW_ADMIN_KEY" != "admin" ]; then
+        sed -i.bak "s|ADMIN_KEY=admin|ADMIN_KEY=${NEW_ADMIN_KEY}|" .env
+        rm -f .env.bak
+        success "管理员密钥已更新"
+      fi
+    else
+      warn "检测到 .env 中的 API Key 未替换，请编辑 .env 或在 /admin 页面配置"
+    fi
   fi
 }
 
@@ -101,6 +141,47 @@ build_frontend() {
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 case "$MODE" in
 
+  --quick | -q)
+    # 傻瓜模式：只需 Docker，交互配置后一键启动
+    header "快速部署模式（Docker）"
+    check_docker
+    setup_env
+
+    # 询问端口
+    if [ -t 0 ]; then
+      read -rp "  监听端口（默认 3001）: " APP_PORT
+      APP_PORT="${APP_PORT:-3001}"
+      if [ "$APP_PORT" != "3001" ]; then
+        sed -i.bak "s|APP_PORT=.*|APP_PORT=${APP_PORT}|g" .env 2>/dev/null || true
+        # 若 .env 中没有 APP_PORT 则追加
+        grep -q "^APP_PORT=" .env || echo "APP_PORT=${APP_PORT}" >> .env
+        rm -f .env.bak
+      fi
+    else
+      APP_PORT="${APP_PORT:-3001}"
+    fi
+
+    # 检查是否有预构建镜像
+    GHCR_IMAGE="ghcr.io/$(git remote get-url origin 2>/dev/null | sed 's|.*github.com[:/]\(.*\)\.git|\1|' | tr '[:upper:]' '[:lower:]'):latest"
+    if docker pull "$GHCR_IMAGE" 2>/dev/null; then
+      success "已拉取最新镜像：$GHCR_IMAGE"
+      sed -i.bak "s|image: history-loong:latest|image: ${GHCR_IMAGE}|" docker-compose.prod.yml 2>/dev/null || true
+      rm -f docker-compose.prod.yml.bak
+    else
+      info "本地构建镜像中（首次约 2-3 分钟）..."
+      docker build -t history-loong .
+    fi
+
+    docker compose -f docker-compose.prod.yml up -d
+    success "启动成功！"
+    echo ""
+    echo "  🌐 应用地址：http://localhost:${APP_PORT}"
+    echo "  ⚙️  后台管理：http://localhost:${APP_PORT}/admin"
+    echo "  📋 查看日志：docker compose -f docker-compose.prod.yml logs -f"
+    echo "  🛑 停止服务：docker compose -f docker-compose.prod.yml down"
+    echo "  🔄 更新版本：make update"
+    ;;
+
   --docker | -d)
     header "Docker 部署模式"
     setup_env
@@ -111,8 +192,8 @@ case "$MODE" in
     docker compose -f docker-compose.prod.yml up -d
     success "启动成功！"
     echo ""
-    echo "  🌐 应用地址：http://localhost:3001"
-    echo "  ⚙️  后台管理：http://localhost:3001/admin"
+    echo "  🌐 应用地址：http://localhost:${APP_PORT:-3001}"
+    echo "  ⚙️  后台管理：http://localhost:${APP_PORT:-3001}/admin"
     echo "  📋 查看日志：docker compose -f docker-compose.prod.yml logs -f"
     echo "  🛑 停止服务：docker compose -f docker-compose.prod.yml down"
     ;;
@@ -123,7 +204,6 @@ case "$MODE" in
     check_deps
     install_deps
     build_frontend
-    info "启动生产服务器..."
     echo ""
     success "安装完成！使用以下命令启动："
     echo ""

@@ -3,7 +3,10 @@
 #  常用命令：make help
 # ─────────────────────────────────────────────────────────────────────────────
 
-.PHONY: help setup dev prod docker docker-dev logs stop clean install build
+.PHONY: help setup setup-prod quick dev dev-backend dev-frontend \
+        install build start \
+        docker docker-build docker-dev docker-prod docker-stop \
+        logs update backup restore clean clean-data reset
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -17,6 +20,9 @@ help: ## 显示所有可用命令
 	@echo ""
 
 # ── 初始化 ────────────────────────────────────────────────────────────────────
+
+quick: ## 🚀 傻瓜一键部署（Docker，交互式配置）
+	@bash setup.sh --quick
 
 setup: ## 一键初始化（复制.env、安装依赖）
 	@bash setup.sh --dev
@@ -67,6 +73,52 @@ docker-stop: ## 停止 Docker 容器
 
 logs: ## 查看 Docker 生产日志
 	@docker compose -f docker-compose.prod.yml logs -f
+
+# ── 升级 ──────────────────────────────────────────────────────────────────────
+
+update: ## 🔄 拉取最新代码并重启（零停机热更新）
+	@echo "拉取最新代码..."
+	@git pull --ff-only
+	@echo "重建镜像..."
+	@docker build -t history-loong .
+	@echo "滚动重启..."
+	@docker compose -f docker-compose.prod.yml up -d --no-deps app
+	@echo "✓ 更新完成"
+
+# ── 数据备份 ──────────────────────────────────────────────────────────────────
+
+BACKUP_DIR ?= ./backups
+BACKUP_FILE := $(BACKUP_DIR)/history-loong-$(shell date +%Y%m%d-%H%M%S).db
+
+backup: ## 💾 备份数据库到 ./backups/
+	@mkdir -p $(BACKUP_DIR)
+	@if docker ps -q -f name=history-loong | grep -q .; then \
+		docker exec history-loong sqlite3 /app/data/history-loong.db ".backup /tmp/backup.db" && \
+		docker cp history-loong:/tmp/backup.db $(BACKUP_FILE) && \
+		echo "✓ 已备份到 $(BACKUP_FILE)"; \
+	elif [ -f ./data/history-loong.db ]; then \
+		cp ./data/history-loong.db $(BACKUP_FILE) && \
+		echo "✓ 已备份到 $(BACKUP_FILE)"; \
+	else \
+		echo "✗ 未找到数据库，请确认服务已运行"; exit 1; \
+	fi
+
+restore: ## ♻️  从备份还原（用法：make restore FILE=./backups/xxx.db）
+ifndef FILE
+	@echo "用法：make restore FILE=./backups/history-loong-YYYYMMDD-HHMMSS.db"
+	@echo ""
+	@echo "可用备份："
+	@ls -lh $(BACKUP_DIR)/*.db 2>/dev/null || echo "  （暂无备份）"
+	@exit 1
+endif
+	@read -p "⚠  确认用 $(FILE) 覆盖当前数据？(y/N) " c; [ "$$c" = "y" ] || exit 0
+	@if docker ps -q -f name=history-loong | grep -q .; then \
+		docker cp $(FILE) history-loong:/app/data/history-loong.db && \
+		docker restart history-loong && \
+		echo "✓ 已还原并重启"; \
+	else \
+		cp $(FILE) ./data/history-loong.db && echo "✓ 已还原"; \
+	fi
 
 # ── 维护 ──────────────────────────────────────────────────────────────────────
 
