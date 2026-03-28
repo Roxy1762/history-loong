@@ -119,10 +119,15 @@ module.exports = {
   updateGameStatus:  stmt(`UPDATE games SET status = ?, updated_at = datetime('now') WHERE id = ?`),
   updateGameSettings:stmt(`UPDATE games SET settings = ?, updated_at = datetime('now') WHERE id = ?`),
   listGames:         stmt(`SELECT id, topic, mode, status, created_at FROM games ORDER BY created_at DESC LIMIT 50`),
+  listAllGames:      stmt(`SELECT * FROM games ORDER BY created_at DESC LIMIT 100`),
+  listGamesByStatus: stmt(`SELECT * FROM games WHERE status = ? ORDER BY created_at DESC LIMIT 100`),
+  deleteGame:        stmt(`DELETE FROM games WHERE id = ?`),
 
   // Players
   upsertPlayer: stmt(`INSERT OR REPLACE INTO players (id, game_id, name, color) VALUES (?, ?, ?, ?)`),
   getPlayers:   stmt(`SELECT * FROM players WHERE game_id = ?`),
+  getPlayerCount: stmt(`SELECT COUNT(*) as count FROM players WHERE game_id = ?`),
+  deletePlayersByGame: stmt(`DELETE FROM players WHERE game_id = ?`),
 
   // Concepts
   insertConcept: stmt(`
@@ -133,6 +138,8 @@ module.exports = {
   getConceptsByGame: stmt(`SELECT * FROM concepts WHERE game_id = ? ORDER BY year ASC, created_at ASC`),
   getPendingConcepts:stmt(`SELECT * FROM concepts WHERE game_id = ? AND validated = 0 AND rejected = 0 ORDER BY created_at ASC`),
   getConceptCount:   stmt(`SELECT COUNT(*) as count FROM concepts WHERE game_id = ? AND validated = 1`),
+  getPendingConceptCount: stmt(`SELECT COUNT(*) as count FROM concepts WHERE game_id = ? AND validated = 0 AND rejected = 0`),
+  deleteConceptsByGame: stmt(`DELETE FROM concepts WHERE game_id = ?`),
   acceptConcept: stmt(`
     UPDATE concepts SET validated=1, rejected=0, name=?, period=?, year=?, dynasty=?,
       description=?, tags=?, extra=? WHERE id=?
@@ -142,6 +149,8 @@ module.exports = {
   // Messages
   insertMessage:    stmt(`INSERT INTO messages (id, game_id, player_id, player_name, type, content, meta) VALUES (?, ?, ?, ?, ?, ?, ?)`),
   getMessagesByGame:stmt(`SELECT * FROM messages WHERE game_id = ? ORDER BY created_at ASC`),
+  getMessageCount:  stmt(`SELECT COUNT(*) as count FROM messages WHERE game_id = ?`),
+  deleteMessagesByGame: stmt(`DELETE FROM messages WHERE game_id = ?`),
 
   // AI configs
   listAIConfigs:   stmt(`SELECT * FROM ai_configs ORDER BY created_at DESC`),

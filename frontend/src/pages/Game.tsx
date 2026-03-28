@@ -118,19 +118,25 @@ export default function Game() {
   const [settling,    setSettling]    = useState(false);
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
 
-  // Track latest me/gameId in a ref so reconnect handler always has fresh values
+  // Track latest values in refs so socket handlers always have fresh values
+  // This avoids the stale closure bug where useEffect depended on [game]
   const meRef     = useRef(me);
   const gameIdRef = useRef(gameId);
+  const gameRef   = useRef(game);
   useEffect(() => { meRef.current = me; },     [me]);
   useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
+  useEffect(() => { gameRef.current = game; }, [game]);
 
   const isDeferred = game?.settings?.validationMode === 'deferred';
   const gameFinished = game?.status === 'finished';
 
-  // ── Socket listeners ────────────────────────────────────────────────────────
+  // ── Socket listeners (registered ONCE, using refs for fresh values) ─────────
   useEffect(() => {
+    console.log('[Game] Setting up socket listeners');
+
     const offs = [
       onSocket('connect', async () => {
+        console.log('[Game] Socket connected');
         setConnected(true);
         setConnError('');
         // If the socket reconnected while we were already in a room, re-join so
@@ -138,8 +144,13 @@ export default function Game() {
         const gid = gameIdRef.current;
         const player = meRef.current;
         if (gid && player) {
+          console.log(`[Game] Reconnect re-join gameId=${gid} player=${player.name}`);
           const res = await joinGame({ gameId: gid, playerName: player.name });
-          if (res.error) return; // reconnect join failure is non-fatal
+          if (res.error) {
+            console.warn(`[Game] Reconnect re-join failed: ${res.error}`);
+            return; // reconnect join failure is non-fatal
+          }
+          console.log('[Game] Reconnect re-join OK');
           if (res.game)            setGame(res.game);
           if (res.player)          setMe(res.player);
           if (res.timeline)        setTimeline(res.timeline);
@@ -147,16 +158,24 @@ export default function Game() {
           if (res.messages)        setMessages(res.messages);
         }
       }),
-      onSocket('connect_error', () => {
+      onSocket('connect_error', (err) => {
+        console.error('[Game] Socket connect_error:', err.message);
         // Only surface the error before the user has joined; after joining,
         // the disconnect indicator in the header is sufficient feedback.
         if (!meRef.current) setConnError('无法连接到服务器，请检查网络或刷新页面重试');
       }),
-      onSocket('disconnect', () => setConnected(false)),
-      onSocket('message:new', msg => addMessage(msg)),
+      onSocket('disconnect', (reason) => {
+        console.warn(`[Game] Socket disconnected: ${reason}`);
+        setConnected(false);
+      }),
+      onSocket('message:new', msg => {
+        console.log(`[Game] message:new type=${msg.type} content="${msg.content?.slice(0, 50)}"`);
+        addMessage(msg);
+      }),
 
       // Real-time mode: concept validated immediately
       onSocket('concept:new', ({ concept }: { concept: Concept }) => {
+        console.log(`[Game] concept:new name="${concept.name}" year=${concept.year}`);
         addConcept(concept);
         setNewestId(concept.id);
         setValidating(null);
@@ -166,16 +185,22 @@ export default function Game() {
 
       // Deferred mode: concept saved as pending
       onSocket('concept:pending', ({ concept }: { concept: Concept }) => {
+        console.log(`[Game] concept:pending name="${concept.name}"`);
         addPendingConcept(concept);
       }),
 
-      onSocket('concept:validating', e => setValidating(e)),
+      onSocket('concept:validating', e => {
+        console.log(`[Game] concept:validating player=${e.playerName} input="${e.rawInput}"`);
+        setValidating(e);
+      }),
 
       // Settlement events
       onSocket('game:settle:start', ({ total }) => {
+        console.log(`[Game] game:settle:start total=${total}`);
         setSettleRunning(total);
       }),
       onSocket('concept:settled', e => {
+        console.log(`[Game] concept:settled conceptId=${e.conceptId} accepted=${e.accepted}`);
         removePendingConcept(e.conceptId);
         incrementSettleDone(e.accepted);
         if (e.accepted && e.concept) {
@@ -186,18 +211,34 @@ export default function Game() {
         }
       }),
       onSocket('game:settle:done', e => {
+        console.log(`[Game] game:settle:done accepted=${e.accepted} rejected=${e.rejected}`);
         resetSettle();
         setSettling(false);
         setSettleResult(e);
       }),
 
-      onSocket('players:update', ({ players: p }) => setPlayers(p)),
-      onSocket('game:finished',  () => {
-        if (game) setGame({ ...game, status: 'finished' });
+      onSocket('players:update', ({ players: p }) => {
+        console.log(`[Game] players:update count=${p.length}`);
+        setPlayers(p);
+      }),
+      onSocket('game:finished', () => {
+        console.log('[Game] game:finished');
+        // Use ref to get latest game value — avoids stale closure
+        const currentGame = gameRef.current;
+        if (currentGame) setGame({ ...currentGame, status: 'finished' });
+      }),
+      onSocket('game:deleted', () => {
+        console.log('[Game] game:deleted — redirecting to home');
+        alert('管理员已删除该房间');
+        window.location.href = '/';
       }),
     ];
-    return () => offs.forEach(off => off());
-  }, [game]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => {
+      console.log('[Game] Tearing down socket listeners');
+      offs.forEach(off => off());
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Empty deps: listeners registered once, use refs for fresh values
 
   useEffect(() => { return () => { disconnectSocket(); reset(); }; }, []);
 
@@ -205,8 +246,14 @@ export default function Game() {
   const handleJoin = useCallback(async (playerName: string) => {
     if (!gameId) return;
     setShowName(false);
+    console.log(`[Game] handleJoin gameId=${gameId} playerName=${playerName}`);
     const res = await joinGame({ gameId, playerName });
-    if (res.error) { setJoinError(res.error); return; }
+    if (res.error) {
+      console.error(`[Game] handleJoin FAILED: ${res.error}`);
+      setJoinError(res.error);
+      return;
+    }
+    console.log('[Game] handleJoin OK');
     if (res.game)             setGame(res.game);
     if (res.player)           setMe(res.player);
     if (res.timeline)         setTimeline(res.timeline);
@@ -219,8 +266,10 @@ export default function Game() {
     if (settling) return;
     if (!confirm(`确认开始结算？将对 ${pendingConcepts.length} 个概念进行 AI 批量验证，结算后游戏结束。`)) return;
     setSettling(true);
+    console.log('[Game] handleSettle start');
     const res = await settleConcepts();
     if (res.error) {
+      console.error(`[Game] handleSettle FAILED: ${res.error}`);
       alert(res.error);
       setSettling(false);
     }
@@ -230,6 +279,7 @@ export default function Game() {
   // ── Hint ────────────────────────────────────────────────────────────────────
   async function handleHint() {
     setHintLoading(true);
+    console.log('[Game] requestHints');
     const res = await requestHints();
     if (res.hints) setHints(res.hints);
     setHintLoading(false);
@@ -238,6 +288,7 @@ export default function Game() {
   // ── Finish (realtime mode) ──────────────────────────────────────────────────
   async function handleFinish() {
     if (!confirm('确认结束游戏？结束后可导出成果。')) return;
+    console.log('[Game] handleFinish');
     await finishGame();
   }
 

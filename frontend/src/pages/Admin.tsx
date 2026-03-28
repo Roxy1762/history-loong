@@ -5,7 +5,8 @@ import {
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
-  type AIConfig, type KnowledgeDoc,
+  adminListGames, adminFinishGame, adminDeleteGame,
+  type AIConfig, type KnowledgeDoc, type AdminGame,
 } from '../services/api';
 import type { Game } from '../types';
 
@@ -53,10 +54,11 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'ai-config' | 'knowledge';
+type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge';
 
 const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'overview',   icon: '📊', label: '概览' },
+  { id: 'games',      icon: '🎮', label: '游戏管理' },
   { id: 'ai-config',  icon: '🤖', label: 'AI 配置' },
   { id: 'knowledge',  icon: '📚', label: '知识库' },
 ];
@@ -119,6 +121,7 @@ export default function Admin() {
       <main className="flex-1 overflow-auto">
         <div className="max-w-5xl mx-auto p-6">
           {tab === 'overview'  && <OverviewPanel />}
+          {tab === 'games'     && <GamesPanel />}
           {tab === 'ai-config' && <AIConfigPanel />}
           {tab === 'knowledge' && <KnowledgePanel />}
         </div>
@@ -208,6 +211,162 @@ function StatusChip({ status }: { status: string }) {
   };
   const labels: Record<string, string> = { waiting: '等待中', playing: '进行中', finished: '已结束' };
   return <span className={`px-2 py-0.5 text-xs rounded ${cfg[status] || 'bg-slate-100 text-slate-500'}`}>{labels[status] || status}</span>;
+}
+
+// ── Panel: Games Management ──────────────────────────────────────────────────
+
+function GamesPanel() {
+  const [games, setGames] = useState<AdminGame[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [actionMsg, setActionMsg] = useState('');
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    console.log(`[Admin] Loading games, filter=${statusFilter || 'all'}`);
+    adminListGames(statusFilter || undefined)
+      .then(setGames)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [statusFilter]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  async function handleFinish(game: AdminGame) {
+    if (!confirm(`确认结束游戏「${game.topic}」(${game.id})？所有在线玩家将收到通知。`)) return;
+    console.log(`[Admin] Finishing game ${game.id}`);
+    try {
+      await adminFinishGame(game.id);
+      setActionMsg(`游戏 ${game.id} 已结束`);
+      reload();
+    } catch (err: unknown) {
+      setActionMsg(`操作失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    }
+    setTimeout(() => setActionMsg(''), 3000);
+  }
+
+  async function handleDelete(game: AdminGame) {
+    if (!confirm(`确认删除游戏「${game.topic}」(${game.id})？\n\n将删除所有相关数据（概念、消息、玩家记录），此操作不可撤销。`)) return;
+    console.log(`[Admin] Deleting game ${game.id}`);
+    try {
+      await adminDeleteGame(game.id);
+      setActionMsg(`游戏 ${game.id} 已删除`);
+      reload();
+    } catch (err: unknown) {
+      setActionMsg(`删除失败: ${err instanceof Error ? err.message : '未知错误'}`);
+    }
+    setTimeout(() => setActionMsg(''), 3000);
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="游戏管理"
+        subtitle="查看、管理和结束游戏房间"
+      />
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-sm text-slate-600 font-medium">筛选状态：</span>
+        {[
+          { value: '', label: '全部' },
+          { value: 'waiting', label: '等待中' },
+          { value: 'playing', label: '进行中' },
+          { value: 'finished', label: '已结束' },
+        ].map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setStatusFilter(opt.value)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium
+              ${statusFilter === opt.value
+                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+          >
+            {opt.label}
+          </button>
+        ))}
+        <button onClick={reload} disabled={loading}
+          className="ml-auto btn-secondary text-xs py-1.5">
+          {loading ? '加载中...' : '刷新'}
+        </button>
+      </div>
+
+      {actionMsg && (
+        <div className={`text-sm px-4 py-2.5 rounded-xl border ${
+          actionMsg.includes('失败') ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'
+        }`}>
+          {actionMsg}
+        </div>
+      )}
+
+      {games.length === 0 ? (
+        <EmptyState icon="🎮" title="暂无游戏" desc={statusFilter ? '当前筛选条件下没有游戏' : '还没有创建过任何游戏'} />
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="font-semibold text-slate-800">
+              游戏列表 <span className="text-slate-400 font-normal text-sm">({games.length})</span>
+            </h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                <tr>
+                  {['房间码', '主题', '模式', '状态', '概念数', '玩家数', '创建时间', '操作'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {games.map(g => (
+                  <tr key={g.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
+                    <td className="px-4 py-3 text-slate-700 max-w-[200px] truncate">{g.topic}</td>
+                    <td className="px-4 py-3"><ModeChip mode={g.mode} /></td>
+                    <td className="px-4 py-3"><StatusChip status={g.status} /></td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <span className="font-medium">{g.conceptCount}</span>
+                      {g.pendingCount > 0 && (
+                        <span className="text-amber-500 ml-1">+{g.pendingCount}⏳</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{g.playerCount}</td>
+                    <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{g.created_at.slice(0, 16).replace('T', ' ')}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        {g.status !== 'finished' && (
+                          <button
+                            onClick={() => handleFinish(g)}
+                            className="text-xs px-2.5 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors font-medium"
+                          >
+                            结束游戏
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(g)}
+                          className="text-xs px-2.5 py-1 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors font-medium"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <InfoBox>
+        <strong>操作说明：</strong>
+        <ul className="mt-1 space-y-0.5 list-disc list-inside">
+          <li><strong>结束游戏</strong> — 将游戏标记为已结束，通知所有在线玩家，玩家可导出成果</li>
+          <li><strong>删除游戏</strong> — 永久删除游戏及所有关联数据（概念、消息、玩家），不可恢复</li>
+        </ul>
+      </InfoBox>
+    </div>
+  );
 }
 
 // ── Panel: AI Config ──────────────────────────────────────────────────────────
