@@ -6,7 +6,13 @@ const { TimelineService } = require('../services/timelineService');
 const router = express.Router();
 const exportService = new ExportService();
 
-// GET /api/export/:gameId?format=json|markdown|csv
+// GET /api/export/formats — list supported formats
+// IMPORTANT: must be declared before /:gameId to avoid being swallowed by it
+router.get('/formats/list', (_req, res) => {
+  res.json({ formats: exportService.listFormats() });
+});
+
+// GET /api/export/:gameId?format=json|markdown|csv|html
 router.get('/:gameId', (req, res) => {
   const gameId = req.params.gameId.toUpperCase();
   const format = req.query.format || 'json';
@@ -25,16 +31,11 @@ router.get('/:gameId', (req, res) => {
   try {
     const result = exportService.export({ game, timeline, messages }, format);
     res.setHeader('Content-Type', result.mimeType + '; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`);
     res.send(result.content);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
-});
-
-// GET /api/export/formats — list supported formats
-router.get('/formats/list', (_req, res) => {
-  res.json({ formats: exportService.listFormats() });
 });
 
 module.exports = router;

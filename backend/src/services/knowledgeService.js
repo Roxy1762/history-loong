@@ -89,11 +89,11 @@ function searchContext(query, topN = 4) {
  * Queries both the topic and the concept name.
  */
 function getContextForConcept(concept, topic) {
-  const byTopic   = searchContext(topic,   2);
-  const byConcept = searchContext(concept, 3);
+  const byTopic   = searchContext(topic,   1);
+  const byConcept = searchContext(concept, 2);
 
   const combined = [byTopic, byConcept].filter(Boolean).join('\n---\n');
-  return combined ? combined.slice(0, 1500) : ''; // cap at 1500 chars
+  return combined ? combined.slice(0, 800) : ''; // cap at 800 chars
 }
 
 // ── List ──────────────────────────────────────────────────────────────────────

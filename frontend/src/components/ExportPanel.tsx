@@ -10,6 +10,7 @@ const FORMAT_INFO: Record<string, { label: string; icon: string; desc: string; c
   json:     { label: 'JSON',     icon: '{}',  desc: '结构化数据，适合二次开发', color: 'bg-blue-50 text-blue-600 border-blue-200' },
   markdown: { label: 'Markdown', icon: '#',   desc: '带格式文本，适合 Notion / Obsidian', color: 'bg-purple-50 text-purple-600 border-purple-200' },
   csv:      { label: 'CSV',      icon: '≡',   desc: '表格数据，适合 Excel 分析', color: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
+  html:     { label: 'HTML',     icon: '◱',   desc: '可视化网页，直接在浏览器打开', color: 'bg-orange-50 text-orange-600 border-orange-200' },
 };
 
 export default function ExportPanel({ gameId, onClose }: Props) {
