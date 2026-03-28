@@ -53,12 +53,22 @@ export async function exportGame(gameId: string, format: ExportFormat) {
     responseType: 'blob',
   });
   const disposition = response.headers['content-disposition'] || '';
-  const match = disposition.match(/filename="?([^";\n]+)"?/);
-  const filename = match?.[1] ?? `history-loong-${gameId}.${format}`;
+  // Support both filename= and filename*=UTF-8'' encodings
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;\n]+)/i);
+  const plainMatch = disposition.match(/filename="?([^";\n]+)"?/i);
+  const rawName = utf8Match ? decodeURIComponent(utf8Match[1]) : plainMatch?.[1];
+  const filename = rawName ?? `history-loong-${gameId}.${format}`;
+
   const url = URL.createObjectURL(response.data);
   const a = document.createElement('a');
-  a.href = url; a.download = filename; a.click();
-  URL.revokeObjectURL(url);
+  a.href = url;
+  a.download = filename;
+  // Must be in DOM for Firefox/Safari to trigger the download
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Delay revoke so the browser has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function getExportFormats() {
