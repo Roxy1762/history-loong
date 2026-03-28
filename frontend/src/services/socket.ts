@@ -72,10 +72,10 @@ function getSocket(): Socket {
     });
 
     // Log when transport upgrades from polling → websocket
-    socket.io.on('upgrade', (transport) => {
-      slog('info', `Transport upgraded → ${(transport as { name?: string }).name ?? transport}`);
+    (socket.io as unknown as { on: (event: string, cb: (arg: unknown) => void) => void }).on('upgrade', (transport) => {
+      slog('info', `Transport upgraded → ${(transport as { name?: string }).name ?? String(transport)}`);
     });
-    socket.io.on('upgradeError', (err) => {
+    (socket.io as unknown as { on: (event: string, cb: (arg: unknown) => void) => void }).on('upgradeError', (err) => {
       slog('warn', `Transport upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
     });
   }
