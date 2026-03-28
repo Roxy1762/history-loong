@@ -312,7 +312,7 @@ function GamesPanel() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                 <tr>
-                  {['房间码', '主题', '模式', '状态', '概念数', '玩家数', '创建时间', '操作'].map(h => (
+                  {['房间码', '主题', '模式', '状态', '概念数', '在线/总玩家', '创建时间', '操作'].map(h => (
                     <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -330,7 +330,13 @@ function GamesPanel() {
                         <span className="text-amber-500 ml-1">+{g.pendingCount}⏳</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{g.playerCount}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <span className={`font-medium ${g.onlineCount > 0 ? 'text-green-600' : 'text-slate-400'}`}>
+                        {g.onlineCount}
+                      </span>
+                      <span className="text-slate-300 mx-1">/</span>
+                      <span className="text-slate-500">{g.playerCount}</span>
+                    </td>
                     <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{g.created_at.slice(0, 16).replace('T', ' ')}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
