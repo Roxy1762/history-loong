@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import {
@@ -117,13 +117,33 @@ export default function Game() {
   const [settling,    setSettling]    = useState(false);
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
 
+  // Track latest me/gameId in a ref so reconnect handler always has fresh values
+  const meRef     = useRef(me);
+  const gameIdRef = useRef(gameId);
+  useEffect(() => { meRef.current = me; },     [me]);
+  useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
+
   const isDeferred = game?.settings?.validationMode === 'deferred';
   const gameFinished = game?.status === 'finished';
 
   // ── Socket listeners ────────────────────────────────────────────────────────
   useEffect(() => {
     const offs = [
-      onSocket('connect',    () => setConnected(true)),
+      onSocket('connect', async () => {
+        setConnected(true);
+        // If the socket reconnected while we were already in a room, re-join so
+        // the backend can restore currentGameId / currentPlayer for this socket.
+        const gid = gameIdRef.current;
+        const player = meRef.current;
+        if (gid && player) {
+          const res = await joinGame({ gameId: gid, playerName: player.name });
+          if (res.game)            setGame(res.game);
+          if (res.player)          setMe(res.player);
+          if (res.timeline)        setTimeline(res.timeline);
+          if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
+          if (res.messages)        setMessages(res.messages);
+        }
+      }),
       onSocket('disconnect', () => setConnected(false)),
       onSocket('message:new', msg => addMessage(msg)),
 
