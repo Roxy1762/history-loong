@@ -282,6 +282,17 @@ router.delete('/knowledge/:id', (req, res) => {
   res.json({ message: '已删除' });
 });
 
+// ── Server Logs ──────────────────────────────────────────────────────────────
+
+router.get('/logs', (req, res) => {
+  const logger = require('../logger');
+  const limit  = Math.min(parseInt(req.query.limit) || 200, 1000);
+  const level  = ['info', 'warn', 'error'].includes(req.query.level) ? req.query.level : null;
+  const logs   = logger.getLogs(limit, level);
+  console.log(`[Admin] GET /logs limit=${limit} level=${level || 'all'} returned=${logs.length}`);
+  res.json({ count: logs.length, logs });
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function maskKey(key = '') {

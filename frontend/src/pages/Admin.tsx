@@ -6,7 +6,8 @@ import {
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
   adminListGames, adminFinishGame, adminDeleteGame,
-  type AIConfig, type KnowledgeDoc, type AdminGame,
+  adminGetLogs,
+  type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry,
 } from '../services/api';
 import type { Game } from '../types';
 
@@ -54,13 +55,14 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge';
+type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'logs';
 
 const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'overview',   icon: '📊', label: '概览' },
   { id: 'games',      icon: '🎮', label: '游戏管理' },
   { id: 'ai-config',  icon: '🤖', label: 'AI 配置' },
   { id: 'knowledge',  icon: '📚', label: '知识库' },
+  { id: 'logs',       icon: '🔍', label: '服务器日志' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -113,7 +115,7 @@ export default function Admin() {
           >
             退出登录
           </button>
-          <p className="text-center text-xs text-slate-600 select-none">v0.1.0</p>
+          <p className="text-center text-xs text-slate-600 select-none">dev 0.1.1</p>
         </div>
       </aside>
 
@@ -124,6 +126,7 @@ export default function Admin() {
           {tab === 'games'     && <GamesPanel />}
           {tab === 'ai-config' && <AIConfigPanel />}
           {tab === 'knowledge' && <KnowledgePanel />}
+          {tab === 'logs'      && <LogsPanel />}
         </div>
       </main>
     </div>
@@ -732,6 +735,139 @@ function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: ()
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? '添加中...' : '添加'}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ── Panel: Server Logs ────────────────────────────────────────────────────────
+
+const LEVEL_STYLES: Record<string, string> = {
+  info:  'text-slate-500',
+  warn:  'text-amber-600 font-medium',
+  error: 'text-red-600 font-medium',
+};
+
+const LEVEL_BG: Record<string, string> = {
+  info:  '',
+  warn:  'bg-amber-50',
+  error: 'bg-red-50',
+};
+
+function LogsPanel() {
+  const [logs, setLogs]     = useState<LogEntry[]>([]);
+  const [level, setLevel]   = useState('');
+  const [limit, setLimit]   = useState(200);
+  const [loading, setLoading] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    adminGetLogs(limit, level || undefined)
+      .then(d => setLogs(d.logs))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [limit, level]);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  // Auto-refresh every 5 s when enabled
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const id = setInterval(reload, 5000);
+    return () => clearInterval(id);
+  }, [autoRefresh, reload]);
+
+  return (
+    <div className="space-y-4">
+      <PageHeader
+        title="服务器日志"
+        subtitle="实时查看后端输出，最新记录排最前"
+        action={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setAutoRefresh(v => !v)}
+              className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                autoRefresh
+                  ? 'bg-green-100 text-green-700 border-green-200'
+                  : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {autoRefresh ? '⟳ 自动刷新' : '⟳ 自动刷新'}
+            </button>
+            <button onClick={reload} disabled={loading} className="btn-secondary text-xs py-1.5">
+              {loading ? '加载中…' : '刷新'}
+            </button>
+          </div>
+        }
+      />
+
+      {/* Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-slate-600 font-medium">级别：</span>
+        {[
+          { value: '',      label: '全部' },
+          { value: 'info',  label: 'INFO' },
+          { value: 'warn',  label: 'WARN' },
+          { value: 'error', label: 'ERROR' },
+        ].map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => setLevel(opt.value)}
+            className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium
+              ${level === opt.value
+                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+          >
+            {opt.label}
+          </button>
+        ))}
+        <span className="ml-auto text-sm text-slate-500">
+          显示最近
+          <select
+            className="mx-1 text-sm border border-slate-200 rounded px-1 py-0.5"
+            value={limit}
+            onChange={e => setLimit(Number(e.target.value))}
+          >
+            {[100, 200, 500, 1000].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          条
+        </span>
+      </div>
+
+      {/* Log table */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 text-xs text-slate-500">
+          共 {logs.length} 条记录 {autoRefresh && <span className="ml-2 text-green-600">● 自动刷新中</span>}
+        </div>
+        {logs.length === 0 ? (
+          <div className="p-8 text-center text-slate-400 text-sm">暂无日志</div>
+        ) : (
+          <div className="overflow-x-auto max-h-[60vh] overflow-y-auto">
+            <table className="w-full text-xs font-mono">
+              <thead className="bg-slate-50 text-slate-500 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium w-36">时间</th>
+                  <th className="px-3 py-2 text-left font-medium w-14">级别</th>
+                  <th className="px-3 py-2 text-left font-medium">内容</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((log, i) => (
+                  <tr key={i} className={`border-t border-slate-50 ${LEVEL_BG[log.level] ?? ''}`}>
+                    <td className="px-3 py-1.5 text-slate-400 whitespace-nowrap">{log.ts.slice(0, 23).replace('T', ' ')}</td>
+                    <td className={`px-3 py-1.5 uppercase ${LEVEL_STYLES[log.level] ?? ''}`}>{log.level}</td>
+                    <td className="px-3 py-1.5 text-slate-700 break-all">{log.msg}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <InfoBox>
+        前端日志请打开浏览器控制台查看。在控制台输入 <code className="bg-blue-100 px-1 rounded">__socketLogs()</code> 可查看 Socket 连接详细记录。
+      </InfoBox>
     </div>
   );
 }
