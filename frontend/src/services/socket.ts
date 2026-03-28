@@ -24,7 +24,16 @@ export function disconnectSocket() {
 // ── Game actions ──────────────────────────────────────────────────────────────
 
 export function joinGame(payload: JoinPayload): Promise<JoinResponse> {
-  return new Promise(resolve => getSocket().emit('game:join', payload, resolve));
+  return new Promise(resolve => {
+    const timer = setTimeout(
+      () => resolve({ error: '连接超时，请检查网络后刷新重试' }),
+      15000,
+    );
+    getSocket().emit('game:join', payload, (res: JoinResponse) => {
+      clearTimeout(timer);
+      resolve(res);
+    });
+  });
 }
 
 export function submitConcept(rawInput: string): Promise<{ ok?: boolean; error?: string; pending?: boolean; concept?: Concept }> {

@@ -220,6 +220,8 @@ export default function Home() {
             </div>
           ))}
         </div>
+
+        <p className="mt-6 text-xs text-slate-300 select-none">v0.1.0</p>
       </div>
     </div>
   );

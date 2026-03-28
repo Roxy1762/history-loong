@@ -20,16 +20,21 @@ const server = http.createServer(app);
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
+// In production the frontend is co-hosted by this server, so any same-origin
+// WebSocket request is valid regardless of hostname. Restricting origins here
+// would break deployments where PUBLIC_URL isn't configured (e.g., accessed
+// via IP). In dev we keep the explicit allowlist.
+const corsOrigins = process.env.NODE_ENV === 'production'
+  ? true
+  : [FRONTEND_URL, 'http://localhost:4173'];
+
 const io = new Server(server, {
-  cors: {
-    origin: [FRONTEND_URL, 'http://localhost:4173'],
-    methods: ['GET', 'POST'],
-  },
+  cors: { origin: corsOrigins, methods: ['GET', 'POST'] },
 });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-app.use(cors({ origin: [FRONTEND_URL, 'http://localhost:4173'] }));
+app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
 // Serve built frontend in production
