@@ -151,3 +151,40 @@ export async function adminDeleteDoc(id: string) {
   const { data } = await api.delete(`/admin/knowledge/${id}`, { headers: adminHeaders() });
   return data;
 }
+
+// ── Admin: Game Management ───────────────────────────────────────────────────
+
+export interface AdminGame extends Game {
+  settings: Record<string, unknown>;
+  conceptCount: number;
+  playerCount: number;
+  pendingCount: number;
+}
+
+export interface AdminGameDetail {
+  game: Game & { settings: Record<string, unknown> };
+  concepts: import('../types').Concept[];
+  players: import('../types').Player[];
+  messageCount: number;
+}
+
+export async function adminListGames(status?: string) {
+  const params = status ? { status } : {};
+  const { data } = await api.get<{ games: AdminGame[] }>('/admin/games', { headers: adminHeaders(), params });
+  return data.games;
+}
+
+export async function adminGetGame(id: string) {
+  const { data } = await api.get<AdminGameDetail>(`/admin/games/${id}`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminFinishGame(id: string) {
+  const { data } = await api.post(`/admin/games/${id}/finish`, {}, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminDeleteGame(id: string) {
+  const { data } = await api.delete(`/admin/games/${id}`, { headers: adminHeaders() });
+  return data;
+}

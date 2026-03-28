@@ -33,6 +33,7 @@ function pickColor(room) {
 
 function broadcastPlayers(io, gameId) {
   const players = [...getRoom(gameId).players.values()];
+  console.log(`[Socket] broadcastPlayers gameId=${gameId} count=${players.length}`);
   io.to(gameId).emit('players:update', { players });
 }
 
@@ -43,22 +44,35 @@ function sysMessage(io, gameId, content, meta = {}) {
   };
   db.insertMessage.run(msg.id, gameId, null, null, 'system', content, JSON.stringify(meta));
   io.to(gameId).emit('message:new', msg);
+  console.log(`[Socket] sysMessage gameId=${gameId}: ${content}`);
 }
 
 function parseConcept(row) {
   return { ...row, tags: JSON.parse(row.tags || '[]'), extra: JSON.parse(row.extra || '{}') };
 }
 
+/** Expose rooms map so admin can inspect / force-end games */
 module.exports = function setupSocket(io) {
+  // Store io reference for admin use
+  module.exports._io = io;
+  module.exports._rooms = rooms;
+
   io.on('connection', (socket) => {
     let currentGameId = null;
     let currentPlayer = null;
 
+    console.log(`[Socket] new connection socketId=${socket.id}`);
+
     // ── join ──────────────────────────────────────────────────────────────────
     socket.on('game:join', ({ gameId, playerName }, callback) => {
       const id = (gameId || '').toUpperCase();
+      console.log(`[Socket] game:join socketId=${socket.id} gameId=${id} playerName=${playerName}`);
+
       const game = db.getGame.get(id);
-      if (!game) return callback?.({ error: '房间不存在' });
+      if (!game) {
+        console.warn(`[Socket] game:join FAILED — room not found gameId=${id}`);
+        return callback?.({ error: '房间不存在' });
+      }
 
       const room    = getRoom(id);
       const color   = pickColor(room);
@@ -71,6 +85,13 @@ module.exports = function setupSocket(io) {
       socket.join(id);
       db.upsertPlayer.run(playerId, id, currentPlayer.name, color);
 
+      // Transition game status from 'waiting' to 'playing' on first join
+      if (game.status === 'waiting') {
+        db.updateGameStatus.run('playing', id);
+        game.status = 'playing';
+        console.log(`[Socket] game status updated to 'playing' gameId=${id}`);
+      }
+
       const settings = JSON.parse(game.settings || '{}');
       const ts       = new TimelineService();
 
@@ -82,6 +103,8 @@ module.exports = function setupSocket(io) {
       const pendingConcepts = db.getPendingConcepts.all(id).map(parseConcept);
 
       const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+
+      console.log(`[Socket] game:join OK socketId=${socket.id} gameId=${id} player=${currentPlayer.name} timeline=${timeline.length} pending=${pendingConcepts.length} messages=${messages.length}`);
 
       callback?.({
         ok: true,
@@ -99,12 +122,26 @@ module.exports = function setupSocket(io) {
 
     // ── submit concept ────────────────────────────────────────────────────────
     socket.on('concept:submit', async ({ rawInput }, callback) => {
-      if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      console.log(`[Socket] concept:submit socketId=${socket.id} gameId=${currentGameId} input="${rawInput}"`);
+
+      if (!currentGameId || !currentPlayer) {
+        console.warn(`[Socket] concept:submit REJECTED — not in room socketId=${socket.id}`);
+        return callback?.({ error: '请先加入房间' });
+      }
 
       const game = db.getGame.get(currentGameId);
-      if (!game)                      return callback?.({ error: '房间不存在' });
-      if (game.status === 'finished') return callback?.({ error: '游戏已结束' });
-      if (getRoom(currentGameId).settling) return callback?.({ error: '正在结算中，请稍候' });
+      if (!game) {
+        console.warn(`[Socket] concept:submit REJECTED — room not found gameId=${currentGameId}`);
+        return callback?.({ error: '房间不存在' });
+      }
+      if (game.status === 'finished') {
+        console.warn(`[Socket] concept:submit REJECTED — game finished gameId=${currentGameId}`);
+        return callback?.({ error: '游戏已结束' });
+      }
+      if (getRoom(currentGameId).settling) {
+        console.warn(`[Socket] concept:submit REJECTED — settling in progress gameId=${currentGameId}`);
+        return callback?.({ error: '正在结算中，请稍候' });
+      }
 
       const input = (rawInput || '').trim();
       if (!input) return callback?.({ error: '请输入内容' });
@@ -135,6 +172,7 @@ module.exports = function setupSocket(io) {
           tags: [], extra: {}, created_at: new Date().toISOString(),
         };
         io.to(currentGameId).emit('concept:pending', { concept: pending });
+        console.log(`[Socket] concept:pending gameId=${currentGameId} conceptId=${conceptId} input="${input}"`);
         callback?.({ ok: true, pending: true, concept: pending });
         return;
       }
@@ -143,6 +181,7 @@ module.exports = function setupSocket(io) {
       io.to(currentGameId).emit('concept:validating', {
         playerId: currentPlayer.id, playerName: currentPlayer.name, rawInput: input,
       });
+      console.log(`[Socket] concept:validating gameId=${currentGameId} input="${input}"`);
 
       try {
         const existing = db.getConceptsByGame.all(currentGameId)
@@ -150,6 +189,8 @@ module.exports = function setupSocket(io) {
           .map(c => ({ name: c.name, period: c.period }));
 
         const knowledgeContext = getContextForConcept(input, game.topic);
+        console.log(`[Socket] AI validation start gameId=${currentGameId} input="${input}" existing=${existing.length} hasKnowledge=${!!knowledgeContext}`);
+
         const result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
 
         const conceptId = uuidv4();
@@ -163,6 +204,7 @@ module.exports = function setupSocket(io) {
             meta: { conceptId, rejected: true }, created_at: new Date().toISOString() };
           db.insertMessage.run(rejMsg.id, currentGameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
           io.to(currentGameId).emit('message:new', rejMsg);
+          console.log(`[Socket] concept REJECTED gameId=${currentGameId} input="${input}" reason="${result.reason}"`);
           return callback?.({ ok: false, reason: result.reason });
         }
 
@@ -191,11 +233,12 @@ module.exports = function setupSocket(io) {
         });
 
         io.to(currentGameId).emit('concept:new', { concept });
+        console.log(`[Socket] concept ACCEPTED gameId=${currentGameId} name="${result.name}" year=${result.year} dynasty=${result.dynasty}`);
         callback?.({ ok: true, concept });
         pluginEvents.emit('concept:accepted', { game, concept, player: currentPlayer });
 
       } catch (err) {
-        console.error('[Socket] concept:submit error:', err);
+        console.error(`[Socket] concept:submit ERROR gameId=${currentGameId} input="${input}":`, err);
         sysMessage(io, currentGameId, `验证出错：${err.message}`);
         callback?.({ error: err.message });
       }
@@ -203,6 +246,8 @@ module.exports = function setupSocket(io) {
 
     // ── batch settle (deferred mode) ──────────────────────────────────────────
     socket.on('game:settle', async (_, callback) => {
+      console.log(`[Socket] game:settle socketId=${socket.id} gameId=${currentGameId}`);
+
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
 
       const game = db.getGame.get(currentGameId);
@@ -217,6 +262,7 @@ module.exports = function setupSocket(io) {
         db.updateGameStatus.run('finished', currentGameId);
         sysMessage(io, currentGameId, '没有待验证的概念，游戏结束');
         io.to(currentGameId).emit('game:finished');
+        console.log(`[Socket] game:settle — no pending concepts, game finished gameId=${currentGameId}`);
         return callback?.({ ok: true, accepted: 0, rejected: 0 });
       }
 
@@ -224,6 +270,8 @@ module.exports = function setupSocket(io) {
       sysMessage(io, currentGameId, `开始结算，共 ${pending.length} 个概念待验证...`);
       io.to(currentGameId).emit('game:settle:start', { total: pending.length });
       callback?.({ ok: true, total: pending.length });
+
+      console.log(`[Socket] game:settle START gameId=${currentGameId} pending=${pending.length}`);
 
       try {
         const settings = JSON.parse(game.settings || '{}');
@@ -273,8 +321,10 @@ module.exports = function setupSocket(io) {
         io.to(currentGameId).emit('game:settle:done', { accepted, rejected });
         io.to(currentGameId).emit('game:finished');
 
+        console.log(`[Socket] game:settle DONE gameId=${currentGameId} accepted=${accepted} rejected=${rejected}`);
+
       } catch (err) {
-        console.error('[Socket] game:settle error:', err);
+        console.error(`[Socket] game:settle ERROR gameId=${currentGameId}:`, err);
         room.settling = false;
         sysMessage(io, currentGameId, `结算出错：${err.message}`);
       } finally {
@@ -294,18 +344,22 @@ module.exports = function setupSocket(io) {
       };
       db.insertMessage.run(msg.id, currentGameId, msg.player_id, msg.player_name, 'text', text, '{}');
       io.to(currentGameId).emit('message:new', msg);
+      console.log(`[Socket] message:send gameId=${currentGameId} player=${currentPlayer.name} content="${text.slice(0, 50)}"`);
       callback?.({ ok: true });
     });
 
     // ── hints ─────────────────────────────────────────────────────────────────
     socket.on('game:hint', async (_, callback) => {
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
+      console.log(`[Socket] game:hint gameId=${currentGameId}`);
       try {
         const game     = db.getGame.get(currentGameId);
         const existing = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
         const hints    = await ai.suggestConcepts(game.topic, existing);
+        console.log(`[Socket] game:hint OK gameId=${currentGameId} hints=${hints.length}`);
         callback?.({ ok: true, hints });
-      } catch {
+      } catch (err) {
+        console.error(`[Socket] game:hint ERROR gameId=${currentGameId}:`, err);
         callback?.({ error: '获取提示失败' });
       }
     });
@@ -313,6 +367,7 @@ module.exports = function setupSocket(io) {
     // ── finish (realtime mode) ────────────────────────────────────────────────
     socket.on('game:finish', (_, callback) => {
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
+      console.log(`[Socket] game:finish gameId=${currentGameId}`);
       db.updateGameStatus.run('finished', currentGameId);
       sysMessage(io, currentGameId, '游戏已结束，可以导出结果了');
       io.to(currentGameId).emit('game:finished');
@@ -320,7 +375,8 @@ module.exports = function setupSocket(io) {
     });
 
     // ── disconnect ────────────────────────────────────────────────────────────
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      console.log(`[Socket] disconnect socketId=${socket.id} gameId=${currentGameId} reason=${reason}`);
       if (!currentGameId || !currentPlayer) return;
       getRoom(currentGameId).players.delete(currentPlayer.id);
       broadcastPlayers(io, currentGameId);

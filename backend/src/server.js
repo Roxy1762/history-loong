@@ -37,6 +37,14 @@ const io = new Server(server, {
 app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
+// Request logging
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/api/')) {
+    console.log(`[HTTP] ${req.method} ${req.path}`);
+  }
+  next();
+});
+
 // Serve built frontend in production
 if (process.env.NODE_ENV === 'production') {
   let distPath = path.join(__dirname, '../../frontend/dist');
