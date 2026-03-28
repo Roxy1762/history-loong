@@ -39,7 +39,10 @@ app.use(express.json());
 
 // Serve built frontend in production
 if (process.env.NODE_ENV === 'production') {
-  const distPath = path.join(__dirname, '../../frontend/dist');
+  let distPath = path.join(__dirname, '../../frontend/dist');
+  if (!require('fs').existsSync(distPath)) {
+    distPath = path.join(__dirname, '../frontend/dist');
+  }
   app.use(express.static(distPath));
 }
 
@@ -58,7 +61,11 @@ app.get('/api/health', (_req, res) =>
 // SPA fallback
 if (process.env.NODE_ENV === 'production') {
   app.get('*', (_req, res) => {
-    res.sendFile(path.join(__dirname, '../../frontend/dist/index.html'));
+    let indexPath = path.join(__dirname, '../../frontend/dist/index.html');
+    if (!require('fs').existsSync(indexPath)) {
+      indexPath = path.join(__dirname, '../frontend/dist/index.html');
+    }
+    res.sendFile(indexPath);
   });
 }
 
