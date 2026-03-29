@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import {
   joinGame, onSocket, onConnectionState, disconnectSocket,
-  requestHints, finishGame, settleConcepts,
+  requestHints, finishGame, settleConcepts, validateSingleConcept,
   type ConnectionState,
 } from '../services/socket';
 import Timeline from '../components/Timeline';
@@ -120,6 +120,7 @@ export default function Game() {
   const [settling,    setSettling]    = useState(false);
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
   const [connState,   setConnState]   = useState<ConnectionState | null>(null);
+  const [validatingConceptIds, setValidatingConceptIds] = useState<Set<string>>(new Set());
 
   // Track latest values in refs so socket handlers always have fresh values
   // This avoids the stale closure bug where useEffect depended on [game]
@@ -205,7 +206,14 @@ export default function Game() {
       onSocket('concept:settled', e => {
         console.log(`[Game] concept:settled conceptId=${e.conceptId} accepted=${e.accepted}`);
         removePendingConcept(e.conceptId);
-        incrementSettleDone(e.accepted);
+        // Only count toward batch-settle progress when a batch settle is running
+        if (useGameStore.getState().settle.running) incrementSettleDone(e.accepted);
+        // Clear single-validation loading state
+        setValidatingConceptIds(prev => {
+          const next = new Set(prev);
+          next.delete(e.conceptId);
+          return next;
+        });
         if (e.accepted && e.concept) {
           addConcept(e.concept);
           setNewestId(e.concept.id);
@@ -291,6 +299,23 @@ export default function Game() {
     const res = await requestHints();
     if (res.hints) setHints(res.hints);
     setHintLoading(false);
+  }
+
+  // ── Validate single concept (free validation) ──────────────────────────────
+  async function handleValidateSingle(conceptId: string) {
+    setValidatingConceptIds(prev => new Set([...prev, conceptId]));
+    console.log(`[Game] handleValidateSingle conceptId=${conceptId}`);
+    const res = await validateSingleConcept(conceptId);
+    if (res.error) {
+      console.error(`[Game] handleValidateSingle FAILED: ${res.error}`);
+      // Remove from validating set on error (success is cleared by concept:settled event)
+      setValidatingConceptIds(prev => {
+        const next = new Set(prev);
+        next.delete(conceptId);
+        return next;
+      });
+      alert(`验证失败：${res.error}`);
+    }
   }
 
   // ── Finish (realtime mode) ──────────────────────────────────────────────────
@@ -520,7 +545,13 @@ export default function Game() {
               )}
             </div>
             <div className="flex-1 overflow-hidden">
-              <Timeline timeline={timeline} pendingConcepts={pendingConcepts} newestId={newestId} />
+              <Timeline
+                timeline={timeline}
+                pendingConcepts={pendingConcepts}
+                newestId={newestId}
+                onValidateConcept={!gameFinished ? handleValidateSingle : undefined}
+                validatingConceptIds={validatingConceptIds}
+              />
             </div>
           </div>
         </div>
