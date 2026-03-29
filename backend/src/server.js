@@ -11,6 +11,7 @@ const path = require('path');
 const gamesRouter = require('./routes/games');
 const exportRouter = require('./routes/export');
 const adminRouter  = require('./routes/admin');
+const profileRouter = require('./routes/profile');
 const setupSocket  = require('./socket');
 const { loadPlugins, GAME_MODES } = require('./plugins');
 
@@ -66,6 +67,7 @@ if (process.env.NODE_ENV === 'production') {
 app.use('/api/games', gamesRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/profile', profileRouter);
 
 app.get('/api/modes', (_req, res) => res.json({ modes: GAME_MODES }));
 
@@ -114,6 +116,10 @@ io.on('connection', (socket) => {
 });
 
 setupSocket(io);
+
+// Settlement recovery on startup
+const settlementSvc = require('./services/settlementService');
+settlementSvc.recoverOnStartup();
 
 // ── Plugins ───────────────────────────────────────────────────────────────────
 

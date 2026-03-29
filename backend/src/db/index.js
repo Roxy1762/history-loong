@@ -123,6 +123,134 @@ try {
   db.exec(`ALTER TABLE games ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
 } catch { /* column already exists */ }
 
+// v1.3.0: AI validation audit log
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ai_decisions (
+    id               TEXT PRIMARY KEY,
+    concept_id       TEXT NOT NULL,
+    game_id          TEXT NOT NULL,
+    validation_method TEXT NOT NULL DEFAULT 'ai',
+    ai_prompt        TEXT,
+    ai_response      TEXT,
+    ai_provider      TEXT,
+    ai_model         TEXT,
+    decision_made_at TEXT NOT NULL DEFAULT (datetime('now')),
+    decision_ms      INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_decisions_game ON ai_decisions(game_id);
+  CREATE INDEX IF NOT EXISTS idx_ai_decisions_concept ON ai_decisions(concept_id);
+`);
+
+// v1.3.0: concept admin overrides
+db.exec(`
+  CREATE TABLE IF NOT EXISTS concept_overrides (
+    concept_id        TEXT PRIMARY KEY,
+    original_decision TEXT NOT NULL,
+    override_decision TEXT NOT NULL,
+    override_reason   TEXT,
+    overridden_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// v1.3.0: validation result cache
+db.exec(`
+  CREATE TABLE IF NOT EXISTS validation_cache (
+    input_hash  TEXT NOT NULL,
+    topic       TEXT NOT NULL,
+    result      TEXT NOT NULL,
+    model_used  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at  TEXT NOT NULL,
+    PRIMARY KEY (input_hash, topic)
+  );
+`);
+
+// v1.3.0: global player profiles (persists across games)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS players_global (
+    id                      TEXT PRIMARY KEY,
+    name                    TEXT NOT NULL,
+    avatar_color            TEXT NOT NULL DEFAULT '#6366f1',
+    total_submitted         INTEGER NOT NULL DEFAULT 0,
+    total_accepted          INTEGER NOT NULL DEFAULT 0,
+    games_played            INTEGER NOT NULL DEFAULT 0,
+    created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at              TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS achievements (
+    id         TEXT PRIMARY KEY,
+    player_id  TEXT NOT NULL,
+    badge_type TEXT NOT NULL,
+    earned_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_achievements_player ON achievements(player_id);
+`);
+
+// v1.3.0: message archive table
+db.exec(`
+  CREATE TABLE IF NOT EXISTS messages_archive (
+    id          TEXT PRIMARY KEY,
+    game_id     TEXT NOT NULL,
+    player_id   TEXT,
+    player_name TEXT,
+    type        TEXT NOT NULL DEFAULT 'text',
+    content     TEXT NOT NULL,
+    meta        TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    archived_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_msgs_archive_game ON messages_archive(game_id);
+`);
+
+// v1.3.0: knowledge base curation
+db.exec(`
+  CREATE TABLE IF NOT EXISTS concept_categories (
+    id         TEXT PRIMARY KEY,
+    name       TEXT UNIQUE NOT NULL,
+    color      TEXT NOT NULL DEFAULT '#6366f1',
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS concept_in_category (
+    concept_id  TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    PRIMARY KEY (concept_id, category_id)
+  );
+`);
+
+// v1.3.0: admin action audit log
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_audit_log (
+    id            TEXT PRIMARY KEY,
+    action        TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id   TEXT,
+    changes       TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_audit_time ON admin_audit_log(created_at);
+`);
+
+// v1.3.0: settlement recovery columns on games
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN settle_started_at TEXT`);
+} catch { /* already exists */ }
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN settle_status TEXT`);
+} catch { /* already exists */ }
+
+// v1.3.0: priority + fallback on ai_configs
+try {
+  db.exec(`ALTER TABLE ai_configs ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`);
+} catch { /* already exists */ }
+try {
+  db.exec(`ALTER TABLE ai_configs ADD COLUMN is_fallback INTEGER NOT NULL DEFAULT 0`);
+} catch { /* already exists */ }
+
+// v1.3.0: status column on knowledge_docs (active | draft | archived)
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
+} catch { /* already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -208,4 +336,65 @@ module.exports = {
       (SELECT COUNT(*) FROM ai_configs) as total_ai_configs,
       (SELECT COUNT(DISTINCT id) FROM players) as total_players
   `),
+
+  // AI Decisions (audit log)
+  insertAIDecision: stmt(`
+    INSERT INTO ai_decisions (id, concept_id, game_id, validation_method, ai_prompt, ai_response, ai_provider, ai_model, decision_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `),
+  getAIDecision:          stmt(`SELECT * FROM ai_decisions WHERE concept_id = ?`),
+  listAIDecisions:        stmt(`SELECT d.*, c.name, c.validated, c.rejected, c.player_name, c.raw_input FROM ai_decisions d LEFT JOIN concepts c ON c.id = d.concept_id ORDER BY d.decision_made_at DESC LIMIT 200`),
+  listAIDecisionsByGame:  stmt(`SELECT d.*, c.name, c.validated, c.rejected, c.player_name, c.raw_input FROM ai_decisions d LEFT JOIN concepts c ON c.id = d.concept_id WHERE d.game_id = ? ORDER BY d.decision_made_at DESC`),
+
+  // Concept overrides
+  insertConceptOverride: stmt(`INSERT OR REPLACE INTO concept_overrides (concept_id, original_decision, override_decision, override_reason) VALUES (?, ?, ?, ?)`),
+  getConceptOverride:    stmt(`SELECT * FROM concept_overrides WHERE concept_id = ?`),
+
+  // Validation cache
+  getCachedValidation:   stmt(`SELECT * FROM validation_cache WHERE input_hash = ? AND topic = ? AND expires_at > datetime('now')`),
+  insertValidationCache: stmt(`INSERT OR REPLACE INTO validation_cache (input_hash, topic, result, model_used, expires_at) VALUES (?, ?, ?, ?, datetime('now', '+90 days'))`),
+  cleanExpiredCache:     stmt(`DELETE FROM validation_cache WHERE expires_at <= datetime('now')`),
+  clearAllCache:         stmt(`DELETE FROM validation_cache`),
+  getCacheStats:         stmt(`SELECT COUNT(*) as total, COUNT(CASE WHEN expires_at > datetime('now') THEN 1 END) as active FROM validation_cache`),
+
+  // Global player profiles
+  upsertGlobalPlayer:   stmt(`INSERT INTO players_global (id, name, avatar_color) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, updated_at=datetime('now')`),
+  getGlobalPlayer:      stmt(`SELECT * FROM players_global WHERE id = ?`),
+  getGlobalPlayerByName:stmt(`SELECT * FROM players_global WHERE name = ?`),
+  updatePlayerStats:    stmt(`UPDATE players_global SET total_submitted=total_submitted+?, total_accepted=total_accepted+?, games_played=games_played+?, updated_at=datetime('now') WHERE id=?`),
+  listLeaderboard:      stmt(`SELECT *, CASE WHEN total_submitted>0 THEN ROUND(1.0*total_accepted/total_submitted*100,1) ELSE 0 END as acceptance_rate FROM players_global ORDER BY total_accepted DESC, total_submitted ASC LIMIT ?`),
+  insertAchievement:    stmt(`INSERT OR IGNORE INTO achievements (id, player_id, badge_type) VALUES (?, ?, ?)`),
+  getAchievements:      stmt(`SELECT * FROM achievements WHERE player_id = ? ORDER BY earned_at ASC`),
+
+  // Message archive
+  archiveMessages:      stmt(`INSERT INTO messages_archive SELECT *, datetime('now') FROM messages WHERE game_id=? AND created_at < datetime('now','-30 days')`),
+  deleteArchivedMessages:stmt(`DELETE FROM messages WHERE game_id=? AND created_at < datetime('now','-30 days')`),
+  getArchivedMessages:  stmt(`SELECT * FROM messages_archive WHERE game_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?`),
+  getRecentMessages:    stmt(`SELECT * FROM messages WHERE game_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?`),
+  getRecentMessageCount:stmt(`SELECT COUNT(*) as count FROM messages WHERE game_id=?`),
+
+  // Concept categories (curation)
+  listCategories:          stmt(`SELECT * FROM concept_categories ORDER BY sort_order ASC, name ASC`),
+  insertCategory:          stmt(`INSERT INTO concept_categories (id, name, color, sort_order) VALUES (?, ?, ?, ?)`),
+  deleteCategory:          stmt(`DELETE FROM concept_categories WHERE id=?`),
+  assignConceptToCategory: stmt(`INSERT OR IGNORE INTO concept_in_category (concept_id, category_id) VALUES (?, ?)`),
+  removeConceptFromCategory:stmt(`DELETE FROM concept_in_category WHERE concept_id=? AND category_id=?`),
+  getConceptCategories:    stmt(`SELECT c.* FROM concept_categories c JOIN concept_in_category cc ON cc.category_id=c.id WHERE cc.concept_id=?`),
+  listKBDocsByStatus:      stmt(`SELECT * FROM knowledge_docs WHERE source='ai_confirmed' AND (status=? OR ?='') ORDER BY created_at DESC LIMIT 100`),
+  updateKBDocStatus:       stmt(`UPDATE knowledge_docs SET status=? WHERE id=?`),
+
+  // Admin audit log
+  insertAdminAudit: stmt(`INSERT INTO admin_audit_log (id, action, resource_type, resource_id, changes) VALUES (?, ?, ?, ?, ?)`),
+  listAdminAudit:   stmt(`SELECT * FROM admin_audit_log ORDER BY created_at DESC LIMIT ?`),
+
+  // Settlement recovery
+  startSettlement:     stmt(`UPDATE games SET settle_started_at=datetime('now'), settle_status='started', updated_at=datetime('now') WHERE id=?`),
+  completeSettlement:  stmt(`UPDATE games SET settle_started_at=NULL, settle_status=NULL, updated_at=datetime('now') WHERE id=?`),
+  failSettlement:      stmt(`UPDATE games SET settle_status='failed', updated_at=datetime('now') WHERE id=?`),
+  getIncompleteSettlements: stmt(`SELECT * FROM games WHERE settle_status='started' ORDER BY settle_started_at ASC`),
+
+  // AI configs with priority
+  listAIConfigsSorted: stmt(`SELECT * FROM ai_configs ORDER BY CASE WHEN is_active=1 THEN 0 ELSE 1 END, priority ASC, created_at DESC`),
+  updateAIConfigPriority: stmt(`UPDATE ai_configs SET priority=?, is_fallback=? WHERE id=?`),
+  getConcept:          stmt(`SELECT * FROM concepts WHERE id=?`),
 };

@@ -12,6 +12,9 @@ const ai = require('../services/aiService');
 const { getContextForConcept, searchContext, ingestAIConfirmedConcept, validateFromKnowledge } = require('../services/knowledgeService');
 const { TimelineService } = require('../services/timelineService');
 const { pluginEvents } = require('../plugins');
+const auditSvc = require('../services/auditService');
+const profileSvc = require('../services/profileService');
+const settlementSvc = require('../services/settlementService');
 
 // In-memory rooms
 const rooms = new Map();
@@ -90,6 +93,9 @@ module.exports = function setupSocket(io) {
 
         db.upsertPlayer.run(playerId, id, currentPlayer.name, color);
         console.log(`[Socket] game:join player upserted playerId=${playerId} gameId=${id}`);
+
+        // Ensure global player profile exists
+        profileSvc.ensureProfile(playerId, currentPlayer.name, color);
 
         // Transition game status from 'waiting' to 'playing' on first join
         if (game.status === 'waiting') {
@@ -202,8 +208,12 @@ module.exports = function setupSocket(io) {
         // ── KB-first validation: skip AI if local KB has a confident match ──
         const kbCheck = validateFromKnowledge(input, game.topic);
         let result;
+        let validationMethod = 'ai';
+        const tsAI = Date.now();
+
         if (kbCheck.confident) {
           result = kbCheck.result;
+          validationMethod = 'kb';
           console.log(`[Socket] KB validation HIT gameId=${currentGameId} input="${input}" name="${result.name}"`);
         } else {
           const knowledgeContext = getContextForConcept(input, game.topic);
@@ -211,11 +221,25 @@ module.exports = function setupSocket(io) {
           result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
         }
 
+        const msElapsed = Date.now() - tsAI;
+
         const conceptId = uuidv4();
 
         if (!result.valid) {
           db.insertConcept.run(conceptId, currentGameId, currentPlayer.id, currentPlayer.name,
             input, input, null, null, null, null, '[]', 0, 1, result.reason || '无效', '{}');
+
+          // Log the rejection decision
+          auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+            prompt: null,  // Don't log full prompt for privacy
+            response: JSON.stringify({ valid: false, reason: result.reason }),
+            provider: result.provider || null,
+            model: result.model || null,
+            ms: msElapsed,
+          });
+
+          // Update player stats (rejected = not accepted)
+          profileSvc.recordConceptResult(currentPlayer.id, false, false);
 
           const rejMsg = { id: uuidv4(), type: 'system', game_id: currentGameId,
             content: `「${input}」被驳回：${result.reason || '与主题无关'}`,
@@ -231,6 +255,18 @@ module.exports = function setupSocket(io) {
         db.insertConcept.run(conceptId, currentGameId, currentPlayer.id, currentPlayer.name,
           input, result.name, result.period, result.year ?? null,
           result.dynasty, result.description, tags, 1, 0, null, extra);
+
+        // Log the acceptance decision
+        auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+          prompt: null,  // Don't log full prompt for privacy
+          response: JSON.stringify(result),
+          provider: result.provider || null,
+          model: result.model || null,
+          ms: msElapsed,
+        });
+
+        // Update player stats (accepted = submitted + 1 accepted)
+        profileSvc.recordConceptResult(currentPlayer.id, true, false);
 
         const ts = new TimelineService();
         const concept = {
@@ -297,6 +333,7 @@ module.exports = function setupSocket(io) {
       }
 
       room.settling = true;
+      settlementSvc.startSettlement(currentGameId);  // Persist to DB
       sysMessage(io, currentGameId, `开始结算，共 ${pending.length} 个概念待验证...`);
       io.to(currentGameId).emit('game:settle:start', { total: pending.length });
       callback?.({ ok: true, total: pending.length });
@@ -322,6 +359,15 @@ module.exports = function setupSocket(io) {
               r.name || row.raw_input, r.period || null, r.year ?? null,
               r.dynasty || null, r.description || null, tags, extra, r.id
             );
+
+            // Log settlement decision
+            auditSvc.logDecision(r.id, currentGameId, 'ai', {
+              response: JSON.stringify(r),
+            });
+
+            // Update player stats for settlement
+            profileSvc.recordConceptResult(row.player_id, true, false);
+
             const concept = {
               id: r.id, game_id: currentGameId,
               player_id: row.player_id, player_name: row.player_name,
@@ -337,6 +383,15 @@ module.exports = function setupSocket(io) {
             try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
           } else {
             db.rejectConcept.run(r.reason || '不符合主题', r.id);
+
+            // Log settlement decision
+            auditSvc.logDecision(r.id, currentGameId, 'ai', {
+              response: JSON.stringify({ valid: false, reason: r.reason }),
+            });
+
+            // Update player stats for settlement
+            profileSvc.recordConceptResult(row.player_id, false, false);
+
             io.to(currentGameId).emit('concept:settled', {
               conceptId: r.id, accepted: false,
               reason: r.reason || '不符合主题', playerName: row.player_name, rawInput: row.raw_input,
@@ -356,11 +411,14 @@ module.exports = function setupSocket(io) {
           io.to(currentGameId).emit('game:finished');
         }
 
+        settlementSvc.completeSettlement(currentGameId);  // Clear settlement state
+
         console.log(`[Socket] game:settle DONE gameId=${currentGameId} accepted=${accepted} rejected=${rejected} endGame=${endGame}`);
 
       } catch (err) {
         console.error(`[Socket] game:settle ERROR gameId=${currentGameId}:`, err);
         room.settling = false;
+        settlementSvc.failSettlement(currentGameId);  // Mark as failed
         sysMessage(io, currentGameId, `结算出错：${err.message}`);
       } finally {
         room.settling = false;
