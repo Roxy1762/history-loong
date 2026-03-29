@@ -10,19 +10,28 @@ export interface Game {
   updated_at: string;
 }
 
-export type GameMode = 'free' | 'chain' | 'ordered' | string;
+export type GameMode =
+  | 'free'
+  | 'chain'
+  | 'ordered'
+  | 'relay'
+  | 'turn-order'
+  | 'score-race'
+  | 'challenge'
+  | string;
 
 export type ValidationMode = 'realtime' | 'deferred';
 
 export interface GameSettings {
   validationMode?: ValidationMode;
-  [key: string]: unknown; // extensible
+  [key: string]: unknown;
 }
 
 export interface Player {
   id: string;
   name: string;
   color: string;
+  score?: number; // present in score-race / challenge modes
 }
 
 export interface Concept {
@@ -60,6 +69,23 @@ export interface GameModeConfig {
   description: string;
 }
 
+// ── Turn state (turn-order mode) ──────────────────────────────────────────────
+
+export interface TurnState {
+  currentPlayerId: string | null;
+  currentPlayerName: string | null;
+  turnIndex: number;
+  order: string[];
+}
+
+// ── Challenge card (challenge mode) ──────────────────────────────────────────
+
+export interface ChallengeCard {
+  id: string;
+  text: string;
+  tag: string;
+}
+
 // ── Socket event payloads ─────────────────────────────────────────────────────
 
 export interface JoinPayload { gameId: string; playerName: string; }
@@ -72,6 +98,9 @@ export interface JoinResponse {
   timeline?: Concept[];
   pendingConcepts?: Concept[];
   messages?: Message[];
+  scores?: Record<string, number>;
+  turnState?: TurnState | null;
+  challengeCard?: ChallengeCard | null;
 }
 
 export interface ConceptNewEvent     { concept: Concept; }
@@ -81,16 +110,24 @@ export interface ConceptValidatingEvent { playerId: string; playerName: string; 
 export interface ConceptSettledEvent {
   conceptId: string;
   accepted: boolean;
-  concept?: Concept;       // present when accepted
-  reason?: string;         // present when rejected
+  concept?: Concept;
+  reason?: string;
   playerName?: string;
   rawInput?: string;
 }
 
 export interface SettleStartEvent { total: number; }
 export interface SettleDoneEvent  { accepted: number; rejected: number; endGame?: boolean; }
-export interface SettleProgressEvent { done: number; total: number; }
+
+export interface TurnUpdateEvent extends TurnState {}
+
+export interface ScoresUpdateEvent { scores: Record<string, number>; }
+
+export interface ChallengeUpdateEvent {
+  card: ChallengeCard | null;
+  round: number;
+}
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-export type ExportFormat = 'json' | 'markdown' | 'csv' | string;
+export type ExportFormat = 'json' | 'markdown' | 'csv' | 'html' | string;

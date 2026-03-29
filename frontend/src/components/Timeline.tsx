@@ -1,5 +1,6 @@
 import { useState, memo, useCallback } from 'react';
 import type { Concept } from '../types';
+import { useGameStore } from '../store/gameStore';
 
 interface Props {
   timeline: Concept[];
@@ -7,6 +8,8 @@ interface Props {
   newestId?: string;
   onValidateConcept?: (conceptId: string) => void;
   validatingConceptIds?: Set<string>;
+  isDeferred?: boolean;
+  selectedPendingIds?: Set<string>;
 }
 
 // ── Era color mapping ─────────────────────────────────────────────────────────
@@ -51,6 +54,18 @@ function formatYear(year: number | null): string {
   return `${year} 年`;
 }
 
+// Difficulty stars (1–5) from concept.extra.difficulty
+function DifficultyStars({ difficulty }: { difficulty?: unknown }) {
+  const d = Math.max(1, Math.min(5, parseInt(String(difficulty)) || 0));
+  if (!d) return null;
+  const colors = ['', 'text-slate-300', 'text-slate-400', 'text-amber-400', 'text-orange-500', 'text-red-500'];
+  return (
+    <span title={`冷僻程度 ${d}/5`} className={`text-xs ${colors[d] || 'text-slate-300'}`}>
+      {'★'.repeat(d)}{'☆'.repeat(5 - d)}
+    </span>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 const Timeline = memo(function Timeline({
@@ -59,8 +74,15 @@ const Timeline = memo(function Timeline({
   newestId,
   onValidateConcept,
   validatingConceptIds = new Set(),
+  isDeferred = false,
+  selectedPendingIds,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const { toggleSelectedPending } = useGameStore();
+
+  // Use store's selectedPendingIds if not passed directly (bridge)
+  const storeSelected = useGameStore(s => s.selectedPendingIds);
+  const effectiveSelected = selectedPendingIds ?? storeSelected;
 
   if (timeline.length === 0 && pendingConcepts.length === 0) {
     return (
@@ -84,6 +106,22 @@ const Timeline = memo(function Timeline({
     }
   }
 
+  // Select all / deselect all helper shown when there are pending concepts in deferred mode
+  const allSelected = pendingConcepts.length > 0 &&
+    pendingConcepts.every(c => effectiveSelected.has(c.id));
+
+  function handleSelectAll() {
+    if (allSelected) {
+      pendingConcepts.forEach(c => {
+        if (effectiveSelected.has(c.id)) toggleSelectedPending(c.id);
+      });
+    } else {
+      pendingConcepts.forEach(c => {
+        if (!effectiveSelected.has(c.id)) toggleSelectedPending(c.id);
+      });
+    }
+  }
+
   return (
     <div className="h-full overflow-y-auto px-5 py-5 space-y-8">
       {/* Pending section */}
@@ -94,21 +132,44 @@ const Timeline = memo(function Timeline({
             <span className="text-xs font-bold px-3 py-1.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 animate-pulse">
               ⏳ 待验证 ({pendingConcepts.length})
             </span>
+            {isDeferred && (
+              <button
+                onClick={handleSelectAll}
+                className="text-xs text-amber-600 hover:text-amber-800 underline transition-colors"
+              >
+                {allSelected ? '取消全选' : '全选'}
+              </button>
+            )}
             <div className="h-px flex-1 bg-amber-200" />
           </div>
           <div className="relative pl-7 space-y-2">
             <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-amber-200 rounded-full" />
             {pendingConcepts.map(c => {
               const isValidating = validatingConceptIds.has(c.id);
+              const isSelected = effectiveSelected.has(c.id);
               return (
                 <div key={c.id} className="relative animate-spring-in">
                   <div className={`absolute -left-[26px] top-3.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow z-10
-                    ${isValidating ? 'bg-indigo-400 animate-pulse' : 'bg-amber-400'}`} />
+                    ${isValidating ? 'bg-indigo-400 animate-pulse' : isSelected ? 'bg-violet-500' : 'bg-amber-400'}`} />
                   <div
-                    className="bg-amber-50/80 border border-amber-100 rounded-2xl px-4 py-3 transition-all duration-200"
+                    className={`border rounded-2xl px-4 py-3 transition-all duration-200 cursor-pointer
+                      ${isSelected
+                        ? 'bg-violet-50/80 border-violet-200 ring-1 ring-violet-300'
+                        : 'bg-amber-50/80 border-amber-100 hover:border-amber-200'}`}
                     style={{ opacity: isValidating ? 0.7 : 1 }}
+                    onClick={() => isDeferred && toggleSelectedPending(c.id)}
                   >
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* Checkbox (deferred mode) */}
+                      {isDeferred && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectedPending(c.id)}
+                          onClick={e => e.stopPropagation()}
+                          className="rounded border-amber-300 text-violet-500 focus:ring-violet-400 w-3.5 h-3.5 flex-shrink-0"
+                        />
+                      )}
                       <span className="font-semibold text-slate-700 text-sm">{c.raw_input}</span>
                       {isValidating ? (
                         <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1">
@@ -118,14 +179,17 @@ const Timeline = memo(function Timeline({
                           验证中
                         </span>
                       ) : (
-                        <span className="text-xs text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">⏳ 待验证</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border
+                          ${isSelected ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-amber-100 text-amber-600 border-amber-200'}`}>
+                          {isSelected ? '✓ 已选' : '⏳ 待验证'}
+                        </span>
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-1.5">
                       <div className="text-xs text-slate-400">{c.player_name}</div>
                       {onValidateConcept && !isValidating && (
                         <button
-                          onClick={() => onValidateConcept(c.id)}
+                          onClick={e => { e.stopPropagation(); onValidateConcept(c.id); }}
                           className="text-xs px-2.5 py-1 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg
                             hover:bg-indigo-100 hover:border-indigo-300 transition-all duration-150 font-medium flex items-center gap-1"
                         >
@@ -149,7 +213,6 @@ const Timeline = memo(function Timeline({
         const color = getEraColor(era);
         return (
           <div key={era} className={`animate-fade-in stagger-${Math.min(groupIdx + 1, 5)}`}>
-            {/* Era header */}
             <div className="flex items-center gap-3 mb-4">
               <div className={`h-px flex-1 ${color.line}`} />
               <span className={`text-xs font-bold px-3 py-1.5 rounded-full border ${color.badge}`}>
@@ -158,11 +221,8 @@ const Timeline = memo(function Timeline({
               <div className={`h-px flex-1 ${color.line}`} />
             </div>
 
-            {/* Concept list */}
             <div className="relative pl-7 space-y-3">
-              {/* Vertical connector */}
               <div className={`absolute left-[11px] top-2 bottom-2 w-0.5 ${color.line} rounded-full`} />
-
               {concepts.map(c => (
                 <ConceptCard
                   key={c.id}
@@ -200,7 +260,6 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
   );
   return (
     <div className={`relative ${isNew ? 'animate-spring-in' : 'animate-slide-up'}`}>
-      {/* Timeline dot */}
       <div className={`absolute -left-[26px] top-4 w-3.5 h-3.5 rounded-full border-2 border-white shadow z-10
         ${color.dot} ${isNew ? 'timeline-dot-new scale-125' : ''}`} />
 
@@ -221,10 +280,10 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
                   </span>
                 )}
                 {isNew && (
-                  <span className="text-xs px-2 py-0.5 bg-indigo-500 text-white rounded-full font-medium animate-pop-in">
-                    新
-                  </span>
+                  <span className="text-xs px-2 py-0.5 bg-indigo-500 text-white rounded-full font-medium animate-pop-in">新</span>
                 )}
+                {/* Difficulty stars */}
+                <DifficultyStars difficulty={(c.extra as Record<string, unknown>)?.difficulty} />
               </div>
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-xs text-slate-400 font-mono">{formatYear(c.year)}</span>
@@ -248,7 +307,6 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
             </div>
           </div>
 
-          {/* Tags */}
           {c.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-2.5">
               {c.tags.map(tag => (
@@ -259,7 +317,6 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
             </div>
           )}
 
-          {/* Expanded description */}
           {expanded && c.description && (
             <div className="mt-3 pt-3 border-t border-slate-50 text-sm text-slate-600 leading-relaxed text-left animate-slide-down">
               {c.description}

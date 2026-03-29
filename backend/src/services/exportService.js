@@ -84,8 +84,9 @@ function formatCSV(data) {
     rows.push(row.join(','));
   }
 
+  // Prepend UTF-8 BOM so Excel opens Chinese characters correctly
   return {
-    content: rows.join('\n'),
+    content: '\uFEFF' + rows.join('\n'),
     mimeType: 'text/csv',
     ext: 'csv',
   };

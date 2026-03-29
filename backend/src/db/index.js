@@ -246,6 +246,22 @@ try {
   db.exec(`ALTER TABLE ai_configs ADD COLUMN is_fallback INTEGER NOT NULL DEFAULT 0`);
 } catch { /* already exists */ }
 
+// v1.4.0: system_prompt for AI configs (custom validation prompt template)
+try {
+  db.exec(`ALTER TABLE ai_configs ADD COLUMN system_prompt TEXT`);
+} catch { /* already exists */ }
+
+// v1.4.0: turn/relay/score/challenge state on games (JSON blob)
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN turn_state TEXT NOT NULL DEFAULT '{}'`);
+} catch { /* already exists */ }
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN scores TEXT NOT NULL DEFAULT '{}'`);
+} catch { /* already exists */ }
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN challenge_state TEXT NOT NULL DEFAULT '{}'`);
+} catch { /* already exists */ }
+
 // v1.3.0: status column on knowledge_docs (active | draft | archived)
 try {
   db.exec(`ALTER TABLE knowledge_docs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
@@ -399,5 +415,11 @@ module.exports = {
   // AI configs with priority
   listAIConfigsSorted: stmt(`SELECT * FROM ai_configs ORDER BY CASE WHEN is_active=1 THEN 0 ELSE 1 END, priority ASC, created_at DESC`),
   updateAIConfigPriority: stmt(`UPDATE ai_configs SET priority=?, is_fallback=? WHERE id=?`),
+  updateAIConfigSystemPrompt: stmt(`UPDATE ai_configs SET system_prompt=? WHERE id=?`),
   getConcept:          stmt(`SELECT * FROM concepts WHERE id=?`),
+
+  // Turn / relay / score / challenge state (in-DB persistence)
+  updateGameTurnState:      stmt(`UPDATE games SET turn_state=?, updated_at=datetime('now') WHERE id=?`),
+  updateGameScores:         stmt(`UPDATE games SET scores=?, updated_at=datetime('now') WHERE id=?`),
+  updateGameChallengeState: stmt(`UPDATE games SET challenge_state=?, updated_at=datetime('now') WHERE id=?`),
 };

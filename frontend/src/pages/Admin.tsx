@@ -23,8 +23,9 @@ import {
   adminApproveConcept, adminApproveAll, adminArchiveConcept, adminRejectConcept,
   adminEditConcept, adminMergeConcepts,
   adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept,
+  adminGetAIDecisions, adminGetAIDecision,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
-  type CurationConcept, type Category,
+  type CurationConcept, type Category, type AIDecision,
 } from '../services/api';
 import type { Game } from '../types';
 
@@ -72,7 +73,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'logs';
+type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
 
 const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'overview',      icon: '📊', label: '概览' },
@@ -81,6 +82,7 @@ const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'knowledge',     icon: '📚', label: '知识库' },
   { id: 'ai-confirmed',  icon: '✅', label: 'AI 确认知识库' },
   { id: 'curation',      icon: '🎯', label: '知识策展' },
+  { id: 'ai-decisions',  icon: '🔬', label: 'AI 完整回复' },
   { id: 'logs',          icon: '🔍', label: '服务器日志' },
 ];
 
@@ -146,8 +148,9 @@ export default function Admin() {
           {tab === 'ai-config'    && <AIConfigPanel />}
           {tab === 'knowledge'    && <KnowledgePanel />}
           {tab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => setTab('curation')} />}
-          {tab === 'curation'     && <CurationPanel />}
-          {tab === 'logs'         && <LogsPanel />}
+          {tab === 'curation'      && <CurationPanel />}
+          {tab === 'ai-decisions'  && <AIDecisionsPanel />}
+          {tab === 'logs'          && <LogsPanel />}
         </div>
       </main>
     </div>
@@ -567,18 +570,21 @@ function AIConfigPanel() {
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                    ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : 'bg-blue-50'}`}>
-                    {cfg.provider_type === 'anthropic' ? '🔶' : '🔷'}
+                    ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : 'bg-indigo-50'}`}>
+                    {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : '🔷'}
                   </div>
                   <div>
-                    <div className="font-semibold text-slate-800 flex items-center gap-2">
+                    <div className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
                       {cfg.name}
                       {cfg.is_active === 1 && (
                         <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-normal">当前使用</span>
                       )}
+                      {(cfg as AIConfig & { system_prompt?: string }).system_prompt && (
+                        <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-normal border border-purple-100">自定义提示词</span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.base_url}
+                      {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.base_url}
                       <span className="ml-2 font-mono">{cfg.model}</span>
                     </div>
                   </div>
@@ -622,6 +628,8 @@ function AIConfigPanel() {
         <ul className="mt-1 space-y-0.5 list-disc list-inside">
           <li><strong>Anthropic</strong> — 填入 API Key，选择 claude-* 模型</li>
           <li><strong>OpenAI Compatible</strong> — 填入 Base URL + API Key，支持 OpenAI、DeepSeek、Qwen、月之暗面、本地 Ollama 等所有兼容接口</li>
+          <li><strong>Google AI Studio</strong> — 填入 Google AI Studio API Key，模型填 <code>gemini-2.0-flash</code></li>
+          <li>可为每个配置设置<strong>自定义提示词</strong>，调整验证风格和严格程度</li>
         </ul>
       </InfoBox>
     </div>
@@ -639,9 +647,11 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     base_url:      initial?.base_url      ?? '',
     api_key:       initial ? '••••••••' : '',
     model:         initial?.model         ?? '',
+    system_prompt: (initial as (AIConfig & { system_prompt?: string }) | null)?.system_prompt ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+  const [showPrompt, setShowPrompt] = useState(false);
 
   function update(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -657,12 +667,15 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     e.preventDefault();
     setSaving(true); setErr('');
     try {
+      const payload: Partial<AIConfig> & { system_prompt?: string } = {
+        ...form,
+        system_prompt: form.system_prompt || undefined,
+      };
       if (initial) {
-        const payload: Partial<AIConfig> = { ...form };
         if (form.api_key === '••••••••') delete payload.api_key;
         await adminUpdateAIConfig(initial.id, payload);
       } else {
-        await adminCreateAIConfig({ ...form, extra: {} });
+        await adminCreateAIConfig({ ...payload, extra: {} } as Omit<AIConfig, 'id' | 'is_active' | 'created_at'>);
       }
       onSaved();
     } catch (e: unknown) {
@@ -671,6 +684,8 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       setSaving(false);
     }
   }
+
+  const needsBaseUrl = form.provider_type === 'openai-compatible';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
@@ -684,11 +699,12 @@ function AIConfigForm({ initial, onClose, onSaved }: {
             <select className="input" value={form.provider_type} onChange={e => update('provider_type', e.target.value)}>
               <option value="openai-compatible">OpenAI Compatible（通用）</option>
               <option value="anthropic">Anthropic Claude（原生）</option>
+              <option value="google">Google AI Studio（Gemini）</option>
             </select>
           </FormField>
         </div>
 
-        {form.provider_type === 'openai-compatible' && (
+        {needsBaseUrl && (
           <FormField label="Base URL">
             <div className="space-y-2">
               <input className="input font-mono text-sm" placeholder="https://api.openai.com/v1" value={form.base_url} onChange={e => update('base_url', e.target.value)} required />
@@ -704,13 +720,55 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </FormField>
         )}
 
+        {form.provider_type === 'google' && (
+          <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
+            💡 Google AI Studio：在 <strong>API Key</strong> 填入 Google AI Studio 的 API Key，<strong>模型</strong> 填写 <code>gemini-2.0-flash</code> 或 <code>gemini-1.5-pro</code>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="API Key">
-            <input className="input font-mono text-sm" type="password" placeholder="sk-..." value={form.api_key} onChange={e => update('api_key', e.target.value)} required={!initial} />
+            <input className="input font-mono text-sm" type="password" placeholder="sk-... / AIza..." value={form.api_key} onChange={e => update('api_key', e.target.value)} required={!initial} />
           </FormField>
           <FormField label="模型名称">
-            <input className="input font-mono text-sm" placeholder="claude-sonnet-4-6 / gpt-4o / ..." value={form.model} onChange={e => update('model', e.target.value)} required />
+            <input className="input font-mono text-sm" placeholder={
+              form.provider_type === 'google' ? 'gemini-2.0-flash' :
+              form.provider_type === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'
+            } value={form.model} onChange={e => update('model', e.target.value)} required />
           </FormField>
+        </div>
+
+        {/* System Prompt (advanced) */}
+        <div className="border border-slate-100 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowPrompt(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium text-slate-700 bg-slate-50 hover:bg-slate-100 transition-colors"
+          >
+            <span>🧠 自定义提示词（可选）{form.system_prompt && <span className="ml-2 text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">已设置</span>}</span>
+            <svg className={`w-4 h-4 text-slate-400 transition-transform ${showPrompt ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showPrompt && (
+            <div className="p-4 bg-white border-t border-slate-100 space-y-2">
+              <p className="text-xs text-slate-500">
+                以 System Prompt 形式注入 AI，在所有验证请求前生效。可用于调整验证风格、添加专业知识、设置严格程度等。留空使用内置提示词。
+              </p>
+              <textarea
+                className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2.5 bg-slate-50 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:bg-white transition-colors"
+                rows={6}
+                placeholder={`例如：
+你是一位专业的中国历史学者，对各朝代政治、经济、文化有深入研究。
+在验证历史概念时，请严格把握准确性，对模糊或争议性内容应说明原因。
+对冷僻概念应给予较高的 difficulty 评分（4-5）。`}
+                value={form.system_prompt}
+                onChange={e => update('system_prompt', e.target.value)}
+                maxLength={2000}
+              />
+              <div className="text-xs text-slate-400 text-right">{form.system_prompt.length}/2000</div>
+            </div>
+          )}
         </div>
 
         {err && <p className="text-sm text-red-500">{err}</p>}
@@ -1620,6 +1678,186 @@ const LEVEL_BG: Record<string, string> = {
   warn:  'bg-amber-50',
   error: 'bg-red-50',
 };
+
+// ── Panel: AI Decisions (full response viewer) ────────────────────────────────
+
+function AIDecisionsPanel() {
+  const [decisions, setDecisions] = useState<AIDecision[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [gameIdFilter, setGameIdFilter] = useState('');
+  const [selected, setSelected] = useState<AIDecision | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    adminGetAIDecisions(gameIdFilter || undefined)
+      .then(setDecisions)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [gameIdFilter]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="AI 完整回复"
+        subtitle="查看每次验证的完整 AI 响应、提示词和耗时"
+        action={
+          <div className="flex gap-2 items-center">
+            <input
+              className="input text-sm w-40"
+              placeholder="按房间码筛选"
+              value={gameIdFilter}
+              onChange={e => setGameIdFilter(e.target.value.toUpperCase())}
+            />
+            <button className="btn-secondary text-sm" onClick={load} disabled={loading}>
+              {loading ? '加载中...' : '刷新'}
+            </button>
+          </div>
+        }
+      />
+
+      {/* Detail modal */}
+      {selected && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setSelected(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+              <div>
+                <h3 className="font-semibold text-slate-800">AI 验证详情</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {selected.raw_input && `输入：「${selected.raw_input}」`}
+                  {selected.name && ` → 「${selected.name}」`}
+                </p>
+              </div>
+              <button onClick={() => setSelected(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {/* Metadata */}
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <div className="font-semibold text-slate-600 mb-1">验证方式</div>
+                  <span className={`px-2 py-0.5 rounded-full font-medium
+                    ${selected.validation_method === 'kb' ? 'bg-green-100 text-green-700' :
+                      selected.validation_method === 'cache' ? 'bg-blue-100 text-blue-700' :
+                      'bg-indigo-100 text-indigo-700'}`}>
+                    {selected.validation_method === 'kb' ? '知识库命中' :
+                     selected.validation_method === 'cache' ? '缓存命中' :
+                     selected.validation_method === 'admin_override' ? '管理员覆写' : 'AI 验证'}
+                  </span>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3">
+                  <div className="font-semibold text-slate-600 mb-1">结果</div>
+                  <span className={`px-2 py-0.5 rounded-full font-medium
+                    ${selected.validated ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                    {selected.validated ? '✅ 通过' : '❌ 驳回'}
+                  </span>
+                </div>
+                {selected.ai_model && (
+                  <div className="bg-slate-50 rounded-xl p-3 col-span-2">
+                    <div className="font-semibold text-slate-600 mb-1">模型 · 耗时</div>
+                    <span className="font-mono">{selected.ai_model}</span>
+                    {selected.decision_ms && <span className="ml-2 text-slate-400">{selected.decision_ms}ms</span>}
+                  </div>
+                )}
+                <div className="bg-slate-50 rounded-xl p-3 col-span-2">
+                  <div className="font-semibold text-slate-600 mb-1">时间 · 房间</div>
+                  <span>{selected.decision_made_at?.slice(0, 19).replace('T', ' ')}</span>
+                  <span className="ml-2 font-mono text-indigo-500">{selected.game_id}</span>
+                  {selected.player_name && <span className="ml-2 text-slate-400">by {selected.player_name}</span>}
+                </div>
+              </div>
+
+              {/* AI Response (JSON pretty-print) */}
+              {selected.ai_response && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1.5">📤 AI 完整回复</div>
+                  <pre className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700 max-h-64 overflow-y-auto">
+                    {(() => {
+                      try { return JSON.stringify(JSON.parse(selected.ai_response), null, 2); }
+                      catch { return selected.ai_response; }
+                    })()}
+                  </pre>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {decisions.length === 0 && !loading ? (
+        <EmptyState icon="🔬" title="暂无验证记录" desc="游戏开始后，每次 AI 验证的完整回复将在此处显示" />
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <h3 className="font-semibold text-slate-800">验证记录 <span className="text-slate-400 font-normal text-sm">({decisions.length})</span></h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+                <tr>
+                  {['时间', '输入', '结果', '方式', '耗时', '房间', '操作'].map(h => (
+                    <th key={h} className="px-3 py-3 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {decisions.map(d => (
+                  <tr key={d.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-2.5 text-xs text-slate-400 whitespace-nowrap">{d.decision_made_at?.slice(5, 19).replace('T', ' ')}</td>
+                    <td className="px-3 py-2.5 max-w-[160px]">
+                      <div className="truncate font-medium text-slate-700">{d.raw_input || d.name || '—'}</div>
+                      {d.name && d.raw_input && d.name !== d.raw_input && (
+                        <div className="truncate text-xs text-slate-400">{d.name}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium
+                        ${d.validated ? 'bg-emerald-100 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+                        {d.validated ? '✅' : '❌'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full
+                        ${d.validation_method === 'kb' ? 'bg-green-100 text-green-700' :
+                          d.validation_method === 'cache' ? 'bg-blue-100 text-blue-700' :
+                          'bg-slate-100 text-slate-600'}`}>
+                        {d.validation_method === 'kb' ? 'KB' : d.validation_method === 'cache' ? '缓存' : 'AI'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-slate-400">{d.decision_ms ? `${d.decision_ms}ms` : '—'}</td>
+                    <td className="px-3 py-2.5 font-mono text-xs text-indigo-500">{d.game_id}</td>
+                    <td className="px-3 py-2.5">
+                      <button
+                        onClick={async () => {
+                          try {
+                            const res = await adminGetAIDecision(d.concept_id);
+                            setSelected({ ...d, ...(res.decision || {}) } as AIDecision);
+                          } catch {
+                            setSelected(d);
+                          }
+                        }}
+                        className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors">
+                        查看
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <InfoBox>
+        <strong>AI 完整回复</strong>：显示每次验证中 AI 返回的完整 JSON（包括 difficulty、tags 等字段），以及验证方式（AI / 知识库命中 / 缓存）和耗时。点击「查看」可展开完整内容。
+      </InfoBox>
+    </div>
+  );
+}
 
 function LogsPanel() {
   const [logs, setLogs]     = useState<LogEntry[]>([]);

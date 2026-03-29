@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Game, Player, Concept, Message } from '../types';
+import type { Game, Player, Concept, Message, TurnState, ChallengeCard } from '../types';
 
 interface ValidatingState {
   playerId: string;
@@ -28,7 +28,7 @@ interface GameState {
   game: Game | null;
   setGame: (g: Game | null) => void;
 
-  // Players
+  // Players (includes score field for score-race/challenge)
   players: Player[];
   setPlayers: (p: Player[]) => void;
 
@@ -42,6 +42,11 @@ interface GameState {
   setPendingConcepts: (p: Concept[]) => void;
   addPendingConcept: (c: Concept) => void;
   removePendingConcept: (id: string) => void;
+
+  // Multi-select for batch validation
+  selectedPendingIds: Set<string>;
+  toggleSelectedPending: (id: string) => void;
+  clearSelectedPending: () => void;
 
   // Messages
   messages: Message[];
@@ -57,6 +62,18 @@ interface GameState {
   setSettleRunning: (total: number) => void;
   incrementSettleDone: (accepted: boolean) => void;
   resetSettle: () => void;
+
+  // Turn-order mode
+  turnState: TurnState | null;
+  setTurnState: (t: TurnState | null) => void;
+
+  // Score-race / challenge mode
+  scores: Record<string, number>;
+  setScores: (s: Record<string, number>) => void;
+
+  // Challenge card
+  challengeCard: ChallengeCard | null;
+  setChallengeCard: (c: ChallengeCard | null) => void;
 
   // UI
   activeTab: 'chat' | 'timeline';
@@ -95,11 +112,22 @@ export const useGameStore = create<GameState>((set) => ({
   pendingConcepts: [],
   setPendingConcepts: p => set({ pendingConcepts: p }),
   addPendingConcept: c => set(s => ({ pendingConcepts: [...s.pendingConcepts, c] })),
-  removePendingConcept: id => set(s => ({ pendingConcepts: s.pendingConcepts.filter(c => c.id !== id) })),
+  removePendingConcept: id => set(s => ({
+    pendingConcepts: s.pendingConcepts.filter(c => c.id !== id),
+    selectedPendingIds: new Set([...s.selectedPendingIds].filter(sid => sid !== id)),
+  })),
+
+  selectedPendingIds: new Set(),
+  toggleSelectedPending: (id) => set(s => {
+    const next = new Set(s.selectedPendingIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return { selectedPendingIds: next };
+  }),
+  clearSelectedPending: () => set({ selectedPendingIds: new Set() }),
 
   messages: [],
   setMessages: m => set({ messages: m }),
-  // Cap at 500 to prevent unbounded memory growth in long sessions
   addMessage: m => set(s => ({
     messages: s.messages.length >= 500
       ? [...s.messages.slice(-499), m]
@@ -121,13 +149,25 @@ export const useGameStore = create<GameState>((set) => ({
   })),
   resetSettle: () => set({ settle: INITIAL_SETTLE }),
 
+  turnState: null,
+  setTurnState: t => set({ turnState: t }),
+
+  scores: {},
+  setScores: s => set({ scores: s }),
+
+  challengeCard: null,
+  setChallengeCard: c => set({ challengeCard: c }),
+
   activeTab: 'chat',
   setActiveTab: t => set({ activeTab: t }),
 
   reset: () => set({
     me: null, game: null, players: [],
     timeline: [], pendingConcepts: [],
+    selectedPendingIds: new Set(),
     messages: [], validating: null,
-    settle: INITIAL_SETTLE, activeTab: 'chat',
+    settle: INITIAL_SETTLE,
+    turnState: null, scores: {}, challengeCard: null,
+    activeTab: 'chat',
   }),
 }));
