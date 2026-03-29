@@ -88,7 +88,7 @@ export interface ConceptSettledEvent {
 }
 
 export interface SettleStartEvent { total: number; }
-export interface SettleDoneEvent  { accepted: number; rejected: number; }
+export interface SettleDoneEvent  { accepted: number; rejected: number; endGame?: boolean; }
 export interface SettleProgressEvent { done: number; total: number; }
 
 // ── Export ────────────────────────────────────────────────────────────────────

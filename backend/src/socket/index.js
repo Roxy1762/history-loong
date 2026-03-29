@@ -9,7 +9,7 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { getContextForConcept, searchContext, ingestAIConfirmedConcept } = require('../services/knowledgeService');
+const { getContextForConcept, searchContext, ingestAIConfirmedConcept, validateFromKnowledge } = require('../services/knowledgeService');
 const { TimelineService } = require('../services/timelineService');
 const { pluginEvents } = require('../plugins');
 
@@ -199,10 +199,17 @@ module.exports = function setupSocket(io) {
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
 
-        const knowledgeContext = getContextForConcept(input, game.topic);
-        console.log(`[Socket] AI validation start gameId=${currentGameId} input="${input}" existing=${existing.length} hasKnowledge=${!!knowledgeContext}`);
-
-        const result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+        // ── KB-first validation: skip AI if local KB has a confident match ──
+        const kbCheck = validateFromKnowledge(input, game.topic);
+        let result;
+        if (kbCheck.confident) {
+          result = kbCheck.result;
+          console.log(`[Socket] KB validation HIT gameId=${currentGameId} input="${input}" name="${result.name}"`);
+        } else {
+          const knowledgeContext = getContextForConcept(input, game.topic);
+          console.log(`[Socket] AI validation start gameId=${currentGameId} input="${input}" existing=${existing.length} hasKnowledge=${!!knowledgeContext}`);
+          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+        }
 
         const conceptId = uuidv4();
 
@@ -264,8 +271,9 @@ module.exports = function setupSocket(io) {
     });
 
     // ── batch settle (deferred mode) ──────────────────────────────────────────
-    socket.on('game:settle', async (_, callback) => {
-      console.log(`[Socket] game:settle socketId=${socket.id} gameId=${currentGameId}`);
+    // Payload: { endGame?: boolean } — if endGame=true the game ends after settle
+    socket.on('game:settle', async ({ endGame = false } = {}, callback) => {
+      console.log(`[Socket] game:settle socketId=${socket.id} gameId=${currentGameId} endGame=${endGame}`);
 
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
 
@@ -277,11 +285,14 @@ module.exports = function setupSocket(io) {
 
       const pending = db.getPendingConcepts.all(currentGameId);
       if (!pending.length) {
-        // Nothing pending — just finish
-        db.updateGameStatus.run('finished', currentGameId);
-        sysMessage(io, currentGameId, '没有待验证的概念，游戏结束');
-        io.to(currentGameId).emit('game:finished');
-        console.log(`[Socket] game:settle — no pending concepts, game finished gameId=${currentGameId}`);
+        if (endGame) {
+          db.updateGameStatus.run('finished', currentGameId);
+          sysMessage(io, currentGameId, '没有待验证的概念，游戏结束');
+          io.to(currentGameId).emit('game:finished');
+        } else {
+          sysMessage(io, currentGameId, '当前没有待验证的概念');
+        }
+        console.log(`[Socket] game:settle — no pending concepts gameId=${currentGameId} endGame=${endGame}`);
         return callback?.({ ok: true, accepted: 0, rejected: 0 });
       }
 
@@ -293,7 +304,6 @@ module.exports = function setupSocket(io) {
       console.log(`[Socket] game:settle START gameId=${currentGameId} pending=${pending.length}`);
 
       try {
-        const settings = JSON.parse(game.settings || '{}');
         const knowledgeContext = searchContext(game.topic, 2);
 
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
@@ -337,12 +347,16 @@ module.exports = function setupSocket(io) {
 
         io.to(currentGameId).emit('game:settle:progress', { done: results.length, total: pending.length });
 
-        db.updateGameStatus.run('finished', currentGameId);
-        sysMessage(io, currentGameId, `结算完成：${accepted} 个通过，${rejected} 个淘汰`);
-        io.to(currentGameId).emit('game:settle:done', { accepted, rejected });
-        io.to(currentGameId).emit('game:finished');
+        const summaryMsg = `结算完成：${accepted} 个通过，${rejected} 个淘汰${endGame ? '，游戏结束' : '，可继续提交'}`;
+        sysMessage(io, currentGameId, summaryMsg);
+        io.to(currentGameId).emit('game:settle:done', { accepted, rejected, endGame });
 
-        console.log(`[Socket] game:settle DONE gameId=${currentGameId} accepted=${accepted} rejected=${rejected}`);
+        if (endGame) {
+          db.updateGameStatus.run('finished', currentGameId);
+          io.to(currentGameId).emit('game:finished');
+        }
+
+        console.log(`[Socket] game:settle DONE gameId=${currentGameId} accepted=${accepted} rejected=${rejected} endGame=${endGame}`);
 
       } catch (err) {
         console.error(`[Socket] game:settle ERROR gameId=${currentGameId}:`, err);
@@ -383,11 +397,19 @@ module.exports = function setupSocket(io) {
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
 
-        const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
         const settings = JSON.parse(game.settings || '{}');
 
-        console.log(`[Socket] concept:validate_single AI start gameId=${currentGameId} input="${row.raw_input}"`);
-        const result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+        // KB-first validation
+        const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
+        let result;
+        if (kbCheck.confident) {
+          result = kbCheck.result;
+          console.log(`[Socket] concept:validate_single KB HIT gameId=${currentGameId} input="${row.raw_input}"`);
+        } else {
+          const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
+          console.log(`[Socket] concept:validate_single AI start gameId=${currentGameId} input="${row.raw_input}"`);
+          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+        }
 
         const ts = new TimelineService();
 

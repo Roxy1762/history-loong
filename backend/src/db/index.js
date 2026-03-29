@@ -118,6 +118,11 @@ try {
   db.exec(`ALTER TABLE knowledge_docs ADD COLUMN game_id TEXT`);
 } catch { /* column already exists */ }
 
+// v1.2.0: add notes column to games for admin annotations
+try {
+  db.exec(`ALTER TABLE games ADD COLUMN notes TEXT NOT NULL DEFAULT ''`);
+} catch { /* column already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -130,6 +135,7 @@ module.exports = {
   getGame:           stmt(`SELECT * FROM games WHERE id = ?`),
   updateGameStatus:  stmt(`UPDATE games SET status = ?, updated_at = datetime('now') WHERE id = ?`),
   updateGameSettings:stmt(`UPDATE games SET settings = ?, updated_at = datetime('now') WHERE id = ?`),
+  updateGameNotes:   stmt(`UPDATE games SET notes = ?, updated_at = datetime('now') WHERE id = ?`),
   listGames:         stmt(`SELECT id, topic, mode, status, created_at FROM games ORDER BY created_at DESC LIMIT 50`),
   listAllGames:      stmt(`SELECT * FROM games ORDER BY created_at DESC LIMIT 100`),
   listGamesByStatus: stmt(`SELECT * FROM games WHERE status = ? ORDER BY created_at DESC LIMIT 100`),

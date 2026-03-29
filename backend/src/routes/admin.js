@@ -120,6 +120,64 @@ router.post('/games/:id/finish', (req, res) => {
   res.json({ message: '游戏已结束' });
 });
 
+// Update game notes
+router.put('/games/:id/notes', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const { notes = '' } = req.body;
+  console.log(`[Admin] PUT /games/${id}/notes`);
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  db.updateGameNotes.run(String(notes).slice(0, 500), id);
+  res.json({ message: '备注已更新' });
+});
+
+// Update game settings
+router.put('/games/:id/settings', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const { settings } = req.body;
+  console.log(`[Admin] PUT /games/${id}/settings`);
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+  if (!settings || typeof settings !== 'object') {
+    return res.status(400).json({ error: '请提供有效的 settings 对象' });
+  }
+
+  // Merge with existing settings
+  const existing = JSON.parse(game.settings || '{}');
+  const merged = { ...existing, ...settings };
+  db.updateGameSettings.run(JSON.stringify(merged), id);
+  console.log(`[Admin] Updated settings for ${id}`);
+  res.json({ message: '设置已更新', settings: merged });
+});
+
+// Restore a finished/errored game back to playing
+router.post('/games/:id/restore', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  console.log(`[Admin] POST /games/${id}/restore`);
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+  if (game.status === 'playing') return res.json({ message: '游戏已在进行中' });
+
+  db.updateGameStatus.run('playing', id);
+
+  // Notify connected players via socket if available
+  const setupSocket = require('../socket');
+  const io = setupSocket._io;
+  if (io) {
+    io.to(id).emit('message:new', {
+      id: uuidv4(), game_id: id, player_id: null, player_name: null,
+      type: 'system', content: '管理员已恢复游戏，可继续提交概念',
+      meta: {}, created_at: new Date().toISOString(),
+    });
+    io.to(id).emit('game:restored');
+    console.log(`[Admin] Emitted game:restored to room ${id}`);
+  }
+
+  db.insertMessage.run(uuidv4(), id, null, null, 'system', '管理员已恢复游戏，可继续提交概念', '{}');
+  res.json({ message: '游戏已恢复为进行中状态' });
+});
+
 router.delete('/games/:id', (req, res) => {
   const id = req.params.id.toUpperCase();
   console.log(`[Admin] DELETE /games/${id}`);

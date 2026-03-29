@@ -207,9 +207,10 @@ export function submitConcept(rawInput: string): Promise<{ ok?: boolean; error?:
   }));
 }
 
-export function settleConcepts(): Promise<{ ok?: boolean; error?: string; total?: number }> {
-  slog('info', 'settleConcepts emit');
-  return new Promise(resolve => getSocket().emit('game:settle', {}, resolve));
+/** Batch-settle all pending concepts. endGame=true also ends the game session. */
+export function settleConcepts(endGame = false): Promise<{ ok?: boolean; error?: string; total?: number }> {
+  slog('info', `settleConcepts emit endGame=${endGame}`);
+  return new Promise(resolve => getSocket().emit('game:settle', { endGame }, resolve));
 }
 
 export function sendMessage(content: string): Promise<{ ok?: boolean; error?: string }> {
@@ -250,6 +251,7 @@ export type SocketEventMap = {
   'players:update':      (e: { players: Player[] }) => void;
   'game:finished':       () => void;
   'game:deleted':        () => void;
+  'game:restored':       () => void;
   'connect':             () => void;
   'disconnect':          (reason: string) => void;
   'connect_error':       (err: Error) => void;

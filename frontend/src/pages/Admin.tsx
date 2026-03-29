@@ -1,4 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
+
+/** Debounce a value by `delay` ms. */
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debouncedValue;
+}
 import { useNavigate } from 'react-router-dom';
 import {
   setAdminKey, getAdminKey,
@@ -6,6 +16,7 @@ import {
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
   adminListGames, adminFinishGame, adminDeleteGame,
+  adminUpdateGameNotes, adminUpdateGameSettings, adminRestoreGame,
   adminGetLogs,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
@@ -224,15 +235,147 @@ function StatusChip({ status }: { status: string }) {
 
 // ── Panel: Games Management ──────────────────────────────────────────────────
 
+function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) => void }) {
+  const [expanded,    setExpanded]    = useState(false);
+  const [notes,       setNotes]       = useState((game as AdminGame & { notes?: string }).notes || '');
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [settingsStr, setSettingsStr] = useState(JSON.stringify(game.settings, null, 2));
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    try {
+      await adminUpdateGameNotes(game.id, notes);
+      onAction(`备注已保存`);
+    } catch { onAction('保存备注失败'); }
+    setSavingNotes(false);
+  }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    try {
+      const parsed = JSON.parse(settingsStr);
+      await adminUpdateGameSettings(game.id, parsed);
+      onAction('设置已更新');
+    } catch (err) {
+      onAction(err instanceof SyntaxError ? 'JSON 格式有误' : '更新失败');
+    }
+    setSavingSettings(false);
+  }
+
+  async function handleFinish() {
+    if (!confirm(`确认结束游戏「${game.topic}」(${game.id})？`)) return;
+    try { await adminFinishGame(game.id); onAction(`游戏 ${game.id} 已结束`); }
+    catch { onAction('操作失败'); }
+  }
+
+  async function handleRestore() {
+    if (!confirm(`确认恢复游戏「${game.topic}」(${game.id})为进行中状态？`)) return;
+    try { await adminRestoreGame(game.id); onAction(`游戏 ${game.id} 已恢复`); }
+    catch { onAction('恢复失败'); }
+  }
+
+  async function handleDelete() {
+    if (!confirm(`确认删除游戏「${game.topic}」(${game.id})？\n此操作不可撤销。`)) return;
+    try { await adminDeleteGame(game.id); onAction(`游戏 ${game.id} 已删除`); }
+    catch { onAction('删除失败'); }
+  }
+
+  return (
+    <>
+      <tr className="hover:bg-slate-50 transition-colors">
+        <td className="px-4 py-3 font-mono text-indigo-600 font-medium">
+          <button onClick={() => setExpanded(e => !e)} className="flex items-center gap-1 hover:underline">
+            {game.id}
+            <svg className={`w-3 h-3 opacity-40 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </td>
+        <td className="px-4 py-3 text-slate-700 max-w-[180px]">
+          <span className="truncate block">{game.topic}</span>
+          {(game as AdminGame & { notes?: string }).notes && (
+            <span className="text-xs text-amber-600 truncate block">📝 {(game as AdminGame & { notes?: string }).notes}</span>
+          )}
+        </td>
+        <td className="px-4 py-3"><ModeChip mode={game.mode} /></td>
+        <td className="px-4 py-3"><StatusChip status={game.status} /></td>
+        <td className="px-4 py-3 text-slate-600">
+          <span className="font-medium">{game.conceptCount}</span>
+          {game.pendingCount > 0 && <span className="text-amber-500 ml-1">+{game.pendingCount}⏳</span>}
+        </td>
+        <td className="px-4 py-3 text-slate-600">
+          <span className={`font-medium ${game.onlineCount > 0 ? 'text-green-600' : 'text-slate-400'}`}>{game.onlineCount}</span>
+          <span className="text-slate-300 mx-1">/</span>
+          <span className="text-slate-500">{game.playerCount}</span>
+        </td>
+        <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{game.created_at.slice(0, 16).replace('T', ' ')}</td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-1">
+            <button onClick={() => setExpanded(e => !e)}
+              className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+              详情
+            </button>
+            {game.status !== 'finished'
+              ? <button onClick={handleFinish} className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">结束</button>
+              : <button onClick={handleRestore} className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">恢复</button>
+            }
+            <button onClick={handleDelete} className="text-xs px-2 py-1 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors">删除</button>
+          </div>
+        </td>
+      </tr>
+
+      {/* Expanded detail row */}
+      {expanded && (
+        <tr>
+          <td colSpan={8} className="bg-slate-50 border-b border-slate-100 px-4 py-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">📝 管理备注</label>
+                <textarea
+                  className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  rows={3}
+                  placeholder="记录备注信息（最多 500 字）..."
+                  maxLength={500}
+                  value={notes}
+                  onChange={e => setNotes(e.target.value)}
+                />
+                <button onClick={saveNotes} disabled={savingNotes}
+                  className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
+                  {savingNotes ? '保存中...' : '保存备注'}
+                </button>
+              </div>
+              {/* Settings */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">⚙️ 游戏设置 (JSON)</label>
+                <textarea
+                  className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  rows={3}
+                  value={settingsStr}
+                  onChange={e => setSettingsStr(e.target.value)}
+                />
+                <button onClick={saveSettings} disabled={savingSettings}
+                  className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
+                  {savingSettings ? '更新中...' : '更新设置'}
+                </button>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
 function GamesPanel() {
-  const [games, setGames] = useState<AdminGame[]>([]);
+  const [games, setGames]               = useState<AdminGame[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [actionMsg, setActionMsg] = useState('');
+  const [searchRaw, setSearchRaw]       = useState('');
+  const search = useDebounce(searchRaw, 250);
+  const [loading, setLoading]           = useState(false);
+  const [actionMsg, setActionMsg]       = useState('');
 
   const reload = useCallback(() => {
     setLoading(true);
-    console.log(`[Admin] Loading games, filter=${statusFilter || 'all'}`);
     adminListGames(statusFilter || undefined)
       .then(setGames)
       .catch(() => {})
@@ -241,132 +384,87 @@ function GamesPanel() {
 
   useEffect(() => { reload(); }, [reload]);
 
-  async function handleFinish(game: AdminGame) {
-    if (!confirm(`确认结束游戏「${game.topic}」(${game.id})？所有在线玩家将收到通知。`)) return;
-    console.log(`[Admin] Finishing game ${game.id}`);
-    try {
-      await adminFinishGame(game.id);
-      setActionMsg(`游戏 ${game.id} 已结束`);
-      reload();
-    } catch (err: unknown) {
-      setActionMsg(`操作失败: ${err instanceof Error ? err.message : '未知错误'}`);
-    }
-    setTimeout(() => setActionMsg(''), 3000);
-  }
+  // Client-side text filter (debounced)
+  const filteredGames = search
+    ? games.filter(g =>
+        g.id.toLowerCase().includes(search.toLowerCase()) ||
+        g.topic.toLowerCase().includes(search.toLowerCase())
+      )
+    : games;
 
-  async function handleDelete(game: AdminGame) {
-    if (!confirm(`确认删除游戏「${game.topic}」(${game.id})？\n\n将删除所有相关数据（概念、消息、玩家记录），此操作不可撤销。`)) return;
-    console.log(`[Admin] Deleting game ${game.id}`);
-    try {
-      await adminDeleteGame(game.id);
-      setActionMsg(`游戏 ${game.id} 已删除`);
-      reload();
-    } catch (err: unknown) {
-      setActionMsg(`删除失败: ${err instanceof Error ? err.message : '未知错误'}`);
-    }
+  function showMsg(msg: string) {
+    setActionMsg(msg);
     setTimeout(() => setActionMsg(''), 3000);
+    // Reload after a tiny delay so DB writes settle
+    setTimeout(() => reload(), 400);
   }
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="游戏管理"
-        subtitle="查看、管理和结束游戏房间"
-      />
+      <PageHeader title="游戏管理" subtitle="查看、管理游戏房间；支持备注、恢复意外结束的游戏" />
 
       {/* Filter bar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm text-slate-600 font-medium">筛选状态：</span>
-        {[
-          { value: '', label: '全部' },
-          { value: 'waiting', label: '等待中' },
-          { value: 'playing', label: '进行中' },
-          { value: 'finished', label: '已结束' },
-        ].map(opt => (
-          <button
-            key={opt.value}
-            onClick={() => setStatusFilter(opt.value)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium
-              ${statusFilter === opt.value
-                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-          >
-            {opt.label}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm text-slate-600 font-medium shrink-0">状态：</span>
+          {[
+            { value: '', label: '全部' },
+            { value: 'waiting', label: '等待中' },
+            { value: 'playing', label: '进行中' },
+            { value: 'finished', label: '已结束' },
+          ].map(opt => (
+            <button key={opt.value} onClick={() => setStatusFilter(opt.value)}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors font-medium
+                ${statusFilter === opt.value
+                  ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                  : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <input
+            className="text-sm border border-slate-200 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 w-44"
+            placeholder="搜索房间码 / 主题..."
+            value={searchRaw}
+            onChange={e => setSearchRaw(e.target.value)}
+          />
+          <button onClick={reload} disabled={loading} className="btn-secondary text-xs py-1.5 shrink-0">
+            {loading ? '加载中...' : '刷新'}
           </button>
-        ))}
-        <button onClick={reload} disabled={loading}
-          className="ml-auto btn-secondary text-xs py-1.5">
-          {loading ? '加载中...' : '刷新'}
-        </button>
+        </div>
       </div>
 
       {actionMsg && (
-        <div className={`text-sm px-4 py-2.5 rounded-xl border ${
-          actionMsg.includes('失败') ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'
-        }`}>
-          {actionMsg}
-        </div>
+        <div className={`text-sm px-4 py-2.5 rounded-xl border animate-slide-down ${
+          actionMsg.includes('失败') || actionMsg.includes('有误')
+            ? 'bg-red-50 text-red-600 border-red-100'
+            : 'bg-green-50 text-green-600 border-green-100'
+        }`}>{actionMsg}</div>
       )}
 
-      {games.length === 0 ? (
-        <EmptyState icon="🎮" title="暂无游戏" desc={statusFilter ? '当前筛选条件下没有游戏' : '还没有创建过任何游戏'} />
+      {filteredGames.length === 0 ? (
+        <EmptyState icon="🎮" title="暂无游戏" desc={statusFilter || search ? '当前筛选条件下没有游戏' : '还没有创建过任何游戏'} />
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-100">
             <h3 className="font-semibold text-slate-800">
-              游戏列表 <span className="text-slate-400 font-normal text-sm">({games.length})</span>
+              游戏列表 <span className="text-slate-400 font-normal text-sm">
+                ({filteredGames.length}{filteredGames.length !== games.length ? ` / ${games.length}` : ''})
+              </span>
             </h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
                 <tr>
-                  {['房间码', '主题', '模式', '状态', '概念数', '在线/总玩家', '创建时间', '操作'].map(h => (
+                  {['房间码', '主题/备注', '模式', '状态', '概念数', '在线/总', '创建时间', '操作'].map(h => (
                     <th key={h} className="px-4 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {games.map(g => (
-                  <tr key={g.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
-                    <td className="px-4 py-3 text-slate-700 max-w-[200px] truncate">{g.topic}</td>
-                    <td className="px-4 py-3"><ModeChip mode={g.mode} /></td>
-                    <td className="px-4 py-3"><StatusChip status={g.status} /></td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <span className="font-medium">{g.conceptCount}</span>
-                      {g.pendingCount > 0 && (
-                        <span className="text-amber-500 ml-1">+{g.pendingCount}⏳</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <span className={`font-medium ${g.onlineCount > 0 ? 'text-green-600' : 'text-slate-400'}`}>
-                        {g.onlineCount}
-                      </span>
-                      <span className="text-slate-300 mx-1">/</span>
-                      <span className="text-slate-500">{g.playerCount}</span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{g.created_at.slice(0, 16).replace('T', ' ')}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        {g.status !== 'finished' && (
-                          <button
-                            onClick={() => handleFinish(g)}
-                            className="text-xs px-2.5 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors font-medium"
-                          >
-                            结束游戏
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDelete(g)}
-                          className="text-xs px-2.5 py-1 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition-colors font-medium"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredGames.map(g => <GameRow key={g.id} game={g} onAction={showMsg} />)}
               </tbody>
             </table>
           </div>
@@ -376,8 +474,10 @@ function GamesPanel() {
       <InfoBox>
         <strong>操作说明：</strong>
         <ul className="mt-1 space-y-0.5 list-disc list-inside">
-          <li><strong>结束游戏</strong> — 将游戏标记为已结束，通知所有在线玩家，玩家可导出成果</li>
-          <li><strong>删除游戏</strong> — 永久删除游戏及所有关联数据（概念、消息、玩家），不可恢复</li>
+          <li>点击<strong>房间码</strong>展开详情，可编辑备注和游戏设置</li>
+          <li><strong>结束</strong> — 标记为已结束并通知在线玩家</li>
+          <li><strong>恢复</strong> — 将已结束的游戏恢复为进行中，玩家可继续提交</li>
+          <li><strong>删除</strong> — 永久删除所有相关数据，不可恢复</li>
         </ul>
       </InfoBox>
     </div>
