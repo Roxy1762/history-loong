@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import Home from './pages/Home';
 import Game from './pages/Game';
+import { Leaderboard } from './pages/Leaderboard';
 
 // Admin is heavy (AI config, knowledge base, logs) — lazy-load to cut initial bundle
 const Admin = lazy(() => import('./pages/Admin'));
@@ -20,14 +21,15 @@ function AdminFallback() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/"             element={<Home />} />
-      <Route path="/game/:gameId" element={<Game />} />
-      <Route path="/admin"        element={
+      <Route path="/"               element={<Home />} />
+      <Route path="/game/:gameId"   element={<Game />} />
+      <Route path="/leaderboard"    element={<Leaderboard />} />
+      <Route path="/admin"          element={
         <Suspense fallback={<AdminFallback />}>
           <Admin />
         </Suspense>
       } />
-      <Route path="*"             element={<Navigate to="/" replace />} />
+      <Route path="*"               element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
