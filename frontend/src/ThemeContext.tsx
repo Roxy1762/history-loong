@@ -1,17 +1,22 @@
 /**
- * Theme system — 3 themes: 清雅 (light), 墨韵 (dark), 锦绣 (gold)
+ * Theme system — 4 themes: 清雅 (light), 墨韵 (dark), 锦绣 (gold), 竹青 (jade)
  * Persists choice to localStorage and applies data-theme to <html>.
+ * NOTE: index.html has an inline script that applies the saved theme before
+ * React hydrates, preventing flash of unstyled content (FOUC).
  */
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
-export type Theme = 'light' | 'dark' | 'gold';
+export type Theme = 'light' | 'dark' | 'gold' | 'jade';
 
 export const THEMES: { id: Theme; label: string; icon: string; desc: string }[] = [
-  { id: 'light', label: '清雅',  icon: '☀️', desc: '简约清爽' },
-  { id: 'dark',  label: '墨韵',  icon: '🌙', desc: '暗色墨韵' },
-  { id: 'gold',  label: '锦绣',  icon: '🏮', desc: '金红锦绣' },
+  { id: 'light', label: '清雅', icon: '☀️', desc: '简约清爽' },
+  { id: 'dark',  label: '墨韵', icon: '🌙', desc: '暗色墨韵' },
+  { id: 'gold',  label: '锦绣', icon: '🏮', desc: '金红锦绣' },
+  { id: 'jade',  label: '竹青', icon: '🎋', desc: '竹韵古风' },
 ];
+
+const VALID_THEMES: Theme[] = ['light', 'dark', 'gold', 'jade'];
 
 interface ThemeCtx { theme: Theme; setTheme: (t: Theme) => void; }
 
@@ -29,9 +34,10 @@ function applyTheme(t: Theme) {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     const saved = localStorage.getItem('hl-theme') as Theme | null;
-    return (saved && ['light', 'dark', 'gold'].includes(saved)) ? saved : 'light';
+    return (saved && VALID_THEMES.includes(saved)) ? saved : 'light';
   });
 
+  // Apply on mount (handles SSR/hydration; the inline HTML script handles pre-React flash)
   useEffect(() => { applyTheme(theme); }, [theme]);
 
   function setTheme(t: Theme) {

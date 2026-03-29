@@ -353,6 +353,104 @@ module.exports = function setupSocket(io) {
       }
     });
 
+    // ── free validate: validate a single pending concept (no game end) ───────
+    socket.on('concept:validate_single', async ({ conceptId }, callback) => {
+      console.log(`[Socket] concept:validate_single socketId=${socket.id} gameId=${currentGameId} conceptId=${conceptId}`);
+
+      if (!currentGameId || !currentPlayer) {
+        return callback?.({ error: '请先加入房间' });
+      }
+
+      const game = db.getGame.get(currentGameId);
+      if (!game) return callback?.({ error: '房间不存在' });
+      if (game.status === 'finished') return callback?.({ error: '游戏已结束' });
+
+      const room = getRoom(currentGameId);
+      if (room.settling) return callback?.({ error: '正在批量结算中，请稍候' });
+
+      // Find the pending concept
+      const pending = db.getPendingConcepts.all(currentGameId);
+      const row = pending.find(p => p.id === conceptId);
+      if (!row) return callback?.({ error: '未找到该概念，可能已被验证' });
+
+      // Mark this concept as "being validated" via a validating event
+      io.to(currentGameId).emit('concept:validating', {
+        playerId: row.player_id, playerName: row.player_name, rawInput: row.raw_input,
+      });
+
+      try {
+        const existing = db.getConceptsByGame.all(currentGameId)
+          .filter(c => c.validated)
+          .map(c => ({ name: c.name, period: c.period }));
+
+        const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
+        const settings = JSON.parse(game.settings || '{}');
+
+        console.log(`[Socket] concept:validate_single AI start gameId=${currentGameId} input="${row.raw_input}"`);
+        const result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+
+        const ts = new TimelineService();
+
+        if (!result.valid) {
+          db.rejectConcept.run(result.reason || '不符合主题', conceptId);
+          io.to(currentGameId).emit('concept:settled', {
+            conceptId, accepted: false,
+            reason: result.reason || '不符合主题',
+            playerName: row.player_name, rawInput: row.raw_input,
+          });
+          const rejMsg = {
+            id: require('uuid').v4(), type: 'system', game_id: currentGameId,
+            content: `「${row.raw_input}」被驳回：${result.reason || '与主题无关'}`,
+            meta: { conceptId, rejected: true }, created_at: new Date().toISOString(),
+          };
+          db.insertMessage.run(rejMsg.id, currentGameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
+          io.to(currentGameId).emit('message:new', rejMsg);
+          console.log(`[Socket] concept:validate_single REJECTED input="${row.raw_input}" reason="${result.reason}"`);
+          return callback?.({ ok: true });
+        }
+
+        const tags  = JSON.stringify(Array.isArray(result.tags) ? result.tags : []);
+        const extra = JSON.stringify({});
+        db.acceptConcept.run(
+          result.name || row.raw_input, result.period || null, result.year ?? null,
+          result.dynasty || null, result.description || null, tags, extra, conceptId
+        );
+
+        const concept = {
+          id: conceptId, game_id: currentGameId,
+          player_id: row.player_id, player_name: row.player_name,
+          raw_input: row.raw_input, name: result.name || row.raw_input,
+          period: result.period, year: result.year ?? null, dynasty: result.dynasty,
+          description: result.description, tags: Array.isArray(result.tags) ? result.tags : [],
+          extra: {}, validated: 1, rejected: 0,
+          eraLabel: ts.getEraLabel(result.year ?? null, result.dynasty), created_at: row.created_at,
+        };
+
+        io.to(currentGameId).emit('concept:settled', { conceptId, accepted: true, concept });
+
+        const confirmContent = `✓ 「${result.name}」已加入时间轴（${result.dynasty || result.period || '年代不详'}）`;
+        const confirmId = require('uuid').v4();
+        db.insertMessage.run(confirmId, currentGameId, null, null, 'system', confirmContent, JSON.stringify({ conceptId, concept: true }));
+        io.to(currentGameId).emit('message:new', {
+          id: confirmId, type: 'system', game_id: currentGameId,
+          content: confirmContent, meta: { conceptId, concept: true }, created_at: new Date().toISOString(),
+        });
+
+        console.log(`[Socket] concept:validate_single ACCEPTED name="${result.name}" year=${result.year}`);
+
+        try {
+          ingestAIConfirmedConcept(concept, currentGameId);
+        } catch (kbErr) {
+          console.warn(`[Socket] AI KB ingest failed (non-fatal): ${kbErr.message}`);
+        }
+
+        callback?.({ ok: true });
+      } catch (err) {
+        console.error(`[Socket] concept:validate_single ERROR gameId=${currentGameId} conceptId=${conceptId}:`, err);
+        callback?.({ error: err.message });
+      }
+    });
+
     // ── chat message ──────────────────────────────────────────────────────────
     socket.on('message:send', ({ content }, callback) => {
       if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });

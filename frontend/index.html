@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>历史接龙 — History Chain Game</title>
     <meta name="description" content="多人在线历史知识接龙游戏，自动生成时间轴，支持导出结果" />
+    <!-- Prevent theme flash: apply saved theme before React renders -->
+    <script>
+      (function() {
+        var saved = localStorage.getItem('hl-theme');
+        var valid = ['dark', 'gold', 'jade'];
+        if (saved && valid.includes(saved)) {
+          document.documentElement.setAttribute('data-theme', saved);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

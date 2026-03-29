@@ -226,6 +226,16 @@ export function finishGame(): Promise<{ ok?: boolean; error?: string }> {
   return new Promise(resolve => getSocket().emit('game:finish', {}, resolve));
 }
 
+/** Validate a single pending concept without ending the game (free-validation mode) */
+export function validateSingleConcept(conceptId: string): Promise<{ ok?: boolean; error?: string }> {
+  slog('info', `validateSingleConcept conceptId=${conceptId}`);
+  return new Promise(resolve => getSocket().emit('concept:validate_single', { conceptId }, (res: { ok?: boolean; error?: string }) => {
+    if (res.error) slog('error', `validateSingleConcept error: ${res.error}`);
+    else slog('info', `validateSingleConcept OK conceptId=${conceptId}`);
+    resolve(res);
+  }));
+}
+
 // ── Event listeners ───────────────────────────────────────────────────────────
 
 export type SocketEventMap = {
