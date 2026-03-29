@@ -8,7 +8,7 @@ const multer  = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { ingestDocument, deleteDocument } = require('../services/knowledgeService');
+const { ingestDocument, deleteDocument, listAIConfirmedDocs } = require('../services/knowledgeService');
 
 const router = express.Router();
 const upload = multer({
@@ -280,6 +280,34 @@ router.delete('/knowledge/:id', (req, res) => {
   deleteDocument(req.params.id);
   console.log(`[Admin] Knowledge deleted id=${req.params.id} title="${doc.title}"`);
   res.json({ message: '已删除' });
+});
+
+// ── AI-Confirmed Knowledge Base ───────────────────────────────────────────────
+
+router.get('/ai-confirmed', (_req, res) => {
+  const docs = listAIConfirmedDocs();
+  console.log(`[Admin] GET /ai-confirmed count=${docs.length}`);
+  res.json({ docs });
+});
+
+router.delete('/ai-confirmed/:id', (req, res) => {
+  const doc = db.getDoc.get(req.params.id);
+  if (!doc) return res.status(404).json({ error: '条目不存在' });
+  if (doc.source !== 'ai_confirmed') return res.status(400).json({ error: '该条目不属于 AI 确认知识库' });
+
+  deleteDocument(req.params.id);
+  console.log(`[Admin] AI-confirmed concept deleted id=${req.params.id} title="${doc.title}"`);
+  res.json({ message: '已删除' });
+});
+
+// Bulk clear all AI-confirmed entries
+router.delete('/ai-confirmed', (_req, res) => {
+  const docs = listAIConfirmedDocs();
+  for (const d of docs) {
+    try { deleteDocument(d.id); } catch { /* non-fatal */ }
+  }
+  console.log(`[Admin] AI-confirmed bulk clear count=${docs.length}`);
+  res.json({ message: `已清空 ${docs.length} 条 AI 确认知识库条目` });
 });
 
 // ── Server Logs ──────────────────────────────────────────────────────────────

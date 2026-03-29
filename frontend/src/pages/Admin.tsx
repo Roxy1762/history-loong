@@ -7,7 +7,8 @@ import {
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
   adminListGames, adminFinishGame, adminDeleteGame,
   adminGetLogs,
-  type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry,
+  adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
+  type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
 } from '../services/api';
 import type { Game } from '../types';
 
@@ -55,14 +56,15 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'logs';
+type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'logs';
 
 const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
-  { id: 'overview',   icon: '📊', label: '概览' },
-  { id: 'games',      icon: '🎮', label: '游戏管理' },
-  { id: 'ai-config',  icon: '🤖', label: 'AI 配置' },
-  { id: 'knowledge',  icon: '📚', label: '知识库' },
-  { id: 'logs',       icon: '🔍', label: '服务器日志' },
+  { id: 'overview',      icon: '📊', label: '概览' },
+  { id: 'games',         icon: '🎮', label: '游戏管理' },
+  { id: 'ai-config',     icon: '🤖', label: 'AI 配置' },
+  { id: 'knowledge',     icon: '📚', label: '知识库' },
+  { id: 'ai-confirmed',  icon: '✅', label: 'AI 确认知识库' },
+  { id: 'logs',          icon: '🔍', label: '服务器日志' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -115,18 +117,19 @@ export default function Admin() {
           >
             退出登录
           </button>
-          <p className="text-center text-xs text-slate-600 select-none">dev 0.1.1</p>
+          <p className="text-center text-xs text-slate-600 select-none">v1.1.0</p>
         </div>
       </aside>
 
       {/* Content */}
       <main className="flex-1 overflow-auto">
         <div className="max-w-5xl mx-auto p-6">
-          {tab === 'overview'  && <OverviewPanel />}
-          {tab === 'games'     && <GamesPanel />}
-          {tab === 'ai-config' && <AIConfigPanel />}
-          {tab === 'knowledge' && <KnowledgePanel />}
-          {tab === 'logs'      && <LogsPanel />}
+          {tab === 'overview'     && <OverviewPanel />}
+          {tab === 'games'        && <GamesPanel />}
+          {tab === 'ai-config'    && <AIConfigPanel />}
+          {tab === 'knowledge'    && <KnowledgePanel />}
+          {tab === 'ai-confirmed' && <AIConfirmedPanel />}
+          {tab === 'logs'         && <LogsPanel />}
         </div>
       </main>
     </div>
@@ -144,16 +147,19 @@ function OverviewPanel() {
   }, []);
 
   const STAT_CARDS = [
-    { key: 'total_games',      label: '总游戏数', icon: '🎮', color: 'bg-indigo-50 text-indigo-600' },
-    { key: 'total_concepts',   label: '有效概念', icon: '📌', color: 'bg-emerald-50 text-emerald-600' },
-    { key: 'total_docs',       label: '知识库文档', icon: '📄', color: 'bg-amber-50 text-amber-600' },
-    { key: 'total_ai_configs', label: 'AI 配置', icon: '🤖', color: 'bg-purple-50 text-purple-600' },
+    { key: 'total_games',       label: '总游戏数',     icon: '🎮', color: 'bg-indigo-50 text-indigo-600' },
+    { key: 'active_games',      label: '进行中',       icon: '▶️', color: 'bg-green-50 text-green-600' },
+    { key: 'total_concepts',    label: '有效概念',     icon: '📌', color: 'bg-emerald-50 text-emerald-600' },
+    { key: 'total_players',     label: '历史玩家',     icon: '👥', color: 'bg-sky-50 text-sky-600' },
+    { key: 'total_docs',        label: '知识库文档',   icon: '📄', color: 'bg-amber-50 text-amber-600' },
+    { key: 'total_ai_confirmed',label: 'AI 确认概念', icon: '✅', color: 'bg-teal-50 text-teal-600' },
+    { key: 'total_ai_configs',  label: 'AI 配置',      icon: '🤖', color: 'bg-purple-50 text-purple-600' },
   ];
 
   return (
     <div className="space-y-6">
       <PageHeader title="概览" subtitle="系统运行状态一览" />
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {STAT_CARDS.map(c => (
           <div key={c.key} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${c.color}`}>
@@ -735,6 +741,132 @@ function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: ()
           <button type="submit" className="btn-primary" disabled={saving}>{saving ? '添加中...' : '添加'}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// ── Panel: AI-Confirmed Knowledge Base ───────────────────────────────────────
+
+function AIConfirmedPanel() {
+  const [docs, setDocs]     = useState<AIConfirmedDoc[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg]       = useState('');
+  const [search, setSearch] = useState('');
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    adminListAIConfirmed().then(setDocs).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  async function handleDelete(id: string, title: string) {
+    if (!confirm(`确认从 AI 确认知识库中删除「${title}」？`)) return;
+    try {
+      await adminDeleteAIConfirmed(id);
+      setMsg(`已删除「${title}」`);
+      reload();
+    } catch { setMsg('删除失败'); }
+    setTimeout(() => setMsg(''), 3000);
+  }
+
+  async function handleClearAll() {
+    if (!confirm(`确认清空全部 ${docs.length} 条 AI 确认知识库条目？\n\n这不会影响游戏数据，只清除自动索引的概念内容。`)) return;
+    try {
+      const res = await adminClearAIConfirmed();
+      setMsg(res.message);
+      reload();
+    } catch { setMsg('清空失败'); }
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  const filtered = docs.filter(d =>
+    !search || d.title.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="AI 确认知识库"
+        subtitle="游戏中 AI 验证通过的历史概念自动入库，供后续验证参考"
+        action={
+          docs.length > 0 ? (
+            <button onClick={handleClearAll} className="btn-danger text-sm">
+              🗑 清空全部
+            </button>
+          ) : undefined
+        }
+      />
+
+      {msg && (
+        <div className={`text-sm px-4 py-2.5 rounded-xl border ${
+          msg.includes('失败') ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'
+        }`}>{msg}</div>
+      )}
+
+      <InfoBox>
+        <strong>工作原理：</strong>每当玩家提交的历史概念被 AI 验证通过，系统自动将该概念（名称、朝代、年份、简介、标签）写入此知识库，下次验证相似概念时将作为参考资料提供给 AI，持续提升准确度。
+      </InfoBox>
+
+      {/* Search */}
+      {docs.length > 0 && (
+        <input
+          className="input max-w-xs"
+          placeholder="搜索概念名称..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      )}
+
+      {loading && <p className="text-sm text-slate-400">加载中...</p>}
+
+      {!loading && docs.length === 0 ? (
+        <EmptyState
+          icon="✅"
+          title="AI 确认知识库为空"
+          desc="当玩家在游戏中成功提交并通过 AI 验证的历史概念后，将自动出现在这里"
+        />
+      ) : (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+            <h3 className="font-semibold text-slate-800">
+              概念列表
+              <span className="text-slate-400 font-normal text-sm ml-1.5">
+                ({filtered.length}{search ? ` / ${docs.length}` : ''})
+              </span>
+            </h3>
+            <button onClick={reload} disabled={loading} className="btn-secondary text-xs py-1.5">
+              {loading ? '加载中...' : '刷新'}
+            </button>
+          </div>
+          <div className="divide-y divide-slate-50 max-h-[60vh] overflow-y-auto">
+            {filtered.map(doc => (
+              <div key={doc.id} className="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-colors">
+                <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center text-lg flex-shrink-0">
+                  ✅
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-slate-800 truncate">{doc.title}</div>
+                  <div className="text-xs text-slate-400 mt-0.5 flex gap-2">
+                    {doc.game_id && (
+                      <span>房间 <code className="font-mono text-indigo-500">{doc.game_id}</code></span>
+                    )}
+                    <span>{doc.created_at.slice(0, 16).replace('T', ' ')}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDelete(doc.id, doc.title)}
+                  className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1 flex-shrink-0"
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+            {filtered.length === 0 && search && (
+              <div className="p-8 text-center text-slate-400 text-sm">没有匹配「{search}」的概念</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,29 @@ if (typeof window !== 'undefined') {
 
 let socket: Socket | null = null;
 
+// ── Connection health state ───────────────────────────────────────────────────
+// Track reconnect attempt count so UI can show progressive feedback
+let _reconnectAttempts = 0;
+const _connListeners: Array<(state: ConnectionState) => void> = [];
+
+export type ConnectionState =
+  | { status: 'connected'; transport: string }
+  | { status: 'disconnected'; reason: string }
+  | { status: 'reconnecting'; attempt: number }
+  | { status: 'failed' };
+
+function notifyConnListeners(state: ConnectionState) {
+  _connListeners.forEach(fn => { try { fn(state); } catch { /* ignore */ } });
+}
+
+export function onConnectionState(fn: (s: ConnectionState) => void): () => void {
+  _connListeners.push(fn);
+  return () => {
+    const i = _connListeners.indexOf(fn);
+    if (i !== -1) _connListeners.splice(i, 1);
+  };
+}
+
 function getTransport() {
   return (socket as unknown as { conn?: { transport?: { name?: string } } })?.conn?.transport?.name ?? 'unknown';
 }
@@ -45,30 +68,39 @@ function getSocket(): Socket {
       // This avoids "websocket error" causing immediate failure before polling fallback.
       transports: ['polling', 'websocket'],
       reconnection: true,
-      reconnectionAttempts: 20,
+      reconnectionAttempts: 30,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 8000,
+      reconnectionDelayMax: 10000,
+      randomizationFactor: 0.4,
       // Connection handshake timeout (ms)
       timeout: 20000,
     });
 
     socket.on('connect', () => {
+      _reconnectAttempts = 0;
       slog('info', `Connected  id=${socket?.id}  transport=${getTransport()}`);
+      notifyConnListeners({ status: 'connected', transport: getTransport() });
     });
     socket.on('disconnect', (reason) => {
       slog('warn', `Disconnected  reason=${reason}  transport=${getTransport()}`);
+      notifyConnListeners({ status: 'disconnected', reason });
     });
     socket.on('connect_error', (err) => {
       slog('error', `connect_error  msg="${err.message}"  transport=${getTransport()}`);
     });
     socket.on('reconnect_attempt', (attempt) => {
+      _reconnectAttempts = attempt;
       slog('info', `Reconnect attempt #${attempt}  transport=${getTransport()}`);
+      notifyConnListeners({ status: 'reconnecting', attempt });
     });
     socket.on('reconnect', (attempt) => {
+      _reconnectAttempts = 0;
       slog('info', `Reconnected after ${attempt} attempts  transport=${getTransport()}`);
+      notifyConnListeners({ status: 'connected', transport: getTransport() });
     });
     socket.on('reconnect_failed', () => {
       slog('error', 'Reconnection failed after all attempts');
+      notifyConnListeners({ status: 'failed' });
     });
 
     // Log when transport upgrades from polling → websocket
@@ -81,6 +113,8 @@ function getSocket(): Socket {
   }
   return socket;
 }
+
+export function getReconnectAttempts() { return _reconnectAttempts; }
 
 /**
  * Wait for socket to be connected, resolving immediately if already connected.
@@ -128,6 +162,7 @@ export function disconnectSocket() {
   slog('info', 'disconnectSocket called');
   socket?.disconnect();
   socket = null;
+  _reconnectAttempts = 0;
 }
 
 // ── Game actions ──────────────────────────────────────────────────────────────

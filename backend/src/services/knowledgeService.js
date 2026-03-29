@@ -96,6 +96,51 @@ function getContextForConcept(concept, topic) {
   return combined ? combined.slice(0, 800) : ''; // cap at 800 chars
 }
 
+// ── AI-Confirmed Knowledge Base ───────────────────────────────────────────────
+
+/**
+ * Automatically ingest an AI-validated concept into the knowledge base.
+ * Each confirmed concept becomes a small searchable document.
+ *
+ * @param {object} concept  The validated concept object
+ * @param {string} gameId   The game room ID (for traceability)
+ */
+function ingestAIConfirmedConcept(concept, gameId) {
+  if (!concept || !concept.name) return;
+
+  // Build a compact but rich text from the concept fields
+  const lines = [
+    `【历史概念】${concept.name}`,
+    concept.dynasty ? `朝代/时期：${concept.dynasty}` : '',
+    concept.period  ? `历史分期：${concept.period}`  : '',
+    concept.year != null ? `年份：${concept.year < 0 ? `公元前 ${Math.abs(concept.year)}` : `公元 ${concept.year}`} 年` : '',
+    concept.description ? `简介：${concept.description}` : '',
+    Array.isArray(concept.tags) && concept.tags.length ? `标签：${concept.tags.join('、')}` : '',
+  ].filter(Boolean);
+
+  const content  = lines.join('\n');
+  const docId    = uuidv4();
+  const title    = concept.name;
+  const filename = `ai_confirmed_${concept.id || docId}.txt`;
+
+  const insertAll = db.db.transaction(() => {
+    db.insertDocFull.run(docId, title, filename, 1, 'ai_confirmed', gameId || null);
+    const chunkId = uuidv4();
+    db.insertChunk.run(chunkId, docId, 0, content);
+    db.insertFTS.run(content, chunkId);
+  });
+
+  insertAll();
+  return docId;
+}
+
+/**
+ * List AI-confirmed knowledge base entries.
+ */
+function listAIConfirmedDocs() {
+  return db.listAIConfirmedDocs.all();
+}
+
 // ── List ──────────────────────────────────────────────────────────────────────
 
 function listDocuments() {
@@ -130,4 +175,4 @@ function splitIntoChunks(text, maxChars) {
   return chunks;
 }
 
-module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments };
+module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs };

@@ -2,13 +2,15 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import {
-  joinGame, onSocket, disconnectSocket,
+  joinGame, onSocket, onConnectionState, disconnectSocket,
   requestHints, finishGame, settleConcepts,
+  type ConnectionState,
 } from '../services/socket';
 import Timeline from '../components/Timeline';
 import Chat from '../components/Chat';
 import PlayerList from '../components/PlayerList';
 import ExportPanel from '../components/ExportPanel';
+import ThemeSwitcher from '../components/ThemeSwitcher';
 import type { Concept } from '../types';
 
 // ── Name dialog ───────────────────────────────────────────────────────────────
@@ -117,6 +119,7 @@ export default function Game() {
   const [hintLoading, setHintLoading] = useState(false);
   const [settling,    setSettling]    = useState(false);
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
+  const [connState,   setConnState]   = useState<ConnectionState | null>(null);
 
   // Track latest values in refs so socket handlers always have fresh values
   // This avoids the stale closure bug where useEffect depended on [game]
@@ -240,6 +243,11 @@ export default function Game() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Empty deps: listeners registered once, use refs for fresh values
 
+  useEffect(() => {
+    const off = onConnectionState(setConnState);
+    return () => off();
+  }, []);
+
   useEffect(() => { return () => { disconnectSocket(); reset(); }; }, []);
 
   // ── Join ────────────────────────────────────────────────────────────────────
@@ -320,6 +328,22 @@ export default function Game() {
       )}
 
       <div className="min-h-screen flex flex-col bg-slate-50">
+        {/* ── Connection status banner ── */}
+        {connState && connState.status === 'reconnecting' && (
+          <div className="bg-amber-500 text-white text-xs px-4 py-1.5 flex items-center gap-2 justify-center z-20">
+            <span className="w-2 h-2 rounded-full bg-white/70 animate-pulse flex-shrink-0" />
+            正在重新连接服务器…（第 {connState.attempt} 次尝试）请稍候
+          </div>
+        )}
+        {connState && connState.status === 'failed' && (
+          <div className="bg-red-600 text-white text-xs px-4 py-1.5 flex items-center gap-2 justify-center z-20">
+            <span className="text-white">⚠️</span>
+            连接失败，请
+            <button className="underline font-semibold" onClick={() => window.location.reload()}>刷新页面</button>
+            重试
+          </div>
+        )}
+
         {/* ── Header ── */}
         <header className="bg-white border-b border-slate-100 shadow-sm z-10">
           <div className="flex items-center gap-3 px-4 py-3">
@@ -349,8 +373,16 @@ export default function Game() {
               </div>
               <div className="flex items-center gap-3 mt-0.5">
                 <div className="flex items-center gap-1.5">
-                  <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-slate-300'}`} />
-                  <span className="text-xs text-slate-400">{connected ? `${players.length} 人在线` : '连接中...'}</span>
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                    connected ? 'bg-emerald-400' :
+                    connState?.status === 'reconnecting' ? 'bg-amber-400 animate-pulse' :
+                    connState?.status === 'failed' ? 'bg-red-500' : 'bg-slate-300 animate-pulse'
+                  }`} />
+                  <span className="text-xs text-slate-400">
+                    {connected ? `${players.length} 人在线` :
+                     connState?.status === 'reconnecting' ? `重连中 #${connState.attempt}` :
+                     connState?.status === 'failed' ? '连接失败' : '连接中...'}
+                  </span>
                 </div>
                 {timeline.length > 0 && (
                   <span className="text-xs text-slate-400">
@@ -372,6 +404,7 @@ export default function Game() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 flex-shrink-0">
+              <ThemeSwitcher />
               <button onClick={handleHint} disabled={hintLoading}
                 className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
                 {hintLoading ? '...' : '💡'}
