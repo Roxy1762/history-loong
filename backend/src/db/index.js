@@ -106,6 +106,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chunks_doc    ON knowledge_chunks(doc_id);
 `);
 
+// ── Migrations ────────────────────────────────────────────────────────────────
+
+// v1.1.0: add source column to knowledge_docs (manual | ai_confirmed)
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`);
+} catch { /* column already exists */ }
+
+// v1.1.0: add game_id column to knowledge_docs for tracing AI-confirmed origin
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN game_id TEXT`);
+} catch { /* column already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -163,9 +175,12 @@ module.exports = {
   deleteAIConfig:  stmt(`DELETE FROM ai_configs WHERE id = ?`),
 
   // Knowledge docs
-  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at FROM knowledge_docs ORDER BY created_at DESC`),
+  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at, source FROM knowledge_docs WHERE source = 'manual' ORDER BY created_at DESC`),
+  listAllDocs:    stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id FROM knowledge_docs ORDER BY created_at DESC`),
+  listAIConfirmedDocs: stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id FROM knowledge_docs WHERE source = 'ai_confirmed' ORDER BY created_at DESC`),
   getDoc:         stmt(`SELECT * FROM knowledge_docs WHERE id = ?`),
   insertDoc:      stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks) VALUES (?, ?, ?, ?)`),
+  insertDocFull:  stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id) VALUES (?, ?, ?, ?, ?, ?)`),
   deleteDoc:      stmt(`DELETE FROM knowledge_docs WHERE id = ?`),
 
   // Knowledge chunks
@@ -180,8 +195,11 @@ module.exports = {
   stats: stmt(`
     SELECT
       (SELECT COUNT(*) FROM games) as total_games,
+      (SELECT COUNT(*) FROM games WHERE status = 'playing') as active_games,
       (SELECT COUNT(*) FROM concepts WHERE validated = 1) as total_concepts,
-      (SELECT COUNT(*) FROM knowledge_docs) as total_docs,
-      (SELECT COUNT(*) FROM ai_configs) as total_ai_configs
+      (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'manual') as total_docs,
+      (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'ai_confirmed') as total_ai_confirmed,
+      (SELECT COUNT(*) FROM ai_configs) as total_ai_configs,
+      (SELECT COUNT(DISTINCT id) FROM players) as total_players
   `),
 };

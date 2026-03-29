@@ -9,7 +9,7 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { getContextForConcept, searchContext } = require('../services/knowledgeService');
+const { getContextForConcept, searchContext, ingestAIConfirmedConcept } = require('../services/knowledgeService');
 const { TimelineService } = require('../services/timelineService');
 const { pluginEvents } = require('../plugins');
 
@@ -248,6 +248,14 @@ module.exports = function setupSocket(io) {
         callback?.({ ok: true, concept });
         pluginEvents.emit('concept:accepted', { game, concept, player: currentPlayer });
 
+        // Auto-ingest into AI-confirmed knowledge base for future validations
+        try {
+          ingestAIConfirmedConcept({ ...concept, id: conceptId }, currentGameId);
+          console.log(`[Socket] AI-confirmed concept ingested name="${result.name}" gameId=${currentGameId}`);
+        } catch (kbErr) {
+          console.warn(`[Socket] AI KB ingest failed (non-fatal): ${kbErr.message}`);
+        }
+
       } catch (err) {
         console.error(`[Socket] concept:submit ERROR gameId=${currentGameId} input="${input}":`, err);
         sysMessage(io, currentGameId, `验证出错：${err.message}`);
@@ -315,6 +323,8 @@ module.exports = function setupSocket(io) {
             };
             io.to(currentGameId).emit('concept:settled', { conceptId: r.id, accepted: true, concept });
             accepted++;
+            // Auto-ingest into AI-confirmed knowledge base
+            try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
           } else {
             db.rejectConcept.run(r.reason || '不符合主题', r.id);
             io.to(currentGameId).emit('concept:settled', {

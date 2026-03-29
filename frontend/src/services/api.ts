@@ -200,6 +200,33 @@ export async function adminDeleteGame(id: string) {
   return data;
 }
 
+// ── Admin: AI-Confirmed Knowledge Base ───────────────────────────────────────
+
+export interface AIConfirmedDoc {
+  id: string;
+  title: string;
+  filename: string;
+  total_chunks: number;
+  created_at: string;
+  source: 'ai_confirmed';
+  game_id: string | null;
+}
+
+export async function adminListAIConfirmed() {
+  const { data } = await api.get<{ docs: AIConfirmedDoc[] }>('/admin/ai-confirmed', { headers: adminHeaders() });
+  return data.docs;
+}
+
+export async function adminDeleteAIConfirmed(id: string) {
+  const { data } = await api.delete(`/admin/ai-confirmed/${id}`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminClearAIConfirmed() {
+  const { data } = await api.delete('/admin/ai-confirmed', { headers: adminHeaders() });
+  return data as { message: string };
+}
+
 // ── Admin: Server Logs ───────────────────────────────────────────────────────
 
 export interface LogEntry {
