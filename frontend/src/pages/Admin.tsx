@@ -545,7 +545,7 @@ function AIConfigPanel() {
     <div className="space-y-5">
       <PageHeader
         title="AI 配置"
-        subtitle="管理 AI 接口，支持 Anthropic Claude 及任意 OpenAI 兼容接口"
+        subtitle="管理 AI 接口，支持 Anthropic Claude、OpenAI 兼容接口、Google Gemini 及智谱 GLM"
         action={<button className="btn-primary text-sm" onClick={() => { setEditing(null); setShowForm(true); }}>+ 添加配置</button>}
       />
 
@@ -570,8 +570,8 @@ function AIConfigPanel() {
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                    ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : 'bg-indigo-50'}`}>
-                    {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : '🔷'}
+                    ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : cfg.provider_type === 'glm' ? 'bg-cyan-50' : 'bg-indigo-50'}`}>
+                    {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : cfg.provider_type === 'glm' ? '💙' : '🔷'}
                   </div>
                   <div>
                     <div className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
@@ -584,7 +584,7 @@ function AIConfigPanel() {
                       )}
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
-                      {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.base_url}
+                      {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.provider_type === 'glm' ? '智谱AI (BigModel)' : cfg.base_url}
                       <span className="ml-2 font-mono">{cfg.model}</span>
                     </div>
                   </div>
@@ -629,6 +629,7 @@ function AIConfigPanel() {
           <li><strong>Anthropic</strong> — 填入 API Key，选择 claude-* 模型</li>
           <li><strong>OpenAI Compatible</strong> — 填入 Base URL + API Key，支持 OpenAI、DeepSeek、Qwen、月之暗面、本地 Ollama 等所有兼容接口</li>
           <li><strong>Google AI Studio</strong> — 填入 Google AI Studio API Key，模型填 <code>gemini-2.0-flash</code></li>
+          <li><strong>智谱AI (GLM)</strong> — 填入 BigModel API Key，模型默认 <code>glm-4-flash</code>（可选自定义 Base URL）</li>
           <li>可为每个配置设置<strong>自定义提示词</strong>，调整验证风格和严格程度</li>
         </ul>
       </InfoBox>
@@ -661,6 +662,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     { label: 'Qwen',      base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
     { label: 'Moonshot',  base_url: 'https://api.moonshot.cn/v1',        model: 'moonshot-v1-8k' },
     { label: 'Ollama',    base_url: 'http://localhost:11434/v1',          model: 'llama3' },
+    { label: 'GLM',       base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
   ];
 
   async function submit(e: React.FormEvent) {
@@ -685,7 +687,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     }
   }
 
-  const needsBaseUrl = form.provider_type === 'openai-compatible';
+  const needsBaseUrl = form.provider_type === 'openai-compatible' || form.provider_type === 'glm';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
@@ -700,6 +702,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               <option value="openai-compatible">OpenAI Compatible（通用）</option>
               <option value="anthropic">Anthropic Claude（原生）</option>
               <option value="google">Google AI Studio（Gemini）</option>
+              <option value="glm">智谱AI（BigModel）</option>
             </select>
           </FormField>
         </div>
@@ -723,6 +726,12 @@ function AIConfigForm({ initial, onClose, onSaved }: {
         {form.provider_type === 'google' && (
           <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
             💡 Google AI Studio：在 <strong>API Key</strong> 填入 Google AI Studio 的 API Key，<strong>模型</strong> 填写 <code>gemini-2.0-flash</code> 或 <code>gemini-1.5-pro</code>
+          </div>
+        )}
+
+        {form.provider_type === 'glm' && (
+          <div className="text-xs text-slate-500 bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2">
+            💡 智谱AI (GLM)：在 <strong>API Key</strong> 填入 BigModel 的 API Key，<strong>模型</strong> 默认填 <code>glm-4-flash</code>，<strong>Base URL</strong> 可自定义或使用默认值 <code>https://open.bigmodel.cn/api/paas/v4</code>
           </div>
         )}
 
