@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import type { Concept } from '../types';
 
 interface Props {
@@ -53,7 +53,7 @@ function formatYear(year: number | null): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function Timeline({
+const Timeline = memo(function Timeline({
   timeline,
   pendingConcepts = [],
   newestId,
@@ -179,7 +179,9 @@ export default function Timeline({
       })}
     </div>
   );
-}
+});
+
+export default Timeline;
 
 // ── ConceptCard ────────────────────────────────────────────────────────────────
 

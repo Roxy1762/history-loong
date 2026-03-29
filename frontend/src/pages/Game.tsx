@@ -68,14 +68,32 @@ function SettleOverlay() {
 
 // ── Settle result toast ───────────────────────────────────────────────────────
 
-function SettleResult({ result, onClose }: { result: { accepted: number; rejected: number } | null; onClose: () => void }) {
+function SettleResult({
+  result,
+  onClose,
+  onEndGame,
+}: {
+  result: { accepted: number; rejected: number; endGame?: boolean } | null;
+  onClose: () => void;
+  onEndGame: () => void;
+}) {
   if (!result) return null;
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-7 text-center animate-slide-up">
+      <div
+        className="rounded-3xl shadow-2xl w-full max-w-xs p-7 text-center animate-slide-up"
+        style={{ background: 'var(--bg-card)' }}
+      >
         <div className="text-5xl mb-4">🎉</div>
-        <h3 className="text-xl font-bold text-slate-800 mb-4">结算完成！</h3>
-        <div className="grid grid-cols-2 gap-3 mb-6">
+        <h3 className="text-xl font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
+          结算完成！
+        </h3>
+        {!result.endGame && (
+          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
+            游戏仍在进行，可继续提交
+          </p>
+        )}
+        <div className="grid grid-cols-2 gap-3 mb-6 mt-4">
           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
             <div className="text-3xl font-black text-emerald-600">{result.accepted}</div>
             <div className="text-xs text-emerald-600 mt-1">✅ 通过</div>
@@ -85,7 +103,17 @@ function SettleResult({ result, onClose }: { result: { accepted: number; rejecte
             <div className="text-xs text-red-500 mt-1">❌ 淘汰</div>
           </div>
         </div>
-        <button className="btn-primary w-full py-3" onClick={onClose}>查看时间轴</button>
+        <button className="btn-primary w-full py-3 mb-2" onClick={onClose}>
+          查看时间轴
+        </button>
+        {!result.endGame && (
+          <button
+            className="btn-danger w-full py-2 text-sm"
+            onClick={onEndGame}
+          >
+            ⏹ 结束游戏
+          </button>
+        )}
       </div>
     </div>
   );
@@ -118,7 +146,7 @@ export default function Game() {
   const [connError,   setConnError]   = useState('');
   const [hintLoading, setHintLoading] = useState(false);
   const [settling,    setSettling]    = useState(false);
-  const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number } | null>(null);
+  const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number; endGame?: boolean } | null>(null);
   const [connState,   setConnState]   = useState<ConnectionState | null>(null);
   const [validatingConceptIds, setValidatingConceptIds] = useState<Set<string>>(new Set());
 
@@ -222,10 +250,10 @@ export default function Game() {
         }
       }),
       onSocket('game:settle:done', e => {
-        console.log(`[Game] game:settle:done accepted=${e.accepted} rejected=${e.rejected}`);
+        console.log(`[Game] game:settle:done accepted=${e.accepted} rejected=${e.rejected} endGame=${e.endGame}`);
         resetSettle();
         setSettling(false);
-        setSettleResult(e);
+        setSettleResult({ accepted: e.accepted, rejected: e.rejected, endGame: e.endGame });
       }),
 
       onSocket('players:update', ({ players: p }) => {
@@ -242,6 +270,11 @@ export default function Game() {
         console.log('[Game] game:deleted — redirecting to home');
         alert('管理员已删除该房间');
         window.location.href = '/';
+      }),
+      onSocket('game:restored', () => {
+        console.log('[Game] game:restored');
+        const currentGame = gameRef.current;
+        if (currentGame) setGame({ ...currentGame, status: 'playing' });
       }),
     ];
     return () => {
@@ -278,12 +311,15 @@ export default function Game() {
   }, [gameId]);
 
   // ── Settle ──────────────────────────────────────────────────────────────────
-  async function handleSettle() {
+  async function handleSettle(endGame = false) {
     if (settling) return;
-    if (!confirm(`确认开始结算？将对 ${pendingConcepts.length} 个概念进行 AI 批量验证，结算后游戏结束。`)) return;
+    const confirmMsg = endGame
+      ? `确认结算并结束游戏？将对 ${pendingConcepts.length} 个概念进行 AI 批量验证。`
+      : `确认开始批量结算？将对 ${pendingConcepts.length} 个概念进行 AI 验证，结算后可继续游戏。`;
+    if (!confirm(confirmMsg)) return;
     setSettling(true);
-    console.log('[Game] handleSettle start');
-    const res = await settleConcepts();
+    console.log(`[Game] handleSettle start endGame=${endGame}`);
+    const res = await settleConcepts(endGame);
     if (res.error) {
       console.error(`[Game] handleSettle FAILED: ${res.error}`);
       alert(res.error);
@@ -349,6 +385,7 @@ export default function Game() {
         <SettleResult
           result={settleResult}
           onClose={() => { setSettleResult(null); setActiveTab('timeline'); }}
+          onEndGame={async () => { setSettleResult(null); await handleFinish(); }}
         />
       )}
 
@@ -435,12 +472,21 @@ export default function Game() {
                 {hintLoading ? '...' : '💡'}
               </button>
 
-              {/* Deferred: settle button */}
+              {/* Deferred: settle buttons */}
               {isDeferred && !gameFinished && pendingConcepts.length > 0 && (
-                <button onClick={handleSettle} disabled={settling}
-                  className="btn-primary text-xs py-1.5 px-3 bg-amber-500 hover:bg-amber-600 shadow-amber-200">
-                  {settling ? '结算中...' : `⚖️ 结算 (${pendingConcepts.length})`}
-                </button>
+                <div className="flex gap-1">
+                  <button onClick={() => handleSettle(false)} disabled={settling}
+                    className="text-xs py-1.5 px-2.5 rounded-lg font-medium transition-colors"
+                    style={{ background: 'var(--brand-light)', color: 'var(--brand)' }}
+                    title="批量验证，不结束游戏">
+                    {settling ? '验证中...' : `⚖️ 验证 (${pendingConcepts.length})`}
+                  </button>
+                  <button onClick={() => handleSettle(true)} disabled={settling}
+                    className="btn-danger text-xs py-1.5 px-2.5"
+                    title="验证并结束游戏">
+                    结束
+                  </button>
+                </div>
               )}
 
               {/* Realtime: finish button */}

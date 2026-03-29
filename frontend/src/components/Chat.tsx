@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import type { Message, Player } from '../types';
 import { sendMessage, submitConcept } from '../services/socket';
 import { useGameStore } from '../store/gameStore';
@@ -9,7 +9,7 @@ interface Props {
   gameFinished: boolean;
 }
 
-export default function Chat({ messages, me, gameFinished }: Props) {
+const Chat = memo(function Chat({ messages, me, gameFinished }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<'concept' | 'chat'>('concept');
@@ -115,7 +115,9 @@ export default function Chat({ messages, me, gameFinished }: Props) {
       )}
     </div>
   );
-}
+});
+
+export default Chat;
 
 // ── MessageRow ────────────────────────────────────────────────────────────────
 

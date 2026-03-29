@@ -45,6 +45,12 @@ export async function getGameModes() {
   return data.modes;
 }
 
+/** Import a previously exported JSON file to create a new restored game. */
+export async function importGame(jsonData: unknown): Promise<{ game: Game; importedConcepts: number; importedMessages: number }> {
+  const { data } = await api.post('/games/import', jsonData);
+  return data as { game: Game; importedConcepts: number; importedMessages: number };
+}
+
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export async function exportGame(gameId: string, format: ExportFormat) {
@@ -198,6 +204,21 @@ export async function adminFinishGame(id: string) {
 export async function adminDeleteGame(id: string) {
   const { data } = await api.delete(`/admin/games/${id}`, { headers: adminHeaders() });
   return data;
+}
+
+export async function adminUpdateGameNotes(id: string, notes: string) {
+  const { data } = await api.put(`/admin/games/${id}/notes`, { notes }, { headers: adminHeaders() });
+  return data as { message: string };
+}
+
+export async function adminUpdateGameSettings(id: string, settings: Record<string, unknown>) {
+  const { data } = await api.put(`/admin/games/${id}/settings`, { settings }, { headers: adminHeaders() });
+  return data as { message: string; settings: Record<string, unknown> };
+}
+
+export async function adminRestoreGame(id: string) {
+  const { data } = await api.post(`/admin/games/${id}/restore`, {}, { headers: adminHeaders() });
+  return data as { message: string };
 }
 
 // ── Admin: AI-Confirmed Knowledge Base ───────────────────────────────────────

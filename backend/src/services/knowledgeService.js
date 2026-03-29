@@ -141,6 +141,108 @@ function listAIConfirmedDocs() {
   return db.listAIConfirmedDocs.all();
 }
 
+// ── Local validation (KB-first, no AI needed) ─────────────────────────────────
+
+/**
+ * Attempt to validate a concept purely from the local knowledge base.
+ * Returns { confident, result } where:
+ *   confident=true  → KB has a strong match; result has the full validated data
+ *   confident=false → KB match is absent or ambiguous; caller should fall back to AI
+ *
+ * A "strong match" means an AI-confirmed entry whose title matches the concept
+ * name exactly (case-insensitive), giving us year/dynasty/description without AI.
+ */
+function validateFromKnowledge(rawInput, topic) {
+  if (!rawInput) return { confident: false };
+
+  const normalized = rawInput.trim().toLowerCase();
+
+  try {
+    // 1. Look for an exact-title match in ai_confirmed docs
+    const exactDoc = db.db.prepare(
+      `SELECT kd.title, kc.content
+         FROM knowledge_docs kd
+         JOIN knowledge_chunks kc ON kc.doc_id = kd.id
+        WHERE kd.source = 'ai_confirmed'
+          AND LOWER(kd.title) = ?
+        LIMIT 1`
+    ).get(normalized);
+
+    if (exactDoc) {
+      const result = parseKBContent(exactDoc.content, exactDoc.title);
+      if (result) {
+        return { confident: true, result: { ...result, valid: true } };
+      }
+    }
+
+    // 2. FTS search — only accept if score is very high (single result, title starts with query)
+    const safeQuery = normalized.replace(/['"*()]/g, ' ').trim();
+    if (!safeQuery) return { confident: false };
+
+    const rows = db.searchFTS.all(safeQuery, 3);
+    if (rows.length === 1) {
+      // Only one hit — check if it belongs to an ai_confirmed doc with matching title
+      const chunk = db.getChunkById.get(rows[0].chunk_id);
+      if (chunk) {
+        const docRow = db.db.prepare(
+          `SELECT * FROM knowledge_docs WHERE id = ? AND source = 'ai_confirmed'`
+        ).get(chunk.doc_id);
+        if (docRow && docRow.title.toLowerCase().startsWith(normalized)) {
+          const result = parseKBContent(chunk.content, docRow.title);
+          if (result) return { confident: true, result: { ...result, valid: true } };
+        }
+      }
+    }
+  } catch {
+    // KB lookup errors are non-fatal
+  }
+
+  return { confident: false };
+}
+
+/**
+ * Parse the compact text format stored by ingestAIConfirmedConcept back into
+ * a structured result object.
+ */
+function parseKBContent(content, title) {
+  try {
+    const lines = content.split('\n');
+    const get = (prefix) => {
+      const line = lines.find(l => l.startsWith(prefix));
+      return line ? line.slice(prefix.length).trim() : null;
+    };
+
+    const dynasty    = get('朝代/时期：');
+    const period     = get('历史分期：');
+    const yearStr    = get('年份：');
+    const description = get('简介：');
+    const tagsStr    = get('标签：');
+
+    let year = null;
+    if (yearStr) {
+      // Format: "公元前 221 年" or "公元 618 年"
+      const bcMatch  = yearStr.match(/公元前\s*(\d+)/);
+      const adMatch  = yearStr.match(/公元\s*(\d+)/);
+      if (bcMatch)  year = -parseInt(bcMatch[1]);
+      else if (adMatch) year = parseInt(adMatch[1]);
+    }
+
+    const tags = tagsStr ? tagsStr.split('、').filter(Boolean) : [];
+
+    return {
+      name: title,
+      dynasty: dynasty || null,
+      period: period || null,
+      year,
+      description: description || null,
+      tags,
+      source: 'kb',
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── List ──────────────────────────────────────────────────────────────────────
 
 function listDocuments() {
@@ -175,4 +277,4 @@ function splitIntoChunks(text, maxChars) {
   return chunks;
 }
 
-module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs };
+module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs, validateFromKnowledge };
