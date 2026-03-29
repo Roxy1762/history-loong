@@ -5,10 +5,11 @@
  *   'anthropic'        — Anthropic Claude (native SDK)
  *   'openai-compatible' — Any OpenAI-compatible API (OpenAI, DeepSeek, Qwen, Ollama, etc.)
  *   'google'           — Google AI Studio / Gemini
+ *   'glm'              — 智谱AI (BigModel) API
  *
  * Resolution order for active config:
  *   1. Active row in ai_configs table
- *   2. Environment variables (ANTHROPIC_API_KEY / OPENAI_BASE_URL / GOOGLE_AI_KEY)
+ *   2. Environment variables (ANTHROPIC_API_KEY / OPENAI_BASE_URL / GOOGLE_AI_KEY / GLM_API_KEY)
  *
  * Token optimisation:
  *   • Validation prompt trimmed to ~120 tokens input, 150 tokens output
@@ -39,6 +40,7 @@ async function callAnthropic(config, prompt, maxTokens) {
 
 async function callOpenAICompatible(config, prompt, maxTokens) {
   const base = (config.base_url || '').replace(/\/$/, '');
+  if (!base) throw new Error('OpenAI-compatible 配置缺少 base_url');
   const url = `${base}/chat/completions`;
 
   const messages = [];
@@ -51,22 +53,30 @@ async function callOpenAICompatible(config, prompt, maxTokens) {
   const timer = setTimeout(() => controller.abort(), 30000);
 
   try {
+    const requestBody = {
+      model: config.model,
+      messages,
+      temperature: 0.2,
+    };
+    // Use max_tokens as the standard parameter; some providers may require it
+    if (maxTokens) {
+      requestBody.max_tokens = maxTokens;
+    }
+
     const resp = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${config.api_key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: maxTokens,
-        messages,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
-      throw new Error(`API ${resp.status}: ${body.slice(0, 200)}`);
+      const errMsg = `API ${resp.status}: ${body.slice(0, 300)}`;
+      console.error(`[AI] OpenAI-compatible error at ${url}: ${errMsg}`);
+      throw new Error(errMsg);
     }
     const data = await resp.json();
     const content = data?.choices?.[0]?.message?.content;
@@ -137,12 +147,62 @@ async function callGoogle(config, prompt, maxTokens) {
   }
 }
 
+async function callGLM(config, prompt, maxTokens) {
+  // GLM (智谱AI) — OpenAI-compatible endpoint at https://open.bigmodel.cn/api/paas/v4
+  const base = (config.base_url || 'https://open.bigmodel.cn/api/paas/v4').replace(/\/$/, '');
+  const url = `${base}/chat/completions`;
+
+  const messages = [];
+  if (config.system_prompt) {
+    messages.push({ role: 'system', content: config.system_prompt });
+  }
+  messages.push({ role: 'user', content: prompt });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.api_key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.model,
+        messages,
+        max_tokens: maxTokens,
+        temperature: 0.2,
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      const errorMsg = `GLM API ${resp.status}: ${body.slice(0, 200)}`;
+      console.error(`[AI] ${errorMsg}`);
+      throw new Error(errorMsg);
+    }
+    const data = await resp.json();
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new Error('GLM returned empty response');
+    return content.trim();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('GLM 请求超时（30秒），请检查网络连接或 API 地址是否正确');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Provider registry (extension point) ──────────────────────────────────────
 
 const PROVIDER_HANDLERS = {
   anthropic: callAnthropic,
   'openai-compatible': callOpenAICompatible,
   google: callGoogle,
+  glm: callGLM,
 };
 
 /** Register a custom provider handler (for plugins) */
@@ -189,6 +249,17 @@ function resolveConfigs() {
       provider_type: 'google',
       api_key: process.env.GOOGLE_AI_KEY,
       model: process.env.GOOGLE_AI_MODEL || 'gemini-2.0-flash',
+      is_active: configs.length === 0 ? 1 : 0,
+      extra: {},
+    });
+  }
+  if (process.env.GLM_API_KEY) {
+    configs.push({
+      id: 'env_glm',
+      provider_type: 'glm',
+      base_url: process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
+      api_key: process.env.GLM_API_KEY,
+      model: process.env.GLM_MODEL || 'glm-4-flash',
       is_active: configs.length === 0 ? 1 : 0,
       extra: {},
     });
