@@ -19,7 +19,12 @@ import {
   adminUpdateGameNotes, adminUpdateGameSettings, adminRestoreGame,
   adminGetLogs,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
+  adminGetCurationPending, adminGetCurationActive,
+  adminApproveConcept, adminApproveAll, adminArchiveConcept, adminRejectConcept,
+  adminEditConcept, adminMergeConcepts,
+  adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
+  type CurationConcept, type Category,
 } from '../services/api';
 import type { Game } from '../types';
 
@@ -67,7 +72,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'logs';
+type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'logs';
 
 const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'overview',      icon: '📊', label: '概览' },
@@ -75,6 +80,7 @@ const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
   { id: 'ai-config',     icon: '🤖', label: 'AI 配置' },
   { id: 'knowledge',     icon: '📚', label: '知识库' },
   { id: 'ai-confirmed',  icon: '✅', label: 'AI 确认知识库' },
+  { id: 'curation',      icon: '🎯', label: '知识策展' },
   { id: 'logs',          icon: '🔍', label: '服务器日志' },
 ];
 
@@ -128,18 +134,19 @@ export default function Admin() {
           >
             退出登录
           </button>
-          <p className="text-center text-xs text-slate-600 select-none">v1.1.0</p>
+          <p className="text-center text-xs text-slate-600 select-none">dev0.3.0</p>
         </div>
       </aside>
 
       {/* Content */}
       <main className="flex-1 overflow-auto">
         <div className="max-w-5xl mx-auto p-6">
-          {tab === 'overview'     && <OverviewPanel />}
+          {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
           {tab === 'games'        && <GamesPanel />}
           {tab === 'ai-config'    && <AIConfigPanel />}
           {tab === 'knowledge'    && <KnowledgePanel />}
-          {tab === 'ai-confirmed' && <AIConfirmedPanel />}
+          {tab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => setTab('curation')} />}
+          {tab === 'curation'     && <CurationPanel />}
           {tab === 'logs'         && <LogsPanel />}
         </div>
       </main>
@@ -149,7 +156,7 @@ export default function Admin() {
 
 // ── Panel: Overview ───────────────────────────────────────────────────────────
 
-function OverviewPanel() {
+function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
   const [stats, setStats] = useState<Record<string, number>>({});
   const [games, setGames] = useState<Game[]>([]);
 
@@ -158,13 +165,14 @@ function OverviewPanel() {
   }, []);
 
   const STAT_CARDS = [
-    { key: 'total_games',       label: '总游戏数',     icon: '🎮', color: 'bg-indigo-50 text-indigo-600' },
-    { key: 'active_games',      label: '进行中',       icon: '▶️', color: 'bg-green-50 text-green-600' },
-    { key: 'total_concepts',    label: '有效概念',     icon: '📌', color: 'bg-emerald-50 text-emerald-600' },
-    { key: 'total_players',     label: '历史玩家',     icon: '👥', color: 'bg-sky-50 text-sky-600' },
-    { key: 'total_docs',        label: '知识库文档',   icon: '📄', color: 'bg-amber-50 text-amber-600' },
-    { key: 'total_ai_confirmed',label: 'AI 确认概念', icon: '✅', color: 'bg-teal-50 text-teal-600' },
-    { key: 'total_ai_configs',  label: 'AI 配置',      icon: '🤖', color: 'bg-purple-50 text-purple-600' },
+    { key: 'total_games',       label: '总游戏数',     icon: '🎮', color: 'bg-indigo-50 text-indigo-600',  nav: undefined },
+    { key: 'active_games',      label: '进行中',       icon: '▶️', color: 'bg-green-50 text-green-600',   nav: 'games' as Tab },
+    { key: 'total_concepts',    label: '有效概念',     icon: '📌', color: 'bg-emerald-50 text-emerald-600', nav: undefined },
+    { key: 'total_players',     label: '历史玩家',     icon: '👥', color: 'bg-sky-50 text-sky-600',       nav: undefined },
+    { key: 'total_docs',        label: '知识库文档',   icon: '📄', color: 'bg-amber-50 text-amber-600',   nav: 'knowledge' as Tab },
+    { key: 'total_kb_active',   label: 'KB 已审概念',  icon: '✅', color: 'bg-teal-50 text-teal-600',     nav: 'curation' as Tab },
+    { key: 'pending_curation',  label: '待策展',       icon: '🎯', color: 'bg-orange-50 text-orange-600', nav: 'curation' as Tab },
+    { key: 'total_ai_configs',  label: 'AI 配置',      icon: '🤖', color: 'bg-purple-50 text-purple-600', nav: 'ai-config' as Tab },
   ];
 
   return (
@@ -172,12 +180,21 @@ function OverviewPanel() {
       <PageHeader title="概览" subtitle="系统运行状态一览" />
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
         {STAT_CARDS.map(c => (
-          <div key={c.key} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <div
+            key={c.key}
+            onClick={() => c.nav && onNavigate?.(c.nav)}
+            className={`bg-white rounded-2xl p-5 shadow-sm border border-slate-100 transition-all
+              ${c.nav ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}
+              ${c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 ? 'ring-2 ring-orange-200' : ''}`}
+          >
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${c.color}`}>
               {c.icon}
             </div>
             <div className="text-3xl font-bold text-slate-800">{stats[c.key] ?? '–'}</div>
             <div className="text-sm text-slate-500 mt-1">{c.label}</div>
+            {c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 && (
+              <div className="text-xs text-orange-500 mt-1 font-medium">点击前往策展 →</div>
+            )}
           </div>
         ))}
       </div>
@@ -847,7 +864,7 @@ function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: ()
 
 // ── Panel: AI-Confirmed Knowledge Base ───────────────────────────────────────
 
-function AIConfirmedPanel() {
+function AIConfirmedPanel({ onNavigateCuration }: { onNavigateCuration?: () => void }) {
   const [docs, setDocs]     = useState<AIConfirmedDoc[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg]       = useState('');
@@ -903,8 +920,18 @@ function AIConfirmedPanel() {
         }`}>{msg}</div>
       )}
 
+      <div className="flex items-center gap-3 p-4 bg-orange-50 border border-orange-100 rounded-xl text-sm text-orange-700">
+        <span className="text-lg">🎯</span>
+        <span>新功能：使用<strong>知识策展</strong>面板对自动摄入的概念进行审核、编辑和分类，提升知识库质量。</span>
+        {onNavigateCuration && (
+          <button onClick={onNavigateCuration} className="ml-auto shrink-0 px-3 py-1.5 bg-orange-600 text-white text-xs rounded-lg hover:bg-orange-700 transition-colors font-medium">
+            前往策展 →
+          </button>
+        )}
+      </div>
+
       <InfoBox>
-        <strong>工作原理：</strong>每当玩家提交的历史概念被 AI 验证通过，系统自动将该概念（名称、朝代、年份、简介、标签）写入此知识库，下次验证相似概念时将作为参考资料提供给 AI，持续提升准确度。
+        <strong>工作原理：</strong>每当玩家提交的历史概念被 AI 验证通过，系统自动将该概念写入策展队列（待审核），审核通过后进入活跃知识库，下次验证相似概念时作为参考资料提供给 AI。
       </InfoBox>
 
       {/* Search */}
@@ -966,6 +993,615 @@ function AIConfirmedPanel() {
             )}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Panel: Knowledge Curation ─────────────────────────────────────────────────
+
+type CurationSubTab = 'queue' | 'active' | 'categories';
+
+function ConceptCard({
+  concept, onApprove, onEdit, onReject,
+}: {
+  concept: CurationConcept;
+  onApprove: () => void;
+  onEdit: () => void;
+  onReject: () => void;
+}) {
+  const yearDisplay = concept.year != null
+    ? (concept.year < 0 ? `公元前 ${Math.abs(concept.year)} 年` : `公元 ${concept.year} 年`)
+    : null;
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 hover:shadow-md transition-shadow">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="font-semibold text-slate-800 truncate">{concept.title}</div>
+          <div className="text-xs text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+            {concept.dynasty && <span className="text-indigo-500">{concept.dynasty}</span>}
+            {yearDisplay && <span>{yearDisplay}</span>}
+            {concept.game_id && <span>房间 <code className="font-mono text-teal-600">{concept.game_id}</code></span>}
+            <span>{concept.created_at.slice(0, 10)}</span>
+          </div>
+        </div>
+        <span className="shrink-0 text-xs px-2 py-0.5 bg-amber-50 text-amber-600 rounded-full border border-amber-100">待审核</span>
+      </div>
+
+      {concept.description && (
+        <p className="text-sm text-slate-600 line-clamp-2">{concept.description}</p>
+      )}
+
+      {concept.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {concept.tags.map(t => (
+            <span key={t} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{t}</span>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2 pt-1 border-t border-slate-50">
+        <button onClick={onApprove}
+          className="flex-1 text-xs py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-lg hover:bg-green-100 transition-colors font-medium">
+          ✓ 接受
+        </button>
+        <button onClick={onEdit}
+          className="flex-1 text-xs py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors font-medium">
+          ✏️ 编辑
+        </button>
+        <button onClick={onReject}
+          className="flex-1 text-xs py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-lg hover:bg-red-100 transition-colors font-medium">
+          ✗ 拒绝
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditConceptModal({
+  concept, onSave, onClose,
+}: {
+  concept: CurationConcept;
+  onSave: (patches: Parameters<typeof adminEditConcept>[1]) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [title,       setTitle]       = useState(concept.title);
+  const [dynasty,     setDynasty]     = useState(concept.dynasty ?? '');
+  const [period,      setPeriod]      = useState(concept.period ?? '');
+  const [year,        setYear]        = useState(concept.year != null ? String(concept.year) : '');
+  const [description, setDescription] = useState(concept.description ?? '');
+  const [tagsStr,     setTagsStr]     = useState(concept.tags.join('、'));
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true); setErr('');
+    try {
+      const yearVal = year.trim() ? parseInt(year.trim()) : null;
+      if (year.trim() && isNaN(yearVal!)) { setErr('年份必须是整数（负数表示公元前）'); setSaving(false); return; }
+      await onSave({
+        title:       title.trim() || undefined,
+        dynasty:     dynasty.trim() || null,
+        period:      period.trim() || null,
+        year:        yearVal,
+        description: description.trim() || null,
+        tags:        tagsStr.split(/[、,，]/).map(t => t.trim()).filter(Boolean),
+      });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">编辑概念</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={submit} className="p-6 space-y-4">
+          <FormField label="概念名称 *">
+            <input className="input" value={title} onChange={e => setTitle(e.target.value)} required />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="朝代 / 时期">
+              <input className="input" placeholder="例：唐朝" value={dynasty} onChange={e => setDynasty(e.target.value)} />
+            </FormField>
+            <FormField label="年份（负数=公元前）">
+              <input className="input" placeholder="例：618 或 -221" value={year} onChange={e => setYear(e.target.value)} />
+            </FormField>
+          </div>
+          <FormField label="历史分期">
+            <input className="input" placeholder="例：封建社会" value={period} onChange={e => setPeriod(e.target.value)} />
+          </FormField>
+          <FormField label="简介">
+            <textarea className="input resize-none" rows={3} value={description} onChange={e => setDescription(e.target.value)} />
+          </FormField>
+          <FormField label="标签（逗号或顿号分隔）">
+            <input className="input" placeholder="例：政治、战争、改革" value={tagsStr} onChange={e => setTagsStr(e.target.value)} />
+          </FormField>
+          {err && <p className="text-sm text-red-500">{err}</p>}
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function MergeConceptsModal({
+  concepts, onMerge, onClose,
+}: {
+  concepts: CurationConcept[];
+  onMerge: (keepId: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [keepId, setKeepId] = useState(concepts[0]?.id ?? '');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onMerge(keepId);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">合并概念</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={submit} className="p-6 space-y-4">
+          <p className="text-sm text-slate-600">选择要保留的概念，其余 {concepts.length - 1} 个将被永久删除：</p>
+          <div className="space-y-2">
+            {concepts.map(c => (
+              <label key={c.id} className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors
+                ${keepId === c.id ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                <input type="radio" name="keep" value={c.id} checked={keepId === c.id}
+                  onChange={() => setKeepId(c.id)} className="mt-0.5 accent-indigo-600" />
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-800">{c.title}</div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {c.dynasty && <span className="mr-2 text-indigo-500">{c.dynasty}</span>}
+                    {c.year != null && <span>{c.year < 0 ? `公元前 ${Math.abs(c.year)}` : `公元 ${c.year}`} 年</span>}
+                  </div>
+                  {c.description && <p className="text-xs text-slate-500 mt-1 line-clamp-1">{c.description}</p>}
+                </div>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
+            <button type="submit" className="btn-danger" disabled={saving}>
+              {saving ? '合并中...' : `确认合并（保留 1 个）`}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CurationPanel() {
+  const [subTab,      setSubTab]      = useState<CurationSubTab>('queue');
+  const [pending,     setPending]     = useState<CurationConcept[]>([]);
+  const [active,      setActive]      = useState<CurationConcept[]>([]);
+  const [categories,  setCategories]  = useState<Category[]>([]);
+  const [loading,     setLoading]     = useState(false);
+  const [msg,         setMsg]         = useState('');
+  const [editTarget,  setEditTarget]  = useState<CurationConcept | null>(null);
+  const [selected,    setSelected]    = useState<Set<string>>(new Set());
+  const [showMerge,   setShowMerge]   = useState(false);
+  const [activeFilter,setActiveFilter]= useState('');
+  const [catFilter,   setCatFilter]   = useState('');
+  const [newCatName,  setNewCatName]  = useState('');
+  const [newCatColor, setNewCatColor] = useState('#6366f1');
+  const [savingCat,   setSavingCat]   = useState(false);
+  const [batchApproving, setBatchApproving] = useState(false);
+
+  const reloadPending = useCallback(() => {
+    setLoading(true);
+    adminGetCurationPending().then(setPending).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const reloadActive = useCallback(() => {
+    setLoading(true);
+    adminGetCurationActive('active').then(setActive).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const reloadCategories = useCallback(() => {
+    adminListCategories().then(setCategories).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    reloadPending();
+    reloadActive();
+    reloadCategories();
+  }, [reloadPending, reloadActive, reloadCategories]);
+
+  function showMsg(text: string, isErr = false) {
+    setMsg(isErr ? `❌ ${text}` : `✅ ${text}`);
+    setTimeout(() => setMsg(''), 3000);
+  }
+
+  async function handleApprove(id: string) {
+    try { await adminApproveConcept(id); reloadPending(); reloadActive(); showMsg('已接受'); }
+    catch (e: unknown) { showMsg(e instanceof Error ? e.message : '接受失败', true); }
+  }
+
+  async function handleReject(id: string, title: string) {
+    if (!confirm(`确认永久删除「${title}」？`)) return;
+    try { await adminRejectConcept(id); reloadPending(); showMsg('已拒绝并删除'); }
+    catch (e: unknown) { showMsg(e instanceof Error ? e.message : '删除失败', true); }
+  }
+
+  async function handleArchive(id: string) {
+    try { await adminArchiveConcept(id); reloadActive(); showMsg('已归档'); }
+    catch (e: unknown) { showMsg(e instanceof Error ? e.message : '归档失败', true); }
+  }
+
+  async function handleEdit(patches: Parameters<typeof adminEditConcept>[1]) {
+    if (!editTarget) return;
+    await adminEditConcept(editTarget.id, patches);
+    setEditTarget(null);
+    reloadPending();
+    reloadActive();
+    showMsg('已保存');
+  }
+
+  async function handleBatchApprove() {
+    if (!confirm(`确认批量接受全部 ${pending.length} 条待审概念？`)) return;
+    setBatchApproving(true);
+    try {
+      const res = await adminApproveAll();
+      reloadPending(); reloadActive();
+      showMsg(`批量接受完成，共接受 ${res.approved} 条`);
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : '批量接受失败', true);
+    } finally {
+      setBatchApproving(false);
+    }
+  }
+
+  async function handleMerge(keepId: string) {
+    const mergeIds = Array.from(selected).filter(id => id !== keepId);
+    try {
+      const res = await adminMergeConcepts(keepId, mergeIds);
+      setSelected(new Set());
+      setShowMerge(false);
+      reloadActive();
+      showMsg(`合并完成，已删除 ${res.deleted} 个重复条目`);
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : '合并失败', true);
+    }
+  }
+
+  async function handleCreateCategory(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    setSavingCat(true);
+    try {
+      await adminCreateCategory(newCatName.trim(), newCatColor);
+      setNewCatName(''); setNewCatColor('#6366f1');
+      reloadCategories();
+      showMsg('分类已创建');
+    } catch { showMsg('创建分类失败', true); }
+    finally { setSavingCat(false); }
+  }
+
+  async function handleDeleteCategory(id: string, name: string) {
+    if (!confirm(`确认删除分类「${name}」？（不影响已归入的概念）`)) return;
+    try { await adminDeleteCategory(id); reloadCategories(); showMsg('分类已删除'); }
+    catch { showMsg('删除失败', true); }
+  }
+
+  async function handleCategorize(conceptId: string, categoryId: string, remove = false) {
+    try {
+      await adminCategorizeConcept(conceptId, categoryId, remove);
+      reloadActive();
+    } catch { showMsg('分类操作失败', true); }
+  }
+
+  // Filtered active list
+  const filteredActive = active.filter(c => {
+    const matchText = !activeFilter || c.title.toLowerCase().includes(activeFilter.toLowerCase());
+    const matchCat  = !catFilter || c.categories.some(cat => cat.id === catFilter);
+    return matchText && matchCat;
+  });
+
+  const selectedConcepts = active.filter(c => selected.has(c.id));
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="知识策展"
+        subtitle="审核、编辑、分类自动摄入的历史概念，把控知识库质量"
+      />
+
+      {msg && (
+        <div className={`text-sm px-4 py-2.5 rounded-xl border animate-slide-down ${
+          msg.startsWith('❌') ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'
+        }`}>{msg}</div>
+      )}
+
+      {/* Sub-tabs */}
+      <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+        {([
+          { id: 'queue',      label: '摄入队列',   badge: pending.length },
+          { id: 'active',     label: '活跃知识库', badge: active.length },
+          { id: 'categories', label: '分类管理',   badge: categories.length },
+        ] as { id: CurationSubTab; label: string; badge: number }[]).map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setSubTab(tab.id)}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5
+              ${subTab === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            {tab.label}
+            {tab.badge > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold
+                ${tab.id === 'queue' && tab.badge > 0
+                  ? 'bg-orange-100 text-orange-600'
+                  : 'bg-slate-200 text-slate-600'}`}>
+                {tab.badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Ingestion Queue ── */}
+      {subTab === 'queue' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <p className="text-sm text-slate-500">
+              共 <strong>{pending.length}</strong> 条待审概念，由 AI 验证通过自动摄入，审核后方可进入活跃知识库。
+            </p>
+            <div className="flex gap-2">
+              <button onClick={reloadPending} disabled={loading} className="btn-secondary text-xs py-1.5">刷新</button>
+              {pending.length > 0 && (
+                <button onClick={handleBatchApprove} disabled={batchApproving || loading}
+                  className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors font-medium">
+                  {batchApproving ? '处理中...' : `批量接受全部 (${pending.length})`}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {loading && <p className="text-sm text-slate-400">加载中...</p>}
+
+          {!loading && pending.length === 0 ? (
+            <EmptyState icon="🎯" title="摄入队列为空" desc="当 AI 验证通过新的历史概念后，会先进入此队列等待审核" />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pending.map(c => (
+                <ConceptCard
+                  key={c.id}
+                  concept={c}
+                  onApprove={() => handleApprove(c.id)}
+                  onEdit={() => setEditTarget(c)}
+                  onReject={() => handleReject(c.id, c.title)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Active Knowledge Base ── */}
+      {subTab === 'active' && (
+        <div className="space-y-4">
+          {/* Toolbar */}
+          <div className="flex flex-wrap gap-3 items-center">
+            <input
+              className="text-sm border border-slate-200 rounded-xl px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 w-48"
+              placeholder="搜索概念名称..."
+              value={activeFilter}
+              onChange={e => setActiveFilter(e.target.value)}
+            />
+            {categories.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs text-slate-500">分类：</span>
+                <button
+                  onClick={() => setCatFilter('')}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors
+                    ${!catFilter ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                  全部
+                </button>
+                {categories.map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setCatFilter(cat.id === catFilter ? '' : cat.id)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1
+                      ${catFilter === cat.id ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="ml-auto flex gap-2">
+              {selected.size >= 2 && (
+                <button onClick={() => setShowMerge(true)}
+                  className="text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors font-medium">
+                  合并选中 ({selected.size})
+                </button>
+              )}
+              {selected.size > 0 && (
+                <button onClick={() => setSelected(new Set())}
+                  className="text-xs px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                  取消选择
+                </button>
+              )}
+              <button onClick={reloadActive} disabled={loading} className="btn-secondary text-xs py-1.5">刷新</button>
+            </div>
+          </div>
+
+          {loading && <p className="text-sm text-slate-400">加载中...</p>}
+
+          {!loading && filteredActive.length === 0 ? (
+            <EmptyState icon="✅" title="活跃知识库为空" desc="已审核通过的概念会在这里显示" />
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <span>
+                  显示 {filteredActive.length}{filteredActive.length !== active.length ? ` / ${active.length}` : ''} 条
+                  {selected.size > 0 && <span className="ml-2 text-indigo-600 font-medium">已选 {selected.size} 条</span>}
+                </span>
+              </div>
+              <div className="divide-y divide-slate-50 max-h-[65vh] overflow-y-auto">
+                {filteredActive.map(c => {
+                  const yearDisplay = c.year != null
+                    ? (c.year < 0 ? `公元前 ${Math.abs(c.year)} 年` : `公元 ${c.year} 年`)
+                    : null;
+                  const isSelected = selected.has(c.id);
+                  return (
+                    <div key={c.id} className={`flex items-start gap-3 px-5 py-3.5 hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => setSelected(prev => {
+                          const next = new Set(prev);
+                          if (next.has(c.id)) next.delete(c.id); else next.add(c.id);
+                          return next;
+                        })}
+                        className="mt-1 accent-indigo-600 shrink-0"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-slate-800">{c.title}</span>
+                          {c.dynasty && <span className="text-xs text-indigo-500">{c.dynasty}</span>}
+                          {yearDisplay && <span className="text-xs text-slate-400">{yearDisplay}</span>}
+                        </div>
+                        {c.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{c.description}</p>}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {c.tags.map(t => (
+                            <span key={t} className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">{t}</span>
+                          ))}
+                          {c.categories.map(cat => (
+                            <span key={cat.id} className="text-xs px-1.5 py-0.5 rounded flex items-center gap-0.5"
+                              style={{ backgroundColor: cat.color + '20', color: cat.color }}>
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                              {cat.name}
+                              <button onClick={() => handleCategorize(c.id, cat.id, true)}
+                                className="ml-0.5 opacity-60 hover:opacity-100">×</button>
+                            </span>
+                          ))}
+                          {categories.length > 0 && (
+                            <select
+                              value=""
+                              onChange={e => { if (e.target.value) handleCategorize(c.id, e.target.value); }}
+                              className="text-xs px-1 py-0.5 bg-slate-50 border border-slate-200 rounded cursor-pointer text-slate-400"
+                            >
+                              <option value="">+ 分类</option>
+                              {categories
+                                .filter(cat => !c.categories.some(cc => cc.id === cat.id))
+                                .map(cat => (
+                                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                ))
+                              }
+                            </select>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex gap-1 shrink-0">
+                        <button onClick={() => setEditTarget(c)}
+                          className="text-xs px-2 py-1 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors">
+                          编辑
+                        </button>
+                        <button onClick={() => handleArchive(c.id)}
+                          className="text-xs px-2 py-1 text-amber-500 hover:bg-amber-50 rounded-lg transition-colors">
+                          归档
+                        </button>
+                        <button onClick={() => handleReject(c.id, c.title)}
+                          className="text-xs px-2 py-1 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Category Manager ── */}
+      {subTab === 'categories' && (
+        <div className="space-y-4 max-w-lg">
+          <form onSubmit={handleCreateCategory} className="bg-white rounded-2xl border border-slate-200 p-5 space-y-3">
+            <h3 className="font-semibold text-slate-800 text-sm">新建分类</h3>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <FormField label="分类名称">
+                  <input className="input" placeholder="例：汉朝、改革、军事" value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)} required />
+                </FormField>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">颜色</label>
+                <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)}
+                  className="w-10 h-9 border border-slate-200 rounded-lg cursor-pointer p-0.5" />
+              </div>
+              <button type="submit" disabled={savingCat} className="btn-primary text-sm py-2">
+                {savingCat ? '创建中...' : '创建'}
+              </button>
+            </div>
+          </form>
+
+          {categories.length === 0 ? (
+            <EmptyState icon="🏷️" title="暂无分类" desc="创建分类后可对活跃知识库中的概念进行归类整理" />
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-100 text-xs text-slate-500">
+                共 {categories.length} 个分类
+              </div>
+              <div className="divide-y divide-slate-50">
+                {categories.map(cat => (
+                  <div key={cat.id} className="flex items-center gap-3 px-5 py-3 hover:bg-slate-50 transition-colors">
+                    <span className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                    <span className="flex-1 font-medium text-slate-800 text-sm">{cat.name}</span>
+                    <span className="text-xs text-slate-400 font-mono">{cat.color}</span>
+                    <button onClick={() => handleDeleteCategory(cat.id, cat.name)}
+                      className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">
+                      删除
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editTarget && (
+        <EditConceptModal
+          concept={editTarget}
+          onSave={handleEdit}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      {/* Merge modal */}
+      {showMerge && selectedConcepts.length >= 2 && (
+        <MergeConceptsModal
+          concepts={selectedConcepts}
+          onMerge={handleMerge}
+          onClose={() => setShowMerge(false)}
+        />
       )}
     </div>
   );

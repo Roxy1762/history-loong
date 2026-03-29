@@ -315,6 +315,7 @@ module.exports = {
   getDoc:         stmt(`SELECT * FROM knowledge_docs WHERE id = ?`),
   insertDoc:      stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks) VALUES (?, ?, ?, ?)`),
   insertDocFull:  stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id) VALUES (?, ?, ?, ?, ?, ?)`),
+  insertDocDraft: stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id, status) VALUES (?, ?, ?, ?, ?, ?, 'draft')`),
   deleteDoc:      stmt(`DELETE FROM knowledge_docs WHERE id = ?`),
 
   // Knowledge chunks
@@ -333,6 +334,8 @@ module.exports = {
       (SELECT COUNT(*) FROM concepts WHERE validated = 1) as total_concepts,
       (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'manual') as total_docs,
       (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'ai_confirmed') as total_ai_confirmed,
+      (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'ai_confirmed' AND status = 'active') as total_kb_active,
+      (SELECT COUNT(*) FROM knowledge_docs WHERE source = 'ai_confirmed' AND status = 'draft') as pending_curation,
       (SELECT COUNT(*) FROM ai_configs) as total_ai_configs,
       (SELECT COUNT(DISTINCT id) FROM players) as total_players
   `),
