@@ -99,7 +99,12 @@ export const useGameStore = create<GameState>((set) => ({
 
   messages: [],
   setMessages: m => set({ messages: m }),
-  addMessage: m => set(s => ({ messages: [...s.messages, m] })),
+  // Cap at 500 to prevent unbounded memory growth in long sessions
+  addMessage: m => set(s => ({
+    messages: s.messages.length >= 500
+      ? [...s.messages.slice(-499), m]
+      : [...s.messages, m],
+  })),
 
   validating: null,
   setValidating: v => set({ validating: v }),

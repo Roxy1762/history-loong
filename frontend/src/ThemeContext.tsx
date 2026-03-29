@@ -22,8 +22,17 @@ interface ThemeCtx { theme: Theme; setTheme: (t: Theme) => void; }
 
 const ThemeContext = createContext<ThemeCtx>({ theme: 'light', setTheme: () => {} });
 
+let _transitionTimer: ReturnType<typeof setTimeout> | undefined;
+
 function applyTheme(t: Theme) {
   const html = document.documentElement;
+  // Add transitioning class so .theme-transitioning * { transition } fires for
+  // ~300ms, then remove it — avoids permanently taxing every element with a
+  // CSS transition on every render.
+  clearTimeout(_transitionTimer);
+  html.classList.add('theme-transitioning');
+  _transitionTimer = setTimeout(() => html.classList.remove('theme-transitioning'), 300);
+
   if (t === 'light') {
     html.removeAttribute('data-theme');
   } else {

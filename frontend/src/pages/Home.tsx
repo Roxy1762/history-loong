@@ -79,7 +79,7 @@ export default function Home() {
       </div>
 
       {/* Nav */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4">
+      <nav className="relative z-30 flex items-center justify-between px-6 py-4">
         <div className="flex items-center gap-2">
           <span className="text-3xl animate-float">🐉</span>
           <span className="font-heading font-bold text-xl" style={{ color: 'var(--text-primary)' }}>
