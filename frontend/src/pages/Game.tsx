@@ -40,23 +40,15 @@ function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
 function SettleOverlay() {
   const { settle } = useGameStore();
   if (!settle.running) return null;
-
   const pct = settle.total > 0 ? Math.round((settle.done / settle.total) * 100) : 0;
-
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-white rounded-3xl shadow-2xl p-8 w-80 text-center animate-slide-up">
         <div className="text-5xl mb-4">⚖️</div>
         <h3 className="text-xl font-bold text-slate-800 mb-1">AI 批量结算中</h3>
-        <p className="text-sm text-slate-500 mb-6">
-          正在验证 {settle.total} 个历史概念...
-        </p>
-        {/* Progress bar */}
+        <p className="text-sm text-slate-500 mb-6">正在验证 {settle.total} 个历史概念...</p>
         <div className="w-full bg-slate-100 rounded-full h-3 mb-3">
-          <div
-            className="bg-indigo-500 h-3 rounded-full transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
+          <div className="bg-indigo-500 h-3 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
         </div>
         <div className="text-xs text-slate-400">
           {settle.done} / {settle.total} — 通过 {settle.accepted}，淘汰 {settle.rejected}
@@ -69,9 +61,7 @@ function SettleOverlay() {
 // ── Settle result toast ───────────────────────────────────────────────────────
 
 function SettleResult({
-  result,
-  onClose,
-  onEndGame,
+  result, onClose, onEndGame,
 }: {
   result: { accepted: number; rejected: number; endGame?: boolean } | null;
   onClose: () => void;
@@ -80,18 +70,11 @@ function SettleResult({
   if (!result) return null;
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div
-        className="rounded-3xl shadow-2xl w-full max-w-xs p-7 text-center animate-slide-up"
-        style={{ background: 'var(--bg-card)' }}
-      >
+      <div className="rounded-3xl shadow-2xl w-full max-w-xs p-7 text-center animate-slide-up" style={{ background: 'var(--bg-card)' }}>
         <div className="text-5xl mb-4">🎉</div>
-        <h3 className="text-xl font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
-          结算完成！
-        </h3>
+        <h3 className="text-xl font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>结算完成！</h3>
         {!result.endGame && (
-          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>
-            游戏仍在进行，可继续提交
-          </p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>游戏仍在进行，可继续提交</p>
         )}
         <div className="grid grid-cols-2 gap-3 mb-6 mt-4">
           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
@@ -103,18 +86,65 @@ function SettleResult({
             <div className="text-xs text-red-500 mt-1">❌ 淘汰</div>
           </div>
         </div>
-        <button className="btn-primary w-full py-3 mb-2" onClick={onClose}>
-          查看时间轴
-        </button>
+        <button className="btn-primary w-full py-3 mb-2" onClick={onClose}>查看时间轴</button>
         {!result.endGame && (
-          <button
-            className="btn-danger w-full py-2 text-sm"
-            onClick={onEndGame}
-          >
-            ⏹ 结束游戏
-          </button>
+          <button className="btn-danger w-full py-2 text-sm" onClick={onEndGame}>⏹ 结束游戏</button>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Score Leaderboard sidebar ─────────────────────────────────────────────────
+
+function ScoreBoard({ players, scores, me }: { players: { id: string; name: string; color: string }[]; scores: Record<string, number>; me: { id: string } | null }) {
+  const sorted = [...players].sort((a, b) => (scores[b.id] || 0) - (scores[a.id] || 0));
+  return (
+    <div className="bg-gradient-to-b from-amber-50 to-yellow-50 border-b border-amber-100 px-4 py-2.5">
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-xs font-bold text-amber-700">🏆 积分榜</span>
+      </div>
+      <div className="flex gap-3 overflow-x-auto">
+        {sorted.map((p, i) => (
+          <div key={p.id} className={`flex items-center gap-1.5 shrink-0 px-2 py-1 rounded-full text-xs font-semibold
+            ${p.id === me?.id ? 'bg-amber-200 text-amber-900' : 'bg-white/70 text-slate-700'}`}>
+            <span>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</span>
+            <span>{p.name}</span>
+            <span className="text-amber-600 font-black">{scores[p.id] || 0}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Challenge card banner ─────────────────────────────────────────────────────
+
+function ChallengeBanner({ card, round }: { card: { text: string } | null; round?: number }) {
+  if (!card) return null;
+  const remaining = Math.max(0, 5 - (round || 0));
+  return (
+    <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-purple-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+      <span className="text-xs font-bold text-purple-700 shrink-0">🃏 当前挑战：</span>
+      <span className="text-xs text-purple-800 font-medium flex-1">{card.text}</span>
+      <span className="text-xs text-purple-400 shrink-0">还需 {remaining} 个概念换牌</span>
+    </div>
+  );
+}
+
+// ── Turn indicator banner ─────────────────────────────────────────────────────
+
+function TurnBanner({ turnState, me }: { turnState: { currentPlayerId: string | null; currentPlayerName: string | null } | null; me: { id: string } | null }) {
+  if (!turnState) return null;
+  const isMyTurn = turnState.currentPlayerId === me?.id;
+  return (
+    <div className={`border-b px-4 py-2 text-center text-xs font-semibold
+      ${isMyTurn
+        ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+        : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
+      {isMyTurn
+        ? '✅ 现在是你的回合，请提交一个历史概念！'
+        : `⏳ 等待 ${turnState.currentPlayerName || '其他玩家'} 提交...`}
     </div>
   );
 }
@@ -135,6 +165,10 @@ export default function Game() {
     setMessages, addMessage,
     setValidating,
     settle, setSettleRunning, incrementSettleDone, resetSettle,
+    turnState, setTurnState,
+    scores, setScores,
+    challengeCard, setChallengeCard,
+    selectedPendingIds, clearSelectedPending,
     reset,
   } = useGameStore();
 
@@ -149,9 +183,8 @@ export default function Game() {
   const [settleResult, setSettleResult] = useState<{ accepted: number; rejected: number; endGame?: boolean } | null>(null);
   const [connState,   setConnState]   = useState<ConnectionState | null>(null);
   const [validatingConceptIds, setValidatingConceptIds] = useState<Set<string>>(new Set());
+  const [challengeRound, setChallengeRound] = useState(0);
 
-  // Track latest values in refs so socket handlers always have fresh values
-  // This avoids the stale closure bug where useEffect depended on [game]
   const meRef     = useRef(me);
   const gameIdRef = useRef(gameId);
   const gameRef   = useRef(game);
@@ -161,87 +194,59 @@ export default function Game() {
 
   const isDeferred = game?.settings?.validationMode === 'deferred';
   const gameFinished = game?.status === 'finished';
+  const isScoreMode = game?.mode === 'score-race' || game?.mode === 'challenge';
+  const isTurnMode  = game?.mode === 'turn-order';
+  const isRelayMode = game?.mode === 'relay';
+  const isChallengeMode = game?.mode === 'challenge';
 
-  // ── Socket listeners (registered ONCE, using refs for fresh values) ─────────
+  // Is it my turn right now?
+  const isMyTurn = isTurnMode
+    ? (turnState?.currentPlayerId === me?.id)
+    : true; // other modes: always allowed
+
+  // ── Socket listeners ──────────────────────────────────────────────────────
   useEffect(() => {
-    console.log('[Game] Setting up socket listeners');
-
     const offs = [
       onSocket('connect', async () => {
-        console.log('[Game] Socket connected');
         setConnected(true);
         setConnError('');
-        // If the socket reconnected while we were already in a room, re-join so
-        // the backend can restore currentGameId / currentPlayer for this socket.
         const gid = gameIdRef.current;
         const player = meRef.current;
         if (gid && player) {
-          console.log(`[Game] Reconnect re-join gameId=${gid} player=${player.name}`);
           const res = await joinGame({ gameId: gid, playerName: player.name });
-          if (res.error) {
-            console.warn(`[Game] Reconnect re-join failed: ${res.error}`);
-            return; // reconnect join failure is non-fatal
-          }
-          console.log('[Game] Reconnect re-join OK');
+          if (res.error) return;
           if (res.game)            setGame(res.game);
           if (res.player)          setMe(res.player);
           if (res.timeline)        setTimeline(res.timeline);
           if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
           if (res.messages)        setMessages(res.messages);
+          if (res.scores)          setScores(res.scores);
+          if (res.turnState)       setTurnState(res.turnState);
+          if (res.challengeCard)   setChallengeCard(res.challengeCard);
         }
       }),
       onSocket('connect_error', (err) => {
-        console.error('[Game] Socket connect_error:', err.message);
-        // Only surface the error before the user has joined; after joining,
-        // the disconnect indicator in the header is sufficient feedback.
         if (!meRef.current) setConnError('无法连接到服务器，请检查网络或刷新页面重试');
+        console.error('[Game] connect_error:', err.message);
       }),
-      onSocket('disconnect', (reason) => {
-        console.warn(`[Game] Socket disconnected: ${reason}`);
-        setConnected(false);
-      }),
-      onSocket('message:new', msg => {
-        console.log(`[Game] message:new type=${msg.type} content="${msg.content?.slice(0, 50)}"`);
-        addMessage(msg);
-      }),
+      onSocket('disconnect', () => setConnected(false)),
+      onSocket('message:new', msg => addMessage(msg)),
 
-      // Real-time mode: concept validated immediately
       onSocket('concept:new', ({ concept }: { concept: Concept }) => {
-        console.log(`[Game] concept:new name="${concept.name}" year=${concept.year}`);
         addConcept(concept);
         setNewestId(concept.id);
         setValidating(null);
         setActiveTab('timeline');
         setTimeout(() => setNewestId(undefined), 4000);
       }),
+      onSocket('concept:pending', ({ concept }: { concept: Concept }) => addPendingConcept(concept)),
+      onSocket('concept:validating', e => setValidating(e)),
 
-      // Deferred mode: concept saved as pending
-      onSocket('concept:pending', ({ concept }: { concept: Concept }) => {
-        console.log(`[Game] concept:pending name="${concept.name}"`);
-        addPendingConcept(concept);
-      }),
-
-      onSocket('concept:validating', e => {
-        console.log(`[Game] concept:validating player=${e.playerName} input="${e.rawInput}"`);
-        setValidating(e);
-      }),
-
-      // Settlement events
-      onSocket('game:settle:start', ({ total }) => {
-        console.log(`[Game] game:settle:start total=${total}`);
-        setSettleRunning(total);
-      }),
+      onSocket('game:settle:start', ({ total }) => setSettleRunning(total)),
       onSocket('concept:settled', e => {
-        console.log(`[Game] concept:settled conceptId=${e.conceptId} accepted=${e.accepted}`);
         removePendingConcept(e.conceptId);
-        // Only count toward batch-settle progress when a batch settle is running
         if (useGameStore.getState().settle.running) incrementSettleDone(e.accepted);
-        // Clear single-validation loading state
-        setValidatingConceptIds(prev => {
-          const next = new Set(prev);
-          next.delete(e.conceptId);
-          return next;
-        });
+        setValidatingConceptIds(prev => { const n = new Set(prev); n.delete(e.conceptId); return n; });
         if (e.accepted && e.concept) {
           addConcept(e.concept);
           setNewestId(e.concept.id);
@@ -250,39 +255,39 @@ export default function Game() {
         }
       }),
       onSocket('game:settle:done', e => {
-        console.log(`[Game] game:settle:done accepted=${e.accepted} rejected=${e.rejected} endGame=${e.endGame}`);
         resetSettle();
         setSettling(false);
+        clearSelectedPending();
         setSettleResult({ accepted: e.accepted, rejected: e.rejected, endGame: e.endGame });
       }),
 
-      onSocket('players:update', ({ players: p }) => {
-        console.log(`[Game] players:update count=${p.length}`);
-        setPlayers(p);
-      }),
+      onSocket('players:update', ({ players: p }) => setPlayers(p)),
       onSocket('game:finished', () => {
-        console.log('[Game] game:finished');
-        // Use ref to get latest game value — avoids stale closure
-        const currentGame = gameRef.current;
-        if (currentGame) setGame({ ...currentGame, status: 'finished' });
+        const g = gameRef.current;
+        if (g) setGame({ ...g, status: 'finished' });
       }),
       onSocket('game:deleted', () => {
-        console.log('[Game] game:deleted — redirecting to home');
         alert('管理员已删除该房间');
         window.location.href = '/';
       }),
       onSocket('game:restored', () => {
-        console.log('[Game] game:restored');
-        const currentGame = gameRef.current;
-        if (currentGame) setGame({ ...currentGame, status: 'playing' });
+        const g = gameRef.current;
+        if (g) setGame({ ...g, status: 'playing' });
+      }),
+
+      // New mode events
+      onSocket('turn:update', e => setTurnState(e)),
+      onSocket('scores:update', ({ scores: s }) => setScores(s)),
+      onSocket('challenge:update', ({ card, round }) => {
+        setChallengeCard(card);
+        setChallengeRound(round);
+      }),
+      onSocket('relay:round_reset', () => {
+        // Visual feedback handled by system message in chat
       }),
     ];
-    return () => {
-      console.log('[Game] Tearing down socket listeners');
-      offs.forEach(off => off());
-    };
+    return () => offs.forEach(off => off());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // Empty deps: listeners registered once, use refs for fresh values
 
   useEffect(() => {
     const off = onConnectionState(setConnState);
@@ -291,73 +296,59 @@ export default function Game() {
 
   useEffect(() => { return () => { disconnectSocket(); reset(); }; }, []);
 
-  // ── Join ────────────────────────────────────────────────────────────────────
+  // ── Join ──────────────────────────────────────────────────────────────────
   const handleJoin = useCallback(async (playerName: string) => {
     if (!gameId) return;
     setShowName(false);
-    console.log(`[Game] handleJoin gameId=${gameId} playerName=${playerName}`);
     const res = await joinGame({ gameId, playerName });
-    if (res.error) {
-      console.error(`[Game] handleJoin FAILED: ${res.error}`);
-      setJoinError(res.error);
-      return;
-    }
-    console.log('[Game] handleJoin OK');
+    if (res.error) { setJoinError(res.error); return; }
     if (res.game)             setGame(res.game);
     if (res.player)           setMe(res.player);
     if (res.timeline)         setTimeline(res.timeline);
     if (res.pendingConcepts)  setPendingConcepts(res.pendingConcepts);
     if (res.messages)         setMessages(res.messages);
+    if (res.scores)           setScores(res.scores);
+    if (res.turnState)        setTurnState(res.turnState);
+    if (res.challengeCard)    setChallengeCard(res.challengeCard);
   }, [gameId]);
 
-  // ── Settle ──────────────────────────────────────────────────────────────────
-  async function handleSettle(endGame = false) {
+  // ── Settle ────────────────────────────────────────────────────────────────
+  async function handleSettle(endGame = false, onlySelected = false) {
     if (settling) return;
+    const ids = onlySelected && selectedPendingIds.size > 0
+      ? [...selectedPendingIds]
+      : undefined;
+    const count = ids ? ids.length : pendingConcepts.length;
     const confirmMsg = endGame
-      ? `确认结算并结束游戏？将对 ${pendingConcepts.length} 个概念进行 AI 批量验证。`
-      : `确认开始批量结算？将对 ${pendingConcepts.length} 个概念进行 AI 验证，结算后可继续游戏。`;
+      ? `确认结算并结束游戏？将对 ${count} 个概念进行 AI 批量验证。`
+      : `确认开始批量结算？将对 ${count} 个概念进行 AI 验证，结算后可继续游戏。`;
     if (!confirm(confirmMsg)) return;
     setSettling(true);
-    console.log(`[Game] handleSettle start endGame=${endGame}`);
-    const res = await settleConcepts(endGame);
-    if (res.error) {
-      console.error(`[Game] handleSettle FAILED: ${res.error}`);
-      alert(res.error);
-      setSettling(false);
-    }
-    // Progress tracked via socket events
+    const res = await settleConcepts(endGame, ids);
+    if (res.error) { alert(res.error); setSettling(false); }
   }
 
-  // ── Hint ────────────────────────────────────────────────────────────────────
+  // ── Hint ──────────────────────────────────────────────────────────────────
   async function handleHint() {
     setHintLoading(true);
-    console.log('[Game] requestHints');
     const res = await requestHints();
     if (res.hints) setHints(res.hints);
     setHintLoading(false);
   }
 
-  // ── Validate single concept (free validation) ──────────────────────────────
+  // ── Validate single ───────────────────────────────────────────────────────
   async function handleValidateSingle(conceptId: string) {
     setValidatingConceptIds(prev => new Set([...prev, conceptId]));
-    console.log(`[Game] handleValidateSingle conceptId=${conceptId}`);
     const res = await validateSingleConcept(conceptId);
     if (res.error) {
-      console.error(`[Game] handleValidateSingle FAILED: ${res.error}`);
-      // Remove from validating set on error (success is cleared by concept:settled event)
-      setValidatingConceptIds(prev => {
-        const next = new Set(prev);
-        next.delete(conceptId);
-        return next;
-      });
+      setValidatingConceptIds(prev => { const n = new Set(prev); n.delete(conceptId); return n; });
       alert(`验证失败：${res.error}`);
     }
   }
 
-  // ── Finish (realtime mode) ──────────────────────────────────────────────────
+  // ── Finish ────────────────────────────────────────────────────────────────
   async function handleFinish() {
     if (!confirm('确认结束游戏？结束后可导出成果。')) return;
-    console.log('[Game] handleFinish');
     await finishGame();
   }
 
@@ -389,25 +380,24 @@ export default function Game() {
         />
       )}
 
-      <div className="min-h-screen flex flex-col bg-slate-50">
-        {/* ── Connection status banner ── */}
-        {connState && connState.status === 'reconnecting' && (
+      {/* h-screen + overflow-hidden keeps both chat and timeline independently scrollable */}
+      <div className="h-screen flex flex-col bg-slate-50 overflow-hidden">
+        {/* ── Connection banners ── */}
+        {connState?.status === 'reconnecting' && (
           <div className="bg-amber-500 text-white text-xs px-4 py-1.5 flex items-center gap-2 justify-center z-20">
             <span className="w-2 h-2 rounded-full bg-white/70 animate-pulse flex-shrink-0" />
-            正在重新连接服务器…（第 {connState.attempt} 次尝试）请稍候
+            正在重新连接服务器…（第 {connState.attempt} 次尝试）
           </div>
         )}
-        {connState && connState.status === 'failed' && (
+        {connState?.status === 'failed' && (
           <div className="bg-red-600 text-white text-xs px-4 py-1.5 flex items-center gap-2 justify-center z-20">
-            <span className="text-white">⚠️</span>
-            连接失败，请
+            ⚠️ 连接失败，请
             <button className="underline font-semibold" onClick={() => window.location.reload()}>刷新页面</button>
-            重试
           </div>
         )}
 
         {/* ── Header ── */}
-        <header className="bg-white border-b border-slate-100 shadow-sm z-10">
+        <header className="bg-white border-b border-slate-100 shadow-sm z-10 flex-shrink-0">
           <div className="flex items-center gap-3 px-4 py-3">
             <button onClick={() => navigate('/')}
               className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
@@ -425,8 +415,17 @@ export default function Game() {
                   </code>
                 )}
                 {isDeferred && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full border border-amber-200 font-medium">结算模式</span>
+                )}
+                {isRelayMode && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-sky-100 text-sky-700 rounded-full border border-sky-200 font-medium">接力模式</span>
+                )}
+                {isTurnMode && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full border border-violet-200 font-medium">轮流模式</span>
+                )}
+                {isScoreMode && !gameFinished && (
                   <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full border border-amber-200 font-medium">
-                    结算模式
+                    {isChallengeMode ? '🃏 挑战模式' : '🏆 积分模式'}
                   </span>
                 )}
                 {gameFinished && (
@@ -442,7 +441,7 @@ export default function Game() {
                   }`} />
                   <span className="text-xs text-slate-400">
                     {connected ? `${players.length} 人在线` :
-                     connState?.status === 'reconnecting' ? `重连中 #${connState.attempt}` :
+                     connState?.status === 'reconnecting' ? `重连中` :
                      connState?.status === 'failed' ? '连接失败' : '连接中...'}
                   </span>
                 </div>
@@ -461,6 +460,12 @@ export default function Game() {
                     <span className="text-slate-200 mr-1">·</span>AI 验证中...
                   </span>
                 )}
+                {/* My score badge */}
+                {isScoreMode && me && (
+                  <span className="text-xs text-amber-600 font-bold">
+                    <span className="text-slate-200 mr-1">·</span>🏆 {scores[me.id] || 0} 分
+                  </span>
+                )}
               </div>
             </div>
 
@@ -472,18 +477,27 @@ export default function Game() {
                 {hintLoading ? '...' : '💡'}
               </button>
 
+              {/* Multi-select batch validate button */}
+              {isDeferred && !gameFinished && selectedPendingIds.size > 0 && (
+                <button
+                  onClick={() => handleSettle(false, true)}
+                  disabled={settling}
+                  className="text-xs py-1.5 px-2.5 rounded-lg font-medium transition-colors bg-violet-100 text-violet-700 hover:bg-violet-200"
+                  title="验证选中的概念">
+                  {settling ? '验证中...' : `✓ 验证选中 (${selectedPendingIds.size})`}
+                </button>
+              )}
+
               {/* Deferred: settle buttons */}
-              {isDeferred && !gameFinished && pendingConcepts.length > 0 && (
+              {isDeferred && !gameFinished && pendingConcepts.length > 0 && selectedPendingIds.size === 0 && (
                 <div className="flex gap-1">
                   <button onClick={() => handleSettle(false)} disabled={settling}
                     className="text-xs py-1.5 px-2.5 rounded-lg font-medium transition-colors"
-                    style={{ background: 'var(--brand-light)', color: 'var(--brand)' }}
-                    title="批量验证，不结束游戏">
+                    style={{ background: 'var(--brand-light)', color: 'var(--brand)' }}>
                     {settling ? '验证中...' : `⚖️ 验证 (${pendingConcepts.length})`}
                   </button>
                   <button onClick={() => handleSettle(true)} disabled={settling}
-                    className="btn-danger text-xs py-1.5 px-2.5"
-                    title="验证并结束游戏">
+                    className="btn-danger text-xs py-1.5 px-2.5">
                     结束
                   </button>
                 </div>
@@ -516,7 +530,7 @@ export default function Game() {
 
         {/* Hints banner */}
         {hints.length > 0 && (
-          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+          <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100 px-4 py-2.5 flex items-center gap-2 flex-wrap flex-shrink-0">
             <span className="text-xs text-amber-700 font-semibold shrink-0">💡 AI 建议：</span>
             {hints.map(h => (
               <span key={h} className="text-xs px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-200 font-medium">{h}</span>
@@ -525,17 +539,41 @@ export default function Game() {
           </div>
         )}
 
-        {/* Deferred mode banner (when no pending concepts yet) */}
+        {/* Score board (score-race / challenge mode) */}
+        {isScoreMode && !gameFinished && players.length > 0 && (
+          <ScoreBoard players={players} scores={scores} me={me} />
+        )}
+
+        {/* Challenge card banner */}
+        {isChallengeMode && challengeCard && !gameFinished && (
+          <ChallengeBanner card={challengeCard} round={challengeRound} />
+        )}
+
+        {/* Turn indicator (turn-order mode) */}
+        {isTurnMode && !gameFinished && (
+          <TurnBanner turnState={turnState} me={me} />
+        )}
+
+        {/* Deferred mode banner */}
         {isDeferred && !gameFinished && pendingConcepts.length === 0 && timeline.length === 0 && (
-          <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 text-center">
+          <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2.5 text-center flex-shrink-0">
             <span className="text-sm text-indigo-600">
-              🎯 <strong>结算模式</strong> — 自由提交概念，游戏结束时由 AI 统一验证，不影响游戏节奏
+              🎯 <strong>结算模式</strong> — 自由提交概念，按需批量验证
+            </span>
+          </div>
+        )}
+
+        {/* Relay mode banner */}
+        {isRelayMode && !gameFinished && (
+          <div className="bg-sky-50 border-b border-sky-100 px-4 py-2 text-center flex-shrink-0">
+            <span className="text-xs text-sky-600">
+              🔄 <strong>接力模式</strong> — 每人每轮只能提交一次，所有人提交后进入下一轮
             </span>
           </div>
         )}
 
         {/* Mobile tab bar */}
-        <div className="flex border-b border-slate-100 bg-white md:hidden">
+        <div className="flex border-b border-slate-100 bg-white md:hidden flex-shrink-0">
           {(['chat', 'timeline'] as const).map(t => (
             <button key={t} onClick={() => setActiveTab(t)}
               className={`flex-1 py-3 text-sm font-semibold transition-colors flex items-center justify-center gap-1.5
@@ -550,18 +588,25 @@ export default function Game() {
           ))}
         </div>
 
-        {/* Main split layout */}
-        <div className="flex-1 flex overflow-hidden">
+        {/* Main split layout — both panes are independently scrollable */}
+        <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Chat pane */}
           <div className={`flex flex-col overflow-hidden border-r border-slate-100 w-full md:w-[420px] lg:w-[460px] flex-shrink-0
             ${activeTab === 'chat' ? 'flex' : 'hidden md:flex'}`}>
-            <Chat messages={messages} me={me} gameFinished={gameFinished} />
+            <Chat
+              messages={messages}
+              me={me}
+              gameFinished={gameFinished}
+              isMyTurn={isMyTurn}
+              isTurnMode={isTurnMode}
+              turnPlayerName={turnState?.currentPlayerName ?? null}
+            />
           </div>
 
           {/* Timeline pane */}
-          <div className={`flex-1 flex flex-col overflow-hidden
+          <div className={`flex-1 flex flex-col overflow-hidden min-w-0
             ${activeTab === 'timeline' ? 'flex' : 'hidden md:flex'}`}>
-            <div className="px-5 py-3 border-b border-slate-100 bg-white flex items-center gap-3">
+            <div className="px-5 py-3 border-b border-slate-100 bg-white flex items-center gap-3 flex-shrink-0">
               <h2 className="font-semibold text-slate-800 flex items-center gap-2">
                 时间轴
                 {timeline.length > 0 && (
@@ -576,11 +621,20 @@ export default function Game() {
                 )}
               </h2>
               <div className="flex-1" />
+              {/* Selected batch validate (timeline header, mobile) */}
+              {isDeferred && !gameFinished && selectedPendingIds.size > 0 && (
+                <button
+                  onClick={() => handleSettle(false, true)}
+                  disabled={settling}
+                  className="text-xs px-2 py-1 bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 transition-colors font-medium">
+                  ✓ 验证选中({selectedPendingIds.size})
+                </button>
+              )}
               <button onClick={handleHint} disabled={hintLoading}
                 className="btn-ghost text-xs py-1 px-2 sm:hidden">
                 {hintLoading ? '...' : '💡'}
               </button>
-              {isDeferred && !gameFinished && pendingConcepts.length > 0 && (
+              {isDeferred && !gameFinished && pendingConcepts.length > 0 && selectedPendingIds.size === 0 && (
                 <button onClick={() => handleSettle(false)} disabled={settling}
                   className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors sm:hidden">
                   ⚖️ 结算
@@ -590,13 +644,15 @@ export default function Game() {
                 <button onClick={handleFinish} className="btn-ghost text-xs py-1 px-2 text-red-400 sm:hidden">⏹</button>
               )}
             </div>
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden min-h-0">
               <Timeline
                 timeline={timeline}
                 pendingConcepts={pendingConcepts}
                 newestId={newestId}
                 onValidateConcept={!gameFinished ? handleValidateSingle : undefined}
                 validatingConceptIds={validatingConceptIds}
+                isDeferred={isDeferred}
+                selectedPendingIds={selectedPendingIds}
               />
             </div>
           </div>

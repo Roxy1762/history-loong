@@ -4,10 +4,16 @@
  * Supported provider types:
  *   'anthropic'        — Anthropic Claude (native SDK)
  *   'openai-compatible' — Any OpenAI-compatible API (OpenAI, DeepSeek, Qwen, Ollama, etc.)
+ *   'google'           — Google AI Studio / Gemini
  *
  * Resolution order for active config:
  *   1. Active row in ai_configs table
- *   2. Environment variables (ANTHROPIC_API_KEY / OPENAI_BASE_URL)
+ *   2. Environment variables (ANTHROPIC_API_KEY / OPENAI_BASE_URL / GOOGLE_AI_KEY)
+ *
+ * Token optimisation:
+ *   • Validation prompt trimmed to ~120 tokens input, 150 tokens output
+ *   • Hints prompt trimmed to ~80 tokens input, 80 tokens output
+ *   • system_prompt (per-config) prepended when set
  */
 
 const Anthropic = require('@anthropic-ai/sdk');
@@ -18,17 +24,28 @@ const cacheService = require('./cacheService');
 
 async function callAnthropic(config, prompt, maxTokens) {
   const client = new Anthropic({ apiKey: config.api_key });
-  const resp = await client.messages.create({
+  const msgParams = {
     model: config.model,
     max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
-  });
+  };
+  // Use system param for system_prompt (saves input tokens vs embedding in user message)
+  if (config.system_prompt) {
+    msgParams.system = config.system_prompt;
+  }
+  const resp = await client.messages.create(msgParams);
   return resp.content[0].text.trim();
 }
 
 async function callOpenAICompatible(config, prompt, maxTokens) {
   const base = (config.base_url || '').replace(/\/$/, '');
   const url = `${base}/chat/completions`;
+
+  const messages = [];
+  if (config.system_prompt) {
+    messages.push({ role: 'system', content: config.system_prompt });
+  }
+  messages.push({ role: 'user', content: prompt });
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
@@ -43,7 +60,7 @@ async function callOpenAICompatible(config, prompt, maxTokens) {
       body: JSON.stringify({
         model: config.model,
         max_tokens: maxTokens,
-        messages: [{ role: 'user', content: prompt }],
+        messages,
       }),
       signal: controller.signal,
     });
@@ -65,11 +82,67 @@ async function callOpenAICompatible(config, prompt, maxTokens) {
   }
 }
 
+async function callGoogle(config, prompt, maxTokens) {
+  const model = config.model || 'gemini-2.0-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.api_key}`;
+
+  const contents = [];
+  // Google doesn't have a separate system field in the same way; prepend as user turn if set
+  if (config.system_prompt) {
+    contents.push({
+      role: 'user',
+      parts: [{ text: config.system_prompt }],
+    });
+    contents.push({
+      role: 'model',
+      parts: [{ text: '好的，我已理解。' }],
+    });
+  }
+  contents.push({
+    role: 'user',
+    parts: [{ text: prompt }],
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          maxOutputTokens: maxTokens,
+          temperature: 0.2,
+        },
+      }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new Error(`Google AI ${resp.status}: ${body.slice(0, 300)}`);
+    }
+    const data = await resp.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Google AI returned empty response');
+    return text.trim();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Google AI 请求超时（30秒）');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── Provider registry (extension point) ──────────────────────────────────────
 
 const PROVIDER_HANDLERS = {
   anthropic: callAnthropic,
   'openai-compatible': callOpenAICompatible,
+  google: callGoogle,
 };
 
 /** Register a custom provider handler (for plugins) */
@@ -110,6 +183,16 @@ function resolveConfigs() {
       extra: {},
     });
   }
+  if (process.env.GOOGLE_AI_KEY) {
+    configs.push({
+      id: 'env_google',
+      provider_type: 'google',
+      api_key: process.env.GOOGLE_AI_KEY,
+      model: process.env.GOOGLE_AI_MODEL || 'gemini-2.0-flash',
+      is_active: configs.length === 0 ? 1 : 0,
+      extra: {},
+    });
+  }
 
   return configs;
 }
@@ -121,7 +204,7 @@ function resolveConfig() {
 
 // ── Core call (deprecated, use completeWithFailover) ────────────────────────
 
-async function complete(prompt, maxTokens = 800) {
+async function complete(prompt, maxTokens = 300) {
   return completeWithFailover(prompt, maxTokens);
 }
 
@@ -130,13 +213,13 @@ async function complete(prompt, maxTokens = 800) {
 async function testConfig(configRow) {
   const handler = PROVIDER_HANDLERS[configRow.provider_type];
   if (!handler) throw new Error(`未知类型: ${configRow.provider_type}`);
-  const text = await handler(configRow, '请回复"连接成功"四个字，不要其他内容。', 50);
+  const text = await handler(configRow, '请回复"连接成功"四个字，不要其他内容。', 30);
   return text;
 }
 
 // ── AI call with failover chain ───────────────────────────────────────────────
 
-async function completeWithFailover(prompt, maxTokens = 800) {
+async function completeWithFailover(prompt, maxTokens = 300) {
   const configs = resolveConfigs();
   if (!configs.length) {
     throw new Error('未配置 AI 服务，请在后台管理界面添加 AI 配置');
@@ -153,11 +236,11 @@ async function completeWithFailover(prompt, maxTokens = 800) {
 
     try {
       const result = await handler(config, prompt, maxTokens);
-      console.log(`[AI] Success with config ${i} (${config.name})`);
+      console.log(`[AI] Success with config ${i} (${config.name || config.id})`);
       return result;
     } catch (err) {
       lastError = err;
-      console.warn(`[AI] Config ${i} (${config.name}) failed: ${err.message}, trying next...`);
+      console.warn(`[AI] Config ${i} (${config.name || config.id}) failed: ${err.message}, trying next...`);
     }
   }
 
@@ -166,6 +249,10 @@ async function completeWithFailover(prompt, maxTokens = 800) {
 
 // ── Game AI methods ───────────────────────────────────────────────────────────
 
+/**
+ * Optimised single-concept validation prompt (~100 input tokens, 150 output tokens).
+ * system_prompt is passed to the provider separately when available.
+ */
 async function validateConcept(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
   // Check cache first (same input + topic = same output always)
   const cached = cacheService.get(concept, topic);
@@ -174,57 +261,46 @@ async function validateConcept(concept, topic, existing = [], gameMode = {}, kno
     return cached;
   }
 
-  // Limit existing list to last 10, compact format
-  const recentExisting = existing.slice(-10);
-  const existingText = recentExisting.length
-    ? recentExisting.map((c) => `${c.name}(${c.year ?? '?'})`).join('、')
-    : '无';
+  // Last 5 accepted concepts only (saves tokens)
+  const recentNames = existing.slice(-5).map(c => c.name).join('、') || '无';
 
   const modeHint = gameMode.mode === 'ordered'
-    ? '时间顺序模式：新概念须晚于已有最新时间。'
+    ? '时序模式：须晚于已有最新时间。'
     : gameMode.mode === 'chain'
-    ? '接龙模式：新概念须与上一概念有明确历史关联。'
+    ? '关联模式：须与上一概念有历史关联。'
     : '';
 
-  const knowledgeSection = knowledgeContext
-    ? `【参考资料】\n${knowledgeContext}\n`
-    : '';
+  const kb = knowledgeContext ? `参考：${knowledgeContext.slice(0, 200)}\n` : '';
 
-  const prompt = `历史接龙游戏验证。主题：${topic}。已有：${existingText}。${modeHint}
-${knowledgeSection}
-玩家提交：「${concept}」
-
-判断是否为与主题相关的有效历史概念，返回JSON（禁止markdown）：
-有效：{"valid":true,"name":"标准名","period":"时间描述","year":-356,"dynasty":"朝代","description":"简介不超40字","tags":["标签"],"extra":{}}
+  // Compact prompt — uses fewer tokens while preserving accuracy
+  const prompt = `历史接龙。主题：${topic}。已有：${recentNames}。${modeHint}
+${kb}验证「${concept}」是否为有效历史概念，返回JSON（禁止markdown）：
+有效：{"valid":true,"name":"标准名","year":-356,"dynasty":"朝代","period":"时段","description":"简介≤30字","tags":["标签"],"difficulty":3}
 无效：{"valid":false,"reason":"原因"}
-year：公元前负数，公元后正数，时间段取起始年，不确定填null。`;
+year：BC负数，AD正数，时间段取起始，不确定null。difficulty：概念冷僻程度1(常见)~5(冷僻)。`;
 
-  const text = await completeWithFailover(prompt, 400);
+  const text = await completeWithFailover(prompt, 200);
   const result = extractJSON(text);
 
-  // Cache the result for future identical submissions
   if (result && result.valid) {
-    cacheService.set(concept, topic, result, resolveConfig().model);
+    cacheService.set(concept, topic, result, resolveConfig()?.model);
   }
 
   return result;
 }
 
 /**
- * Batch validate multiple concepts in a single AI call.
- * concepts: [{ id, raw_input }]
- * Returns: [{ id, valid, name?, year?, dynasty?, period?, description?, tags?, reason? }]
+ * Batch validate — 10 per call (up from 8), shorter per-item prompt.
  */
 async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
   if (!concepts.length) return [];
 
-  const BATCH = 8; // concepts per AI call
+  const BATCH = 10;
   const results = [];
 
   for (let i = 0; i < concepts.length; i += BATCH) {
     const slice = concepts.slice(i, i + BATCH);
 
-    // Check cache for each concept
     const cached = [];
     const toValidate = [];
     for (const c of slice) {
@@ -237,18 +313,14 @@ async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
     }
 
     if (toValidate.length > 0) {
-      const list = toValidate.map((c, idx) => `${idx + 1}. ${c.raw_input}`).join('\n');
-      const knowledgeSection = knowledgeContext
-        ? `【参考资料】\n${knowledgeContext}\n` : '';
+      const list = toValidate.map((c, idx) => `${idx + 1}.${c.raw_input}`).join(' ');
+      const kb = knowledgeContext ? `参考：${knowledgeContext.slice(0, 150)}\n` : '';
 
-      const prompt = `批量验证历史接龙概念。主题：${topic}。
-${knowledgeSection}验证以下${toValidate.length}项，返回等长JSON数组（禁止markdown）：
+      const prompt = `批量验证历史接龙（主题：${topic}）。${kb}验证${toValidate.length}项，返回等长JSON数组（禁止markdown）：
 ${list}
+格式：[{"index":1,"valid":true,"name":"名","year":-356,"dynasty":"朝","period":"时","description":"≤30字","tags":["t"],"difficulty":3},{"index":2,"valid":false,"reason":"原因"}]`;
 
-格式：[{"index":1,"valid":true,"name":"标准名","year":-356,"dynasty":"朝代","period":"时间","description":"简介不超40字","tags":["标签"]},{"index":2,"valid":false,"reason":"原因"}]
-year：公元前负数，公元后正数，时间段取起始年，不确定填null。`;
-
-      const text = await completeWithFailover(prompt, 700);
+      const text = await completeWithFailover(prompt, 400);
       const arr = extractJSON(text);
       if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
 
@@ -257,14 +329,12 @@ year：公元前负数，公元后正数，时间段取起始年，不确定填n
         const fullResult = { id: toValidate[j].id, ...r };
         results.push(fullResult);
 
-        // Cache valid results
         if (r.valid) {
-          cacheService.set(toValidate[j].raw_input, topic, r, resolveConfig().model);
+          cacheService.set(toValidate[j].raw_input, topic, r, resolveConfig()?.model);
         }
       }
     }
 
-    // Add cached results
     results.push(...cached);
   }
 
@@ -272,11 +342,11 @@ year：公元前负数，公元后正数，时间段取起始年，不确定填n
 }
 
 async function suggestConcepts(topic, existing = [], count = 3) {
-  const existingNames = existing.map((c) => c.name).join('、') || '无';
-  const prompt = `历史接龙游戏主题：${topic}。已出现的概念：${existingNames}。
-请推荐 ${count} 个尚未出现的、与主题相关的历史概念，每行一个，只写名称，不要编号或解释。`;
-  const text = await complete(prompt, 200);
-  return text.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, count);
+  const existingNames = existing.slice(-8).map(c => c.name).join('、') || '无';
+  // Compact hints prompt
+  const prompt = `历史接龙主题：${topic}。已有：${existingNames}。推荐${count}个未出现的相关历史概念，每行一个名称，不加编号。`;
+  const text = await complete(prompt, 100);
+  return text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, count);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -284,8 +354,12 @@ async function suggestConcepts(topic, existing = [], count = 3) {
 function extractJSON(text) {
   const clean = text.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
   try { return JSON.parse(clean); } catch { /* fall through */ }
-  const m = clean.match(/\{[\s\S]*\}/);
-  if (m) return JSON.parse(m[0]);
+  // Try object
+  const obj = clean.match(/\{[\s\S]*\}/);
+  if (obj) { try { return JSON.parse(obj[0]); } catch { /* fall through */ } }
+  // Try array
+  const arr = clean.match(/\[[\s\S]*\]/);
+  if (arr) { try { return JSON.parse(arr[0]); } catch { /* fall through */ } }
   throw new Error('Cannot parse AI response as JSON');
 }
 
@@ -296,6 +370,7 @@ module.exports = {
   suggestConcepts,
   testConfig,
   resolveConfig,
+  resolveConfigs,
   registerProviderHandler,
   PROVIDER_HANDLERS,
 };

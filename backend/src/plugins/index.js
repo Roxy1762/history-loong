@@ -39,6 +39,22 @@ const GAME_MODES = {
     label: '时序接龙',
     description: '所有概念必须按时间先后顺序提交',
   },
+  relay: {
+    label: '接力接龙',
+    description: '每轮每人只能提交一个概念，所有人都提交后开启下一轮',
+  },
+  'turn-order': {
+    label: '轮流接龙',
+    description: '玩家按加入顺序严格轮流提交，等待轮到自己才能提交',
+  },
+  'score-race': {
+    label: '积分竞速',
+    description: '越冷僻的历史概念得分越高（AI评级1-5星），比拼谁得分最多',
+  },
+  challenge: {
+    label: '挑战接龙',
+    description: '每轮有随机挑战卡（如"提交军事事件""提交女性人物"），完成挑战获得额外积分',
+  },
 };
 
 // ── Plugin context ────────────────────────────────────────────────────────────

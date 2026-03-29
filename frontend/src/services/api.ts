@@ -65,7 +65,10 @@ export async function exportGame(gameId: string, format: ExportFormat) {
   const rawName = utf8Match ? decodeURIComponent(utf8Match[1]) : plainMatch?.[1];
   const filename = rawName ?? `history-loong-${gameId}.${format}`;
 
-  const url = URL.createObjectURL(response.data);
+  // Re-create the blob with explicit charset so browsers don't misinterpret encoding
+  const contentType = (response.headers['content-type'] as string) || 'application/octet-stream';
+  const typedBlob = new Blob([response.data], { type: contentType });
+  const url = URL.createObjectURL(typedBlob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
@@ -94,12 +97,13 @@ export async function adminGetStats() {
 export interface AIConfig {
   id: string;
   name: string;
-  provider_type: 'anthropic' | 'openai-compatible' | string;
+  provider_type: 'anthropic' | 'openai-compatible' | 'google' | string;
   base_url: string | null;
   api_key: string;
   model: string;
   is_active: number;
   extra: Record<string, unknown>;
+  system_prompt?: string | null;
   created_at: string;
 }
 
@@ -337,6 +341,44 @@ export async function adminDeleteCategory(id: string) {
 
 export async function adminCategorizeConcept(id: string, categoryId: string, remove = false) {
   const { data } = await api.post(`/admin/curation/concepts/${id}/categorize`, { categoryId, remove }, { headers: adminHeaders() });
+  return data;
+}
+
+// ── Admin: AI Validation Audit ───────────────────────────────────────────────
+
+export interface AIDecision {
+  id: string;
+  concept_id: string;
+  game_id: string;
+  validation_method: 'ai' | 'kb' | 'cache' | 'admin_override' | string;
+  ai_prompt: string | null;
+  ai_response: string | null;
+  ai_provider: string | null;
+  ai_model: string | null;
+  decision_made_at: string;
+  decision_ms: number | null;
+  // joined from concepts
+  name?: string | null;
+  raw_input?: string | null;
+  player_name?: string | null;
+  validated?: number;
+  rejected?: number;
+}
+
+export async function adminGetAIDecisions(gameId?: string) {
+  const params = gameId ? { game_id: gameId } : {};
+  const { data } = await api.get<{ decisions: AIDecision[] }>('/admin/audit', {
+    headers: adminHeaders(),
+    params,
+  });
+  return data.decisions;
+}
+
+export async function adminGetAIDecision(conceptId: string) {
+  const { data } = await api.get<{ decision: AIDecision | null; override: unknown | null }>(
+    `/admin/audit/${conceptId}`,
+    { headers: adminHeaders() }
+  );
   return data;
 }
 

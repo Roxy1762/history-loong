@@ -224,6 +224,7 @@ router.get('/ai-configs', (_req, res) => {
     ...c,
     api_key: maskKey(c.api_key),
     extra: JSON.parse(c.extra || '{}'),
+    system_prompt: c.system_prompt || null,
   }));
   res.json({ configs });
 });
@@ -244,7 +245,7 @@ router.post('/ai-configs', (req, res) => {
 });
 
 router.put('/ai-configs/:id', (req, res) => {
-  const { name, provider_type, base_url, api_key, model, extra = {} } = req.body;
+  const { name, provider_type, base_url, api_key, model, extra = {}, system_prompt } = req.body;
   const existing = db.getAIConfig.get(req.params.id);
   if (!existing) return res.status(404).json({ error: '配置不存在' });
 
@@ -259,6 +260,10 @@ router.put('/ai-configs/:id', (req, res) => {
     JSON.stringify(extra),
     req.params.id
   );
+  // Update system_prompt separately (may be null to clear)
+  if (system_prompt !== undefined) {
+    db.updateAIConfigSystemPrompt.run(system_prompt || null, req.params.id);
+  }
   console.log(`[Admin] AI config updated id=${req.params.id}`);
   res.json({ message: '更新成功' });
 });

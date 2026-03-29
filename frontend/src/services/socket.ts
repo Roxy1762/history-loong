@@ -2,7 +2,8 @@ import { io, Socket } from 'socket.io-client';
 import type {
   JoinPayload, JoinResponse, Message, Concept, Player,
   ConceptNewEvent, ConceptPendingEvent, ConceptValidatingEvent,
-  ConceptSettledEvent, SettleStartEvent, SettleDoneEvent, SettleProgressEvent,
+  ConceptSettledEvent, SettleStartEvent, SettleDoneEvent,
+  TurnUpdateEvent, ScoresUpdateEvent, ChallengeUpdateEvent,
 } from '../types';
 
 // ── Tiny client-side log buffer (last 200 entries, viewable in devtools) ──────
@@ -207,10 +208,11 @@ export function submitConcept(rawInput: string): Promise<{ ok?: boolean; error?:
   }));
 }
 
-/** Batch-settle all pending concepts. endGame=true also ends the game session. */
-export function settleConcepts(endGame = false): Promise<{ ok?: boolean; error?: string; total?: number }> {
-  slog('info', `settleConcepts emit endGame=${endGame}`);
-  return new Promise(resolve => getSocket().emit('game:settle', { endGame }, resolve));
+/** Batch-settle all pending concepts. endGame=true also ends the game session.
+ *  conceptIds — if provided, only validate those specific pending concepts (multi-select). */
+export function settleConcepts(endGame = false, conceptIds?: string[]): Promise<{ ok?: boolean; error?: string; total?: number }> {
+  slog('info', `settleConcepts emit endGame=${endGame} ids=${conceptIds?.length ?? 'all'}`);
+  return new Promise(resolve => getSocket().emit('game:settle', { endGame, conceptIds }, resolve));
 }
 
 export function sendMessage(content: string): Promise<{ ok?: boolean; error?: string }> {
@@ -246,12 +248,17 @@ export type SocketEventMap = {
   'concept:validating':  (e: ConceptValidatingEvent) => void;
   'concept:settled':     (e: ConceptSettledEvent) => void;
   'game:settle:start':   (e: SettleStartEvent) => void;
-  'game:settle:progress':(e: SettleProgressEvent) => void;
+  'game:settle:progress':(e: { done: number; total: number }) => void;
   'game:settle:done':    (e: SettleDoneEvent) => void;
   'players:update':      (e: { players: Player[] }) => void;
   'game:finished':       () => void;
   'game:deleted':        () => void;
   'game:restored':       () => void;
+  // New mode events
+  'turn:update':         (e: TurnUpdateEvent) => void;
+  'scores:update':       (e: ScoresUpdateEvent) => void;
+  'challenge:update':    (e: ChallengeUpdateEvent) => void;
+  'relay:round_reset':   (e: Record<string, never>) => void;
   'connect':             () => void;
   'disconnect':          (reason: string) => void;
   'connect_error':       (err: Error) => void;
