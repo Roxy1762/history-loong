@@ -9,6 +9,12 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
 const { ingestDocument, deleteDocument, listAIConfirmedDocs } = require('../services/knowledgeService');
+const auditSvc = require('../services/auditService');
+const cacheSvc = require('../services/cacheService');
+const profileSvc = require('../services/profileService');
+const messageSvc = require('../services/messageService');
+const settlementSvc = require('../services/settlementService');
+const curationSvc = require('../services/curationService');
 
 const router = express.Router();
 const upload = multer({
@@ -379,7 +385,250 @@ router.get('/logs', (req, res) => {
   res.json({ count: logs.length, logs });
 });
 
+// ── AI Validation Audit ───────────────────────────────────────────────────────
+
+router.get('/audit', (req, res) => {
+  const { game_id, method, outcome } = req.query;
+  const decisions = auditSvc.listDecisions({ gameId: game_id, method, outcome });
+  console.log(`[Admin] GET /audit count=${decisions.length}`);
+  res.json({ decisions });
+});
+
+router.get('/audit/:conceptId', (req, res) => {
+  const decision = auditSvc.getDecision(req.params.conceptId);
+  const override = auditSvc.getOverride(req.params.conceptId);
+  if (!decision) return res.status(404).json({ error: '未找到验证记录' });
+  res.json({ decision, override });
+});
+
+router.post('/audit/:conceptId/override', (req, res) => {
+  const { decision, reason } = req.body;
+  if (!['accepted', 'rejected'].includes(decision)) {
+    return res.status(400).json({ error: 'decision 必须是 accepted 或 rejected' });
+  }
+  try {
+    const result = auditSvc.overrideConcept(req.params.conceptId, decision, reason);
+    logAdminAction('concept_override', 'concept', req.params.conceptId, { decision, reason });
+    console.log(`[Admin] Override concept id=${req.params.conceptId} decision=${decision}`);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Validation Cache ──────────────────────────────────────────────────────────
+
+router.get('/cache/stats', (_req, res) => {
+  res.json({ stats: cacheSvc.getStats() });
+});
+
+router.delete('/cache', (_req, res) => {
+  const count = cacheSvc.clearAll();
+  logAdminAction('cache_clear', 'cache', null, { count });
+  res.json({ message: `已清空 ${count} 条缓存` });
+});
+
+// ── Settlement Recovery ───────────────────────────────────────────────────────
+
+router.get('/settlements/incomplete', (_req, res) => {
+  const items = settlementSvc.getIncompleteSettlements();
+  res.json({ settlements: items });
+});
+
+router.post('/settlements/:gameId/retry', async (req, res) => {
+  const gameId = req.params.gameId.toUpperCase();
+  const game = db.getGame.get(gameId);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+  if (game.settle_status !== 'started' && game.settle_status !== 'failed') {
+    return res.status(400).json({ error: '该游戏没有未完成的结算' });
+  }
+
+  // Let the socket handler do the actual settlement; just clear the stuck flag
+  // so players can trigger it again.
+  settlementSvc.rollbackSettlement(gameId);
+
+  const setupSocket = require('../socket');
+  const io = setupSocket._io;
+  if (io) {
+    io.to(gameId).emit('message:new', {
+      id: uuidv4(), game_id: gameId, player_id: null, player_name: null,
+      type: 'system', content: '管理员已重置结算状态，可重新触发结算',
+      meta: {}, created_at: new Date().toISOString(),
+    });
+  }
+  logAdminAction('settlement_retry', 'game', gameId, {});
+  res.json({ message: '结算状态已重置' });
+});
+
+router.post('/settlements/:gameId/rollback', (req, res) => {
+  const gameId = req.params.gameId.toUpperCase();
+  const game = db.getGame.get(gameId);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  settlementSvc.rollbackSettlement(gameId);
+  logAdminAction('settlement_rollback', 'game', gameId, {});
+  res.json({ message: '结算已回滚，待验证概念保留' });
+});
+
+router.post('/settlements/:gameId/abandon', (req, res) => {
+  const gameId = req.params.gameId.toUpperCase();
+  const game = db.getGame.get(gameId);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  settlementSvc.failSettlement(gameId);
+  logAdminAction('settlement_abandon', 'game', gameId, {});
+  res.json({ message: '结算已标记失败，玩家可重新加入' });
+});
+
+// ── Knowledge Curation ────────────────────────────────────────────────────────
+
+router.get('/curation/pending', (_req, res) => {
+  const items = curationSvc.getPendingIngestions();
+  res.json({ concepts: items });
+});
+
+router.get('/curation/concepts', (req, res) => {
+  const status = req.query.status || 'active';
+  const items = curationSvc.getActiveConcepts(status);
+  res.json({ concepts: items });
+});
+
+router.post('/curation/concepts/:id/approve', (req, res) => {
+  try {
+    const result = curationSvc.approveConcept(req.params.id);
+    logAdminAction('kb_approve', 'knowledge', req.params.id, {});
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/curation/concepts/approve-all', (_req, res) => {
+  const result = curationSvc.approveAll();
+  logAdminAction('kb_approve_all', 'knowledge', null, result);
+  res.json(result);
+});
+
+router.post('/curation/concepts/:id/archive', (req, res) => {
+  try {
+    const result = curationSvc.archiveConcept(req.params.id);
+    logAdminAction('kb_archive', 'knowledge', req.params.id, {});
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/curation/concepts/:id', (req, res) => {
+  try {
+    const result = curationSvc.rejectConcept(req.params.id);
+    logAdminAction('kb_delete', 'knowledge', req.params.id, {});
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/curation/concepts/:id', (req, res) => {
+  try {
+    const result = curationSvc.editConcept(req.params.id, req.body);
+    logAdminAction('kb_edit', 'knowledge', req.params.id, req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/curation/concepts/:id/categorize', (req, res) => {
+  const { categoryId, remove } = req.body;
+  if (!categoryId) return res.status(400).json({ error: '请提供 categoryId' });
+  if (remove) {
+    curationSvc.removeFromCategory(req.params.id, categoryId);
+  } else {
+    curationSvc.assignCategory(req.params.id, categoryId);
+  }
+  res.json({ ok: true });
+});
+
+router.get('/curation/categories', (_req, res) => {
+  res.json({ categories: curationSvc.listCategories() });
+});
+
+router.post('/curation/categories', (req, res) => {
+  const { name, color, sortOrder } = req.body;
+  if (!name) return res.status(400).json({ error: '请提供分类名称' });
+  const cat = curationSvc.createCategory(name, color, sortOrder);
+  logAdminAction('category_create', 'category', cat.id, { name });
+  res.json(cat);
+});
+
+router.delete('/curation/categories/:id', (req, res) => {
+  curationSvc.deleteCategory(req.params.id);
+  logAdminAction('category_delete', 'category', req.params.id, {});
+  res.json({ ok: true });
+});
+
+// ── Message Archive ───────────────────────────────────────────────────────────
+
+router.get('/games/:id/messages', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = parseInt(req.query.offset) || 0;
+  const messages = messageSvc.getMessages(id, limit, offset);
+  const total = messageSvc.getMessageCount(id);
+  res.json({ messages, total, limit, offset });
+});
+
+router.get('/games/:id/messages/archive', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const messages = messageSvc.getArchivedMessages(id, limit, offset);
+  res.json({ messages, limit, offset });
+});
+
+router.post('/messages/archive', (_req, res) => {
+  const count = messageSvc.archiveAllOldMessages();
+  logAdminAction('messages_archive', 'messages', null, { archived: count });
+  res.json({ message: `已归档 ${count} 条消息` });
+});
+
+// ── Admin Audit Log ───────────────────────────────────────────────────────────
+
+router.get('/audit-log', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const logs = db.listAdminAudit.all(limit);
+  res.json({ logs });
+});
+
+// ── AI Config Priority ────────────────────────────────────────────────────────
+
+router.put('/ai-configs/:id/priority', (req, res) => {
+  const { priority, is_fallback } = req.body;
+  const existing = db.getAIConfig.get(req.params.id);
+  if (!existing) return res.status(404).json({ error: '配置不存在' });
+  db.updateAIConfigPriority.run(
+    priority ?? existing.priority ?? 0,
+    is_fallback ? 1 : 0,
+    req.params.id
+  );
+  logAdminAction('ai_config_priority', 'ai_config', req.params.id, { priority, is_fallback });
+  res.json({ ok: true });
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function logAdminAction(action, resourceType, resourceId, changes) {
+  try {
+    db.insertAdminAudit.run(
+      uuidv4(),
+      action,
+      resourceType || null,
+      resourceId || null,
+      JSON.stringify(changes || {})
+    );
+  } catch { /* non-fatal */ }
+}
 
 function maskKey(key = '') {
   if (key.length <= 8) return '***';
