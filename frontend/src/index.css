@@ -414,10 +414,10 @@
   50%       { transform: translateY(-4px); }
 }
 
-/* Width expand — progress bars, reveal effects */
+/* Width expand — progress bars, reveal effects (scaleX avoids layout triggers) */
 @keyframes expandWidth {
-  from { width: 0%; }
-  to   { width: 100%; }
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
 }
 
 /* Glow ring — for highlighted/new items */
@@ -453,18 +453,20 @@
 .animate-slide-up       { animation: slideUp    0.28s ease-out both; }
 .animate-slide-down     { animation: slideDown  0.22s ease-out both; }
 .animate-slide-in-right { animation: slideInRight 0.2s ease-out both; }
-.animate-spring-in      { animation: springIn   0.4s cubic-bezier(0.34,1.56,0.64,1) both; }
-.animate-pop-in         { animation: popIn      0.3s cubic-bezier(0.34,1.56,0.64,1) both; }
-.animate-float          { animation: float      3s ease-in-out infinite; }
-.animate-expand-width   { animation: expandWidth 0.6s ease-out both; }
-.animate-glow-ring      { animation: glowRing   1.8s ease-in-out infinite; }
+/* spring/pop use transform+opacity — GPU composited, no layout triggers */
+.animate-spring-in      { animation: springIn   0.4s cubic-bezier(0.34,1.56,0.64,1) both; will-change: transform, opacity; }
+.animate-pop-in         { animation: popIn      0.3s cubic-bezier(0.34,1.56,0.64,1) both; will-change: transform, opacity; }
+/* Continuous animations: hint GPU layer promotion */
+.animate-float          { animation: float      3s ease-in-out infinite; will-change: transform; }
+.animate-expand-width   { animation: expandWidth 0.6s ease-out both; transform-origin: left center; }
+.animate-glow-ring      { animation: glowRing   1.8s ease-in-out infinite; will-change: box-shadow; }
 .animate-tab-in         { animation: tabSlideIn 0.2s ease-out both; }
 .animate-tab-in-left    { animation: tabSlideInLeft 0.2s ease-out both; }
-.animate-rotate-in      { animation: rotateIn   0.3s cubic-bezier(0.34,1.56,0.64,1) both; }
-.animate-pulse-scale    { animation: pulseScale 2s ease-in-out infinite; }
+.animate-rotate-in      { animation: rotateIn   0.3s cubic-bezier(0.34,1.56,0.64,1) both; will-change: transform, opacity; }
+.animate-pulse-scale    { animation: pulseScale 2s ease-in-out infinite; will-change: transform; }
 
 /* Timeline pulse for new concepts */
-.timeline-dot-new { animation: dotPulse 1.2s ease-in-out 3; }
+.timeline-dot-new { animation: dotPulse 1.2s ease-in-out 3; will-change: box-shadow; }
 
 /* Staggered list entrance (apply with JS or inline style) */
 .stagger-1 { animation-delay: 60ms; }
@@ -479,6 +481,7 @@
   background-size: 400% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
+  will-change: background-position;
 }
 
 /* Gradient text */
@@ -546,13 +549,34 @@
 [data-theme="jade"] .era-song-yuan { border-left-color: #2d6248; background-color: #e6f4ec; }
 [data-theme="jade"] .era-modern    { border-left-color: #5ca878; background-color: #edfbf2; }
 
-/* Theme transition: smooth change */
-[data-theme] * {
+/* Theme transition: smooth change — scoped to the brief switching window only.
+   ThemeContext adds .theme-transitioning on <html> for 300ms during a switch,
+   then removes it, so the costly per-element transition isn't permanent. */
+.theme-transitioning * {
   transition-property: background-color, border-color, color, fill, stroke;
   transition-duration: 0.25s;
   transition-timing-function: ease;
 }
-/* But don't transition animations themselves */
-[data-theme] *[class*="animate-"] {
+/* Don't override running animations during a theme switch */
+.theme-transitioning *[class*="animate-"] {
   transition: none;
+}
+
+/* Respect user's motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .animate-float,
+  .animate-glow-ring,
+  .animate-pulse-scale,
+  .animate-spring-in,
+  .animate-pop-in,
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-slide-down,
+  .animate-slide-in-right,
+  .animate-tab-in,
+  .animate-tab-in-left,
+  .animate-rotate-in,
+  .animate-expand-width,
+  .timeline-dot-new,
+  .skeleton { animation: none !important; will-change: auto !important; }
 }

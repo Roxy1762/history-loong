@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, memo, useCallback } from 'react';
 import type { Concept } from '../types';
 
 interface Props {
@@ -170,7 +170,7 @@ const Timeline = memo(function Timeline({
                   color={color}
                   isNew={c.id === newestId}
                   expanded={expandedId === c.id}
-                  onToggle={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                  onToggle={setExpandedId}
                 />
               ))}
             </div>
@@ -190,10 +190,14 @@ interface CardProps {
   color: { dot: string; badge: string; line: string };
   isNew: boolean;
   expanded: boolean;
-  onToggle: () => void;
+  onToggle: (id: string | null) => void;
 }
 
-function ConceptCard({ concept: c, color, isNew, expanded, onToggle }: CardProps) {
+const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle }: CardProps) {
+  const handleToggle = useCallback(
+    () => onToggle(expanded ? null : c.id),
+    [onToggle, expanded, c.id],
+  );
   return (
     <div className={`relative ${isNew ? 'animate-spring-in' : 'animate-slide-up'}`}>
       {/* Timeline dot */}
@@ -201,7 +205,7 @@ function ConceptCard({ concept: c, color, isNew, expanded, onToggle }: CardProps
         ${color.dot} ${isNew ? 'timeline-dot-new scale-125' : ''}`} />
 
       <button
-        onClick={onToggle}
+        onClick={handleToggle}
         className={`w-full text-left bg-white rounded-2xl border shadow-sm hover:shadow-md
           transition-all duration-200 hover:-translate-y-0.5
           ${isNew ? 'border-indigo-300 ring-2 ring-indigo-100 animate-glow-ring' : 'border-slate-100 hover:border-slate-200'}`}
@@ -265,4 +269,4 @@ function ConceptCard({ concept: c, color, isNew, expanded, onToggle }: CardProps
       </button>
     </div>
   );
-}
+});
