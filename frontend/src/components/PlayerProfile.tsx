@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { X, Award, TrendingUp, Target } from 'lucide-react';
 
 interface PlayerAchievement {
   id: string;
@@ -86,9 +85,9 @@ export function PlayerProfile({ playerId, onClose }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-white/20 rounded-lg transition"
+            className="p-2 hover:bg-white/20 rounded-lg transition text-xl"
           >
-            <X className="w-5 h-5" />
+            ✕
           </button>
         </div>
 
@@ -96,7 +95,7 @@ export function PlayerProfile({ playerId, onClose }: Props) {
         <div className="p-6 border-b border-border grid grid-cols-2 gap-4">
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center gap-2 text-muted mb-1">
-              <Target className="w-4 h-4" />
+              <span className="text-lg">🎯</span>
               <span className="text-xs font-semibold">通过率</span>
             </div>
             <p className="text-2xl font-bold text-primary">{profile.acceptanceRate.toFixed(1)}%</p>
@@ -104,7 +103,7 @@ export function PlayerProfile({ playerId, onClose }: Props) {
 
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center gap-2 text-muted mb-1">
-              <TrendingUp className="w-4 h-4" />
+              <span className="text-lg">✓</span>
               <span className="text-xs font-semibold">通过数</span>
             </div>
             <p className="text-2xl font-bold text-primary">{profile.total_accepted}</p>
@@ -112,6 +111,7 @@ export function PlayerProfile({ playerId, onClose }: Props) {
 
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center gap-2 text-muted mb-1">
+              <span className="text-lg">📝</span>
               <span className="text-xs font-semibold">提交数</span>
             </div>
             <p className="text-2xl font-bold text-primary">{profile.total_submitted}</p>
@@ -119,6 +119,7 @@ export function PlayerProfile({ playerId, onClose }: Props) {
 
           <div className="bg-muted/30 rounded-lg p-3">
             <div className="flex items-center gap-2 text-muted mb-1">
+              <span className="text-lg">🎮</span>
               <span className="text-xs font-semibold">游戏数</span>
             </div>
             <p className="text-2xl font-bold text-primary">{profile.games_played}</p>
@@ -129,7 +130,7 @@ export function PlayerProfile({ playerId, onClose }: Props) {
         {profile.achievements && profile.achievements.length > 0 && (
           <div className="p-6 border-b border-border">
             <div className="flex items-center gap-2 mb-4">
-              <Award className="w-5 h-5 text-brand" />
+              <span className="text-xl">🏆</span>
               <h3 className="font-semibold text-primary">成就徽章</h3>
               <span className="ml-auto text-xs bg-brand/20 text-brand px-2 py-1 rounded">
                 {profile.achievements.length} 个
@@ -141,8 +142,8 @@ export function PlayerProfile({ playerId, onClose }: Props) {
                   key={badge.id}
                   className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800"
                 >
-                  <div className="p-2 bg-yellow-100 dark:bg-yellow-900 rounded text-yellow-600 dark:text-yellow-300 flex-shrink-0">
-                    <Award className="w-4 h-4" />
+                  <div className="p-2 bg-yellow-100 dark:bg-yellow-900 rounded text-yellow-600 dark:text-yellow-300 flex-shrink-0 text-lg">
+                    ⭐
                   </div>
                   <div className="flex-grow">
                     <p className="font-semibold text-primary">{badge.label}</p>

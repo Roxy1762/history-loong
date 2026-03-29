@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Star, Trophy, Medal, Zap } from 'lucide-react';
 
 interface LeaderboardEntry {
   id: string;
@@ -45,13 +44,15 @@ export function Leaderboard() {
   const getBadgeIcon = (type: string) => {
     switch (type) {
       case 'first_concept':
-        return <Zap className="w-4 h-4" />;
+        return '⚡';
       case 'century_accepted':
-        return <Star className="w-4 h-4" />;
+        return '⭐';
       case 'five_games':
-        return <Medal className="w-4 h-4" />;
+        return '🎖️';
+      case 'high_accuracy':
+        return '🎯';
       default:
-        return <Trophy className="w-4 h-4" />;
+        return '🏆';
     }
   };
 
@@ -96,18 +97,18 @@ export function Leaderboard() {
 
                 {/* Achievements */}
                 {entry.achievements && entry.achievements.length > 0 && (
-                  <div className="flex-shrink-0 flex gap-2">
+                  <div className="flex-shrink-0 flex gap-1">
                     {entry.achievements.slice(0, 3).map((badge, idx) => (
                       <div
                         key={idx}
                         title={`${badge.label}: ${badge.desc}`}
-                        className="p-2 rounded-full bg-yellow-100 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-300"
+                        className="text-lg hover:scale-125 transition-transform"
                       >
                         {getBadgeIcon(badge.badge_type)}
                       </div>
                     ))}
                     {entry.achievements.length > 3 && (
-                      <div className="p-2 rounded-full bg-muted text-muted text-sm font-semibold">
+                      <div className="text-xs font-semibold text-muted self-center">
                         +{entry.achievements.length - 3}
                       </div>
                     )}
@@ -120,7 +121,7 @@ export function Leaderboard() {
 
         {entries.length === 0 && (
           <div className="text-center py-12">
-            <Trophy className="w-16 h-16 mx-auto text-muted opacity-50 mb-4" />
+            <div className="text-6xl mx-auto text-muted opacity-50 mb-4">🏆</div>
             <p className="text-muted">暂无排行榜数据</p>
           </div>
         )}
