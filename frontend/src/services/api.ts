@@ -248,6 +248,98 @@ export async function adminClearAIConfirmed() {
   return data as { message: string };
 }
 
+// ── Admin: Knowledge Curation ────────────────────────────────────────────────
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  sort_order: number;
+}
+
+export interface CurationConcept {
+  id: string;
+  title: string;
+  filename: string;
+  total_chunks: number;
+  source: string;
+  game_id: string | null;
+  status: 'draft' | 'active' | 'archived';
+  created_at: string;
+  categories: Category[];
+  dynasty: string | null;
+  period: string | null;
+  year: number | null;
+  description: string | null;
+  tags: string[];
+}
+
+export async function adminGetCurationPending() {
+  const { data } = await api.get<{ concepts: CurationConcept[] }>('/admin/curation/pending', { headers: adminHeaders() });
+  return data.concepts;
+}
+
+export async function adminGetCurationActive(status = 'active') {
+  const { data } = await api.get<{ concepts: CurationConcept[] }>('/admin/curation/concepts', {
+    headers: adminHeaders(),
+    params: { status },
+  });
+  return data.concepts;
+}
+
+export async function adminApproveConcept(id: string) {
+  const { data } = await api.post(`/admin/curation/concepts/${id}/approve`, {}, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminApproveAll() {
+  const { data } = await api.post('/admin/curation/concepts/approve-all', {}, { headers: adminHeaders() });
+  return data as { approved: number };
+}
+
+export async function adminArchiveConcept(id: string) {
+  const { data } = await api.post(`/admin/curation/concepts/${id}/archive`, {}, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminRejectConcept(id: string) {
+  const { data } = await api.delete(`/admin/curation/concepts/${id}`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminEditConcept(id: string, patches: {
+  title?: string; dynasty?: string | null; period?: string | null;
+  year?: number | null; description?: string | null; tags?: string[];
+}) {
+  const { data } = await api.put(`/admin/curation/concepts/${id}`, patches, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminMergeConcepts(keepId: string, mergeIds: string[]) {
+  const { data } = await api.post('/admin/curation/concepts/merge', { keepId, mergeIds }, { headers: adminHeaders() });
+  return data as { ok: boolean; kept: string; deleted: number };
+}
+
+export async function adminListCategories() {
+  const { data } = await api.get<{ categories: Category[] }>('/admin/curation/categories', { headers: adminHeaders() });
+  return data.categories;
+}
+
+export async function adminCreateCategory(name: string, color?: string, sortOrder?: number) {
+  const { data } = await api.post('/admin/curation/categories', { name, color, sortOrder }, { headers: adminHeaders() });
+  return data as Category;
+}
+
+export async function adminDeleteCategory(id: string) {
+  const { data } = await api.delete(`/admin/curation/categories/${id}`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminCategorizeConcept(id: string, categoryId: string, remove = false) {
+  const { data } = await api.post(`/admin/curation/concepts/${id}/categorize`, { categoryId, remove }, { headers: adminHeaders() });
+  return data;
+}
+
 // ── Admin: Server Logs ───────────────────────────────────────────────────────
 
 export interface LogEntry {

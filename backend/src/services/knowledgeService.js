@@ -124,7 +124,9 @@ function ingestAIConfirmedConcept(concept, gameId) {
   const filename = `ai_confirmed_${concept.id || docId}.txt`;
 
   const insertAll = db.db.transaction(() => {
-    db.insertDocFull.run(docId, title, filename, 1, 'ai_confirmed', gameId || null);
+    // Insert as 'draft' so new AI-confirmed concepts enter the curation queue
+    // rather than going directly to the active knowledge base.
+    db.insertDocDraft.run(docId, title, filename, 1, 'ai_confirmed', gameId || null);
     const chunkId = uuidv4();
     db.insertChunk.run(chunkId, docId, 0, content);
     db.insertFTS.run(content, chunkId);
@@ -277,4 +279,4 @@ function splitIntoChunks(text, maxChars) {
   return chunks;
 }
 
-module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs, validateFromKnowledge };
+module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs, validateFromKnowledge, parseKBContent };

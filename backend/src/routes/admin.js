@@ -568,6 +568,20 @@ router.delete('/curation/categories/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/curation/concepts/merge', (req, res) => {
+  const { keepId, mergeIds } = req.body;
+  if (!keepId || !Array.isArray(mergeIds) || mergeIds.length === 0) {
+    return res.status(400).json({ error: '请提供 keepId 和 mergeIds 数组' });
+  }
+  try {
+    const result = curationSvc.mergeConcepts(keepId, mergeIds);
+    logAdminAction('kb_merge', 'knowledge', keepId, { mergeIds, deleted: result.deleted });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ── Message Archive ───────────────────────────────────────────────────────────
 
 router.get('/games/:id/messages', (req, res) => {
