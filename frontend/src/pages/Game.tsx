@@ -581,7 +581,7 @@ export default function Game() {
                 {hintLoading ? '...' : '💡'}
               </button>
               {isDeferred && !gameFinished && pendingConcepts.length > 0 && (
-                <button onClick={handleSettle} disabled={settling}
+                <button onClick={() => handleSettle(false)} disabled={settling}
                   className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors sm:hidden">
                   ⚖️ 结算
                 </button>
