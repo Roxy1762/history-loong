@@ -1,0 +1,464 @@
+--- /mnt/data/orig2/history-loong-main/backend/src/db/index.js	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/backend/src/db/index.js	2026-03-30 12:53:54.156577628 +0000
+@@ -278,6 +278,7 @@
+   createGame:        stmt(`INSERT INTO games (id, topic, mode, settings) VALUES (?, ?, ?, ?)`),
+   getGame:           stmt(`SELECT * FROM games WHERE id = ?`),
+   updateGameStatus:  stmt(`UPDATE games SET status = ?, updated_at = datetime('now') WHERE id = ?`),
++  updateGameMode:    stmt(`UPDATE games SET mode = ?, updated_at = datetime('now') WHERE id = ?`),
+   updateGameSettings:stmt(`UPDATE games SET settings = ?, updated_at = datetime('now') WHERE id = ?`),
+   updateGameNotes:   stmt(`UPDATE games SET notes = ?, updated_at = datetime('now') WHERE id = ?`),
+   listGames:         stmt(`SELECT id, topic, mode, status, created_at FROM games ORDER BY created_at DESC LIMIT 50`),
+--- /mnt/data/orig2/history-loong-main/backend/src/routes/admin.js	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/backend/src/routes/admin.js	2026-03-30 12:57:33.475229740 +0000
+@@ -15,6 +15,7 @@
+ const messageSvc = require('../services/messageService');
+ const settlementSvc = require('../services/settlementService');
+ const curationSvc = require('../services/curationService');
++const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
+ 
+ const router = express.Router();
+ const upload = multer({
+@@ -157,6 +158,61 @@
+   res.json({ message: '设置已更新', settings: merged });
+ });
+ 
++
++// Update primary mode + extra modes
++router.put('/games/:id/modes', (req, res) => {
++  const id = req.params.id.toUpperCase();
++  const { mode, extraModes = [] } = req.body;
++  console.log(`[Admin] PUT /games/${id}/modes mode=${mode} extraModes=${JSON.stringify(extraModes)}`);
++
++  const game = db.getGame.get(id);
++  if (!game) return res.status(404).json({ error: '游戏不存在' });
++
++  if (!mode || !GAME_MODES[mode]) {
++    return res.status(400).json({ error: '请提供有效的主模式' });
++  }
++  if (!Array.isArray(extraModes)) {
++    return res.status(400).json({ error: 'extraModes 必须是数组' });
++  }
++
++  const normalizedExtraModes = [...new Set(extraModes)]
++    .filter(Boolean)
++    .filter(em => em !== mode);
++
++  for (const em of normalizedExtraModes) {
++    if (!COMBINABLE_MODES[em] && !GAME_MODES[em]) {
++      return res.status(400).json({ error: `未知附加模式: ${em}` });
++    }
++  }
++
++  const existingSettings = JSON.parse(game.settings || '{}');
++  const nextSettings = { ...existingSettings, extraModes: normalizedExtraModes };
++
++  db.updateGameMode.run(mode, id);
++  db.updateGameSettings.run(JSON.stringify(nextSettings), id);
++
++  const updated = db.getGame.get(id);
++  const payload = {
++    ...updated,
++    settings: JSON.parse(updated.settings || '{}'),
++  };
++
++  db.insertMessage.run(
++    uuidv4(),
++    id,
++    null,
++    null,
++    'system',
++    `管理员已更新游戏模式：主模式「${mode}」${normalizedExtraModes.length > 0 ? `，附加模式 ${normalizedExtraModes.join('、')}` : ''}`,
++    JSON.stringify({ type: 'admin_mode_update', mode, extraModes: normalizedExtraModes })
++  );
++
++  res.json({
++    message: '游戏模式已更新',
++    game: payload,
++  });
++});
++
+ // Restore a finished/errored game back to playing
+ router.post('/games/:id/restore', (req, res) => {
+   const id = req.params.id.toUpperCase();
+--- /mnt/data/orig2/history-loong-main/backend/src/socket/index.js	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/backend/src/socket/index.js	2026-03-30 12:58:35.392148774 +0000
+@@ -101,6 +101,10 @@
+   return false;
+ }
+ 
++function getActiveModes(game, settings) {
++  return [...new Set([game.mode, ...(Array.isArray(settings?.extraModes) ? settings.extraModes : [])].filter(Boolean))];
++}
++
+ function pickColor(room) {
+   const used = new Set([...room.players.values()].map(p => p.color));
+   return COLORS.find(c => !used.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+@@ -226,7 +230,7 @@
+         const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+ 
+         // Init challenge card if needed
+-        if (game.mode === 'challenge' && !room.challengeCard) {
++        if (hasMode(game, settings, 'challenge') && !room.challengeCard) {
+           pickNextChallenge(room); // start with generic card immediately
+           // Generate topic-specific cards in background (replaces card when ready)
+           if (!room.topicCards) {
+@@ -254,7 +258,7 @@
+           pendingConcepts,
+           messages,
+           scores,
+-          turnState: game.mode === 'turn-order' ? {
++          turnState: hasMode(game, settings, 'turn-order') ? {
+             currentPlayerId: room.joinOrder.filter(pid => room.players.has(pid))[room.turnIndex % Math.max(room.joinOrder.filter(pid => room.players.has(pid)).length, 1)] || null,
+             order: room.joinOrder.filter(pid => room.players.has(pid)),
+           } : null,
+@@ -266,8 +270,8 @@
+         pluginEvents.emit('player:join', { game, player: currentPlayer });
+ 
+         // Broadcast turn/challenge state to newcomer
+-        if (game.mode === 'turn-order') broadcastTurnState(io, id);
+-        if (game.mode === 'challenge' && room.challengeCard) broadcastChallenge(io, id);
++        if (hasMode(game, settings, 'turn-order')) broadcastTurnState(io, id);
++        if (hasMode(game, settings, 'challenge') && room.challengeCard) broadcastChallenge(io, id);
+ 
+       } catch (err) {
+         console.error(`[Socket] game:join ERROR socketId=${socket.id} gameId=${id}:`, err);
+@@ -295,7 +299,7 @@
+       const isDeferred = settings.validationMode === 'deferred';
+ 
+       // ── Turn-order mode check ─────────────────────────────────────────────
+-      if (game.mode === 'turn-order') {
++      if (hasMode(game, settings, 'turn-order')) {
+         const order = room.joinOrder.filter(pid => room.players.has(pid));
+         if (order.length > 0) {
+           const currentTurnIdx = room.turnIndex % order.length;
+@@ -308,7 +312,7 @@
+       }
+ 
+       // ── Relay mode check ──────────────────────────────────────────────────
+-      if (game.mode === 'relay') {
++      if (hasMode(game, settings, 'relay')) {
+         if (room.roundSubmitted.has(currentPlayer.id)) {
+           return callback?.({ error: '你本轮已提交过概念，等待其他玩家提交后开启新一轮' });
+         }
+@@ -364,7 +368,7 @@
+           validationMethod = 'kb';
+         } else {
+           const knowledgeContext = getContextForConcept(input, game.topic);
+-          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
++          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
+         }
+ 
+         const msElapsed = Date.now() - tsAI;
+@@ -647,7 +651,7 @@
+           result = kbCheck.result;
+         } else {
+           const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
+-          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
++          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
+         }
+ 
+         const ts = new TimelineService();
+@@ -867,7 +871,10 @@
+         pluginEvents.emit('player:leave', { gameId: currentGameId, player: currentPlayer });
+ 
+         const game = db.getGame.get(currentGameId);
+-        if (game?.mode === 'turn-order') broadcastTurnState(io, currentGameId);
++        if (game) {
++          const settings = JSON.parse(game.settings || '{}');
++          if (hasMode(game, settings, 'turn-order')) broadcastTurnState(io, currentGameId);
++        }
+       } catch (err) {
+         console.error(`[Socket] disconnect cleanup ERROR socketId=${socket.id}:`, err);
+       }
+@@ -878,7 +885,9 @@
+ // ── Turn/relay state advancement (internal helper) ────────────────────────────
+ 
+ function _advanceTurnState(io, gameId, game, room, playerId) {
+-  if (game.mode === 'turn-order') {
++  const settings = JSON.parse(game.settings || '{}');
++
++  if (hasMode(game, settings, 'turn-order')) {
+     const order = room.joinOrder.filter(pid => room.players.has(pid));
+     if (order.length > 0) {
+       room.turnIndex = (room.turnIndex + 1) % order.length;
+@@ -887,7 +896,7 @@
+       const nextName = room.players.get(nextId)?.name || '下一位玩家';
+       sysMessage(io, gameId, `轮到 ${nextName} 提交概念了`);
+     }
+-  } else if (game.mode === 'relay') {
++  } else if (hasMode(game, settings, 'relay')) {
+     room.roundSubmitted.add(playerId);
+     const activePlayers = [...room.players.keys()];
+     const allSubmitted = activePlayers.every(pid => room.roundSubmitted.has(pid));
+--- /mnt/data/orig2/history-loong-main/backend/src/services/aiService.js	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/backend/src/services/aiService.js	2026-03-30 12:57:33.477993797 +0000
+@@ -366,11 +366,15 @@
+ 
+   const recentNames = existing.slice(-5).map(c => c.name).join('、') || '无';
+ 
+-  const modeHint = gameMode.mode === 'ordered'
+-    ? '时序模式：须晚于已有最新时间。'
+-    : gameMode.mode === 'chain'
+-    ? '关联模式：须与上一概念有历史关联。'
+-    : '';
++  const activeModes = new Set([
++    gameMode.mode,
++    ...(Array.isArray(gameMode.modes) ? gameMode.modes : []),
++  ].filter(Boolean));
++
++  const modeHints = [];
++  if (activeModes.has('ordered')) modeHints.push('时序模式：须晚于已有最新时间。');
++  if (activeModes.has('chain')) modeHints.push('关联模式：须与上一概念有历史关联。');
++  const modeHint = modeHints.join('');
+ 
+   const kb = knowledgeContext ? `参考：${knowledgeContext.slice(0, 200)}\n` : '';
+ 
+--- /mnt/data/orig2/history-loong-main/frontend/src/types/index.ts	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/frontend/src/types/index.ts	2026-03-30 12:57:33.478520913 +0000
+@@ -24,6 +24,7 @@
+ 
+ export interface GameSettings {
+   validationMode?: ValidationMode;
++  extraModes?: string[];
+   [key: string]: unknown;
+ }
+ 
+--- /mnt/data/orig2/history-loong-main/frontend/src/pages/Game.tsx	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/frontend/src/pages/Game.tsx	2026-03-30 13:00:52.140156960 +0000
+@@ -12,7 +12,7 @@
+ import PlayerList from '../components/PlayerList';
+ import ExportPanel from '../components/ExportPanel';
+ import ThemeSwitcher from '../components/ThemeSwitcher';
+-import type { Concept } from '../types';
++import type { Concept, Game } from '../types';
+ 
+ // ── Name dialog ───────────────────────────────────────────────────────────────
+ 
+@@ -240,12 +240,15 @@
+   useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
+   useEffect(() => { gameRef.current = game; }, [game]);
+ 
++  const activeModes = getActiveModeSet(game);
+   const isDeferred = game?.settings?.validationMode === 'deferred';
+   const gameFinished = game?.status === 'finished';
+-  const isScoreMode = game?.mode === 'score-race' || game?.mode === 'challenge';
+-  const isTurnMode  = game?.mode === 'turn-order';
+-  const isRelayMode = game?.mode === 'relay';
+-  const isChallengeMode = game?.mode === 'challenge';
++  const isScoreMode = activeModes.has('score-race') || activeModes.has('challenge');
++  const isTurnMode  = activeModes.has('turn-order');
++  const isRelayMode = activeModes.has('relay');
++  const isChallengeMode = activeModes.has('challenge');
++  const isOrderedMode = activeModes.has('ordered');
++  const isChainMode = activeModes.has('chain');
+ 
+   // Is it my turn right now?
+   const isMyTurn = isTurnMode
+@@ -533,6 +536,12 @@
+                 {isTurnMode && !gameFinished && (
+                   <span className="text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full border border-violet-200 font-medium">轮流模式</span>
+                 )}
++                {isOrderedMode && !gameFinished && (
++                  <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full border border-indigo-200 font-medium">时序模式</span>
++                )}
++                {isChainMode && !gameFinished && (
++                  <span className="text-xs px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full border border-teal-200 font-medium">关联模式</span>
++                )}
+                 {isScoreMode && !gameFinished && (
+                   <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full border border-amber-200 font-medium">
+                     {isChallengeMode ? '🃏 挑战模式' : '🏆 积分模式'}
+--- /mnt/data/orig2/history-loong-main/frontend/src/services/api.ts	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/frontend/src/services/api.ts	2026-03-30 12:57:33.479893423 +0000
+@@ -220,6 +220,11 @@
+   return data as { message: string; settings: Record<string, unknown> };
+ }
+ 
++export async function adminUpdateGameModes(id: string, mode: string, extraModes: string[]) {
++  const { data } = await api.put(`/admin/games/${id}/modes`, { mode, extraModes }, { headers: adminHeaders() });
++  return data as { message: string; game: AdminGame };
++}
++
+ export async function adminRestoreGame(id: string) {
+   const { data } = await api.post(`/admin/games/${id}/restore`, {}, { headers: adminHeaders() });
+   return data as { message: string };
+--- /mnt/data/orig2/history-loong-main/frontend/src/pages/Admin.tsx	2026-03-30 04:20:59.000000000 +0000
++++ /mnt/data/proj/history-loong-main/frontend/src/pages/Admin.tsx	2026-03-30 12:57:33.483065206 +0000
+@@ -16,8 +16,8 @@
+   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
+   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
+   adminListGames, adminFinishGame, adminDeleteGame,
+-  adminUpdateGameNotes, adminUpdateGameSettings, adminRestoreGame,
+-  adminGetLogs,
++  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame,
++  adminGetLogs, getGameModes,
+   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
+   adminGetCurationPending, adminGetCurationActive,
+   adminApproveConcept, adminApproveAll, adminArchiveConcept, adminRejectConcept,
+@@ -27,7 +27,7 @@
+   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
+   type CurationConcept, type Category, type AIDecision,
+ } from '../services/api';
+-import type { Game } from '../types';
++import type { Game, GameModeConfig } from '../types';
+ 
+ // ── Login screen ──────────────────────────────────────────────────────────────
+ 
+@@ -223,7 +223,7 @@
+                   <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
+                   <td className="px-4 py-3 text-slate-700">{g.topic}</td>
+                   <td className="px-4 py-3">
+-                    <ModeChip mode={g.mode} />
++                    <ModeChip mode={g.mode} extraModes={Array.isArray(g.settings?.extraModes) ? g.settings.extraModes as string[] : []} />
+                   </td>
+                   <td className="px-4 py-3">
+                     <StatusChip status={g.status} />
+@@ -239,9 +239,26 @@
+   );
+ }
+ 
+-function ModeChip({ mode }: { mode: string }) {
+-  const map: Record<string, string> = { free: '自由', chain: '关联', ordered: '时序' };
+-  return <span className="px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded">{map[mode] || mode}</span>;
++function ModeChip({ mode, extraModes = [] }: { mode: string; extraModes?: string[] }) {
++  const map: Record<string, string> = {
++    free: '自由',
++    chain: '关联',
++    ordered: '时序',
++    relay: '接力',
++    'turn-order': '轮流',
++    'score-race': '积分',
++    challenge: '挑战',
++  };
++  const modes = [mode, ...extraModes.filter(m => m !== mode)];
++  return (
++    <div className="flex flex-wrap gap-1">
++      {modes.map((item, idx) => (
++        <span key={`${item}-${idx}`} className={`px-2 py-0.5 text-xs rounded ${idx === 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
++          {map[item] || item}
++        </span>
++      ))}
++    </div>
++  );
+ }
+ function StatusChip({ status }: { status: string }) {
+   const cfg: Record<string, string> = {
+@@ -261,6 +278,23 @@
+   const [savingNotes, setSavingNotes] = useState(false);
+   const [settingsStr, setSettingsStr] = useState(JSON.stringify(game.settings, null, 2));
+   const [savingSettings, setSavingSettings] = useState(false);
++  const [modeDraft, setModeDraft] = useState(game.mode);
++  const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
++    Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : []
++  );
++  const [savingModes, setSavingModes] = useState(false);
++  const [modeOptions, setModeOptions] = useState<Record<string, GameModeConfig>>({});
++  const [combinableModeOptions, setCombinableModeOptions] = useState<Record<string, GameModeConfig>>({});
++
++  useEffect(() => {
++    if (!expanded) return;
++    getGameModes()
++      .then(data => {
++        setModeOptions(data.modes || {});
++        setCombinableModeOptions(data.combinableModes || {});
++      })
++      .catch(() => {});
++  }, [expanded]);
+ 
+   async function saveNotes() {
+     setSavingNotes(true);
+@@ -283,6 +317,22 @@
+     setSavingSettings(false);
+   }
+ 
++  async function saveModes() {
++    setSavingModes(true);
++    try {
++      const normalizedExtraModes = [...new Set(extraModeDraft)].filter(m => m !== modeDraft);
++      await adminUpdateGameModes(game.id, modeDraft, normalizedExtraModes);
++      setExtraModeDraft(normalizedExtraModes);
++      const parsedSettings = JSON.parse(settingsStr || '{}');
++      parsedSettings.extraModes = normalizedExtraModes;
++      setSettingsStr(JSON.stringify(parsedSettings, null, 2));
++      onAction('游戏模式已更新');
++    } catch {
++      onAction('更新游戏模式失败');
++    }
++    setSavingModes(false);
++  }
++
+   async function handleFinish() {
+     if (!confirm(`确认结束游戏「${game.topic}」(${game.id})？`)) return;
+     try { await adminFinishGame(game.id); onAction(`游戏 ${game.id} 已结束`); }
+@@ -316,7 +366,7 @@
+             <span className="text-xs text-amber-600 truncate block">📝 {(game as AdminGame & { notes?: string }).notes}</span>
+           )}
+         </td>
+-        <td className="px-4 py-3"><ModeChip mode={game.mode} /></td>
++        <td className="px-4 py-3"><ModeChip mode={game.mode} extraModes={Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : []} /></td>
+         <td className="px-4 py-3"><StatusChip status={game.status} /></td>
+         <td className="px-4 py-3 text-slate-600">
+           <span className="font-medium">{game.conceptCount}</span>
+@@ -372,6 +422,63 @@
+                   {savingNotes ? '保存中...' : '保存备注'}
+                 </button>
+               </div>
++              {/* Mode editor */}
++              <div>
++                <label className="block text-xs font-semibold text-slate-600 mb-1.5">🎮 游戏模式</label>
++                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
++                  <div>
++                    <div className="text-xs text-slate-500 mb-1.5">主模式</div>
++                    <select
++                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
++                      value={modeDraft}
++                      onChange={e => {
++                        const nextMode = e.target.value;
++                        setModeDraft(nextMode);
++                        setExtraModeDraft(prev => prev.filter(m => m !== nextMode));
++                      }}
++                    >
++                      {Object.entries(modeOptions).map(([key, cfg]) => (
++                        <option key={key} value={key}>{cfg.label}</option>
++                      ))}
++                    </select>
++                  </div>
++
++                  <div>
++                    <div className="text-xs text-slate-500 mb-1.5">附加模式</div>
++                    <div className="space-y-2 max-h-40 overflow-auto pr-1">
++                      {Object.entries(combinableModeOptions).map(([key, cfg]) => {
++                        const checked = extraModeDraft.includes(key);
++                        const disabled = key === modeDraft;
++                        return (
++                          <label key={key} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${checked ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200 bg-slate-50'} ${disabled ? 'opacity-50' : ''}`}>
++                            <input
++                              type="checkbox"
++                              checked={checked || disabled}
++                              disabled={disabled}
++                              onChange={() => {
++                                if (disabled) return;
++                                setExtraModeDraft(prev =>
++                                  prev.includes(key) ? prev.filter(m => m !== key) : [...prev, key]
++                                );
++                              }}
++                              className="mt-0.5"
++                            />
++                            <div>
++                              <div className="text-sm font-medium text-slate-700">{cfg.label}</div>
++                              <div className="text-xs text-slate-500 mt-0.5">{cfg.description}</div>
++                            </div>
++                          </label>
++                        );
++                      })}
++                    </div>
++                  </div>
++
++                  <button onClick={saveModes} disabled={savingModes}
++                    className="text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
++                    {savingModes ? '更新中...' : '保存模式'}
++                  </button>
++                </div>
++              </div>
+               {/* Settings */}
+               <div>
+                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">⚙️ 游戏设置 (JSON)</label>

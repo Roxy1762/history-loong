@@ -12,7 +12,7 @@ import Chat from '../components/Chat';
 import PlayerList from '../components/PlayerList';
 import ExportPanel from '../components/ExportPanel';
 import ThemeSwitcher from '../components/ThemeSwitcher';
-import type { Concept } from '../types';
+import type { Concept, Game } from '../types';
 
 // ── Name dialog ───────────────────────────────────────────────────────────────
 
@@ -240,12 +240,15 @@ export default function Game() {
   useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
   useEffect(() => { gameRef.current = game; }, [game]);
 
+  const activeModes = getActiveModeSet(game);
   const isDeferred = game?.settings?.validationMode === 'deferred';
   const gameFinished = game?.status === 'finished';
-  const isScoreMode = game?.mode === 'score-race' || game?.mode === 'challenge';
-  const isTurnMode  = game?.mode === 'turn-order';
-  const isRelayMode = game?.mode === 'relay';
-  const isChallengeMode = game?.mode === 'challenge';
+  const isScoreMode = activeModes.has('score-race') || activeModes.has('challenge');
+  const isTurnMode  = activeModes.has('turn-order');
+  const isRelayMode = activeModes.has('relay');
+  const isChallengeMode = activeModes.has('challenge');
+  const isOrderedMode = activeModes.has('ordered');
+  const isChainMode = activeModes.has('chain');
 
   // Is it my turn right now?
   const isMyTurn = isTurnMode
@@ -532,6 +535,12 @@ export default function Game() {
                 )}
                 {isTurnMode && !gameFinished && (
                   <span className="text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full border border-violet-200 font-medium">轮流模式</span>
+                )}
+                {isOrderedMode && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full border border-indigo-200 font-medium">时序模式</span>
+                )}
+                {isChainMode && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full border border-teal-200 font-medium">关联模式</span>
                 )}
                 {isScoreMode && !gameFinished && (
                   <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full border border-amber-200 font-medium">
