@@ -14,6 +14,12 @@ import ExportPanel from '../components/ExportPanel';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import type { Concept, Game } from '../types';
 
+function getActiveModeSet(game: Game | null | undefined): Set<string> {
+  if (!game) return new Set();
+  const extraModes = Array.isArray(game.settings?.extraModes) ? game.settings.extraModes : [];
+  return new Set([game.mode, ...extraModes].filter((mode): mode is string => Boolean(mode)));
+}
+
 // ── Name dialog ───────────────────────────────────────────────────────────────
 
 function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
