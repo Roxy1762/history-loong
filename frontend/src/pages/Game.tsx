@@ -20,6 +20,29 @@ function getActiveModeSet(game: Game | null | undefined): Set<string> {
   return new Set([game.mode, ...extraModes].filter((mode): mode is string => Boolean(mode)));
 }
 
+const PLAYER_ID_STORAGE_KEY = 'history_loong_player_id';
+
+function createLocalPlayerId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `p_${crypto.randomUUID().replace(/-/g, '')}`;
+  }
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function getStablePlayerId(): string {
+  const existing = localStorage.getItem(PLAYER_ID_STORAGE_KEY);
+  if (existing) return existing;
+  const next = createLocalPlayerId();
+  localStorage.setItem(PLAYER_ID_STORAGE_KEY, next);
+  return next;
+}
+
+function getAdminKeyFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const key = params.get('adminKey');
+  return key && key.trim() ? key.trim() : null;
+}
+
 // ── Name dialog ───────────────────────────────────────────────────────────────
 
 function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
@@ -270,7 +293,7 @@ export default function Game() {
         const gid = gameIdRef.current;
         const player = meRef.current;
         if (gid && player) {
-          const res = await joinGame({ gameId: gid, playerName: player.name });
+          const res = await joinGame({ gameId: gid, playerName: player.name, playerId: player.id || getStablePlayerId() });
           if (res.error) return;
           if (res.game)            setGame(res.game);
           if (res.player)          setMe(res.player);
@@ -280,6 +303,15 @@ export default function Game() {
           if (res.scores)          setScores(res.scores);
           if (res.turnState)       setTurnState(res.turnState);
           if (res.challengeCard)   setChallengeCard(res.challengeCard);
+          if (res.player?.id) {
+            localStorage.setItem(PLAYER_ID_STORAGE_KEY, res.player.id);
+          }
+
+          const adminKey = getAdminKeyFromUrl();
+          if (adminKey) {
+            const adminRes = await adminJoinGame(gid, adminKey);
+            setIsAdmin(Boolean(adminRes.ok));
+          }
         }
       }),
       onSocket('connect_error', (err) => {
@@ -369,17 +401,6 @@ export default function Game() {
     return () => offs.forEach(off => off());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Admin join via URL param (?adminKey=xxx)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const adminKey = params.get('adminKey');
-    if (adminKey && gameId) {
-      adminJoinGame(gameId, adminKey).then(res => {
-        if (res.ok) setIsAdmin(true);
-      });
-    }
-  }, [gameId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     const off = onConnectionState(setConnState);
     return () => off();
@@ -391,7 +412,8 @@ export default function Game() {
   const handleJoin = useCallback(async (playerName: string) => {
     if (!gameId) return;
     setShowName(false);
-    const res = await joinGame({ gameId, playerName });
+    const stablePlayerId = getStablePlayerId();
+    const res = await joinGame({ gameId, playerName, playerId: stablePlayerId });
     if (res.error) { setJoinError(res.error); return; }
     if (res.game)             setGame(res.game);
     if (res.player)           setMe(res.player);
@@ -401,6 +423,15 @@ export default function Game() {
     if (res.scores)           setScores(res.scores);
     if (res.turnState)        setTurnState(res.turnState);
     if (res.challengeCard)    setChallengeCard(res.challengeCard);
+    if (res.player?.id) {
+      localStorage.setItem(PLAYER_ID_STORAGE_KEY, res.player.id);
+    }
+
+    const adminKey = getAdminKeyFromUrl();
+    if (adminKey) {
+      const adminRes = await adminJoinGame(gameId, adminKey);
+      setIsAdmin(Boolean(adminRes.ok));
+    }
   }, [gameId]);
 
   // ── Settle ────────────────────────────────────────────────────────────────

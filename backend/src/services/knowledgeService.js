@@ -5,9 +5,13 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const db = require('../db');
 
 const CHUNK_SIZE = 400; // characters per chunk
+const DEFAULT_SILICONFLOW_BASE_URL = 'https://api.siliconflow.cn/v1';
+const EMBEDDING_CACHE_MAX = Math.max(100, parseInt(process.env.KB_EMBED_CACHE_MAX || '2000', 10) || 2000);
+const embeddingCache = new Map();
 
 // ── Ingest ────────────────────────────────────────────────────────────────────
 
@@ -94,6 +98,220 @@ function getContextForConcept(concept, topic) {
 
   const combined = [byTopic, byConcept].filter(Boolean).join('\n---\n');
   return combined ? combined.slice(0, 800) : ''; // cap at 800 chars
+}
+
+/**
+ * Advanced context search with optional SiliconFlow embedding + rerank.
+ * Falls back to plain FTS when config is missing or remote calls fail.
+ */
+async function searchContextAdvanced(query, topN = 4) {
+  if (!query) return '';
+  try {
+    const candidates = searchChunksByFTS(query, Math.max(12, topN * 4));
+    if (!candidates.length) return '';
+    const ranked = await rankChunks(query, candidates, topN);
+    const texts = ranked.map(r => r.content).filter(Boolean);
+    return texts.join('\n---\n');
+  } catch {
+    return searchContext(query, topN);
+  }
+}
+
+/**
+ * Advanced combined context for a concept submission.
+ */
+async function getContextForConceptAdvanced(concept, topic) {
+  const [byTopic, byConcept] = await Promise.all([
+    searchContextAdvanced(topic, 1),
+    searchContextAdvanced(concept, 2),
+  ]);
+  const combined = [byTopic, byConcept].filter(Boolean).join('\n---\n');
+  return combined ? combined.slice(0, 800) : '';
+}
+
+function searchChunksByFTS(query, limit = 20) {
+  const safeQuery = String(query || '').replace(/['"*()]/g, ' ').trim();
+  if (!safeQuery) return [];
+
+  const rows = db.searchFTS.all(safeQuery, limit);
+  if (!rows.length) return [];
+
+  return rows
+    .map((r, idx) => {
+      const chunk = db.getChunkById.get(r.chunk_id);
+      if (!chunk || !chunk.content) return null;
+      return { chunk_id: r.chunk_id, content: chunk.content, ftsRank: idx };
+    })
+    .filter(Boolean);
+}
+
+function getSiliconFlowConfig() {
+  const apiKey = process.env.SILICONFLOW_API_KEY || '';
+  const baseUrl = (process.env.SILICONFLOW_BASE_URL || DEFAULT_SILICONFLOW_BASE_URL).replace(/\/$/, '');
+  const embeddingModel = process.env.SILICONFLOW_EMBED_MODEL || '';
+  const rerankModel = process.env.SILICONFLOW_RERANK_MODEL || '';
+  const enabledByEnv = String(process.env.KB_USE_SILICONFLOW || '').toLowerCase();
+  const allowEnhancement = enabledByEnv !== '0' && enabledByEnv !== 'false';
+
+  return {
+    apiKey,
+    baseUrl,
+    embeddingModel,
+    rerankModel,
+    enableEmbedding: Boolean(apiKey && embeddingModel && allowEnhancement),
+    enableRerank: Boolean(apiKey && rerankModel && allowEnhancement),
+  };
+}
+
+async function rankChunks(query, candidates, topN) {
+  const config = getSiliconFlowConfig();
+  let ranked = candidates.slice();
+
+  if (config.enableEmbedding) {
+    try {
+      const [queryVec] = await embedTexts(config, [query]);
+      const docVecs = await embedTexts(config, ranked.map(c => c.content));
+      ranked = ranked
+        .map((c, idx) => ({ ...c, score: cosineSimilarity(queryVec, docVecs[idx]) }))
+        .sort((a, b) => b.score - a.score);
+    } catch (err) {
+      console.warn(`[KB] Embedding ranking failed, fallback to FTS: ${err.message}`);
+      ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+    }
+  } else {
+    ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+  }
+
+  const rerankPoolSize = Math.max(topN * 4, topN);
+  let pool = ranked.slice(0, rerankPoolSize);
+  if (config.enableRerank && pool.length > 1) {
+    try {
+      const reranked = await rerankWithSiliconFlow(config, query, pool, topN);
+      if (reranked.length > 0) pool = reranked;
+    } catch (err) {
+      console.warn(`[KB] Rerank failed, keep embedding/FTS order: ${err.message}`);
+    }
+  }
+  return pool.slice(0, topN);
+}
+
+async function embedTexts(config, texts) {
+  const vectors = new Array(texts.length);
+  const uncached = [];
+
+  for (let i = 0; i < texts.length; i++) {
+    const text = String(texts[i] || '');
+    const key = `${config.embeddingModel}:${hashText(text)}`;
+    const cached = embeddingCache.get(key);
+    if (cached) vectors[i] = cached;
+    else uncached.push({ idx: i, key, text });
+  }
+
+  if (uncached.length > 0) {
+    const response = await fetch(`${config.baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: config.embeddingModel,
+        input: uncached.map(item => item.text),
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`embedding API ${response.status}: ${body.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const rows = Array.isArray(data?.data) ? data.data : [];
+    if (rows.length !== uncached.length) {
+      throw new Error(`embedding count mismatch: expected=${uncached.length}, got=${rows.length}`);
+    }
+
+    for (let i = 0; i < uncached.length; i++) {
+      const vector = rows[i]?.embedding;
+      if (!Array.isArray(vector) || vector.length === 0) {
+        throw new Error('embedding response missing vector');
+      }
+      const { idx, key } = uncached[i];
+      vectors[idx] = vector;
+      cacheEmbedding(key, vector);
+    }
+  }
+
+  return vectors;
+}
+
+async function rerankWithSiliconFlow(config, query, candidates, topN) {
+  const response = await fetch(`${config.baseUrl}/rerank`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: config.rerankModel,
+      query,
+      documents: candidates.map(c => c.content),
+      top_n: topN,
+      return_documents: false,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`rerank API ${response.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const rows = Array.isArray(data?.results)
+    ? data.results
+    : Array.isArray(data?.data)
+      ? data.data
+      : [];
+
+  const normalized = rows
+    .map((r, idx) => ({
+      index: Number.isInteger(r?.index) ? r.index : idx,
+      score: Number(r?.relevance_score ?? r?.score ?? 0),
+    }))
+    .filter(r => Number.isInteger(r.index) && r.index >= 0 && r.index < candidates.length)
+    .sort((a, b) => b.score - a.score);
+
+  return normalized.map(r => ({ ...candidates[r.index], rerankScore: r.score }));
+}
+
+function hashText(text) {
+  return crypto.createHash('sha1').update(text).digest('hex');
+}
+
+function cacheEmbedding(key, vector) {
+  embeddingCache.set(key, vector);
+  if (embeddingCache.size > EMBEDDING_CACHE_MAX) {
+    const oldestKey = embeddingCache.keys().next().value;
+    if (oldestKey) embeddingCache.delete(oldestKey);
+  }
+}
+
+function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || b.length === 0 || a.length !== b.length) {
+    return 0;
+  }
+  let dot = 0;
+  let aNorm = 0;
+  let bNorm = 0;
+  for (let i = 0; i < a.length; i++) {
+    const av = Number(a[i]) || 0;
+    const bv = Number(b[i]) || 0;
+    dot += av * bv;
+    aNorm += av * av;
+    bNorm += bv * bv;
+  }
+  if (aNorm <= 0 || bNorm <= 0) return 0;
+  return dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm));
 }
 
 // ── AI-Confirmed Knowledge Base ───────────────────────────────────────────────
@@ -279,4 +497,16 @@ function splitIntoChunks(text, maxChars) {
   return chunks;
 }
 
-module.exports = { ingestDocument, deleteDocument, searchContext, getContextForConcept, listDocuments, ingestAIConfirmedConcept, listAIConfirmedDocs, validateFromKnowledge, parseKBContent };
+module.exports = {
+  ingestDocument,
+  deleteDocument,
+  searchContext,
+  getContextForConcept,
+  searchContextAdvanced,
+  getContextForConceptAdvanced,
+  listDocuments,
+  ingestAIConfirmedConcept,
+  listAIConfirmedDocs,
+  validateFromKnowledge,
+  parseKBContent,
+};

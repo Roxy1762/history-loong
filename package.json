@@ -12,7 +12,8 @@
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "build": "npm run build --workspace=frontend",
-    "start": "npm run start --workspace=backend"
+    "start": "npm run start --workspace=backend",
+    "check:i18n": "powershell -ExecutionPolicy Bypass -File scripts/check-i18n-and-syntax.ps1"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
