@@ -35,9 +35,21 @@ export async function getGameConcepts(id: string) {
   return data.concepts;
 }
 
-export async function getGameMessages(id: string) {
-  const { data } = await api.get<{ messages: Message[] }>(`/games/${id}/messages`);
-  return data.messages;
+export async function getGameMessages(
+  id: string,
+  options?: { limit?: number; offset?: number; includeArchived?: boolean }
+) {
+  const params = {
+    limit: options?.limit,
+    offset: options?.offset,
+    includeArchived: options?.includeArchived ? 1 : 0,
+  };
+  const { data } = await api.get<{
+    messages: Message[];
+    archivedMessages?: Message[];
+    pagination: { limit: number; offset: number; total: number; hasMore: boolean; archivedTotal?: number };
+  }>(`/games/${id}/messages`, { params });
+  return data;
 }
 
 export async function getGameModes() {

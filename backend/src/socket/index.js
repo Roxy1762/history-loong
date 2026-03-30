@@ -35,6 +35,7 @@ const { pluginEvents } = require('../plugins');
 const auditSvc = require('../services/auditService');
 const profileSvc = require('../services/profileService');
 const settlementSvc = require('../services/settlementService');
+const { parseArray, parseObject } = require('../utils/json');
 
 // ── In-memory rooms ───────────────────────────────────────────────────────────
 
@@ -230,13 +231,14 @@ function sysMessage(io, gameId, content, meta = {}) {
 }
 
 function parseConcept(row) {
-  return { ...row, tags: JSON.parse(row.tags || '[]'), extra: JSON.parse(row.extra || '{}') };
+  return { ...row, tags: parseArray(row.tags, []), extra: parseObject(row.extra, {}) };
 }
 
 function buildGameSnapshot(game, room, player) {
-  const settings = JSON.parse(game.settings || '{}');
+  const settings = parseObject(game.settings, {});
   const ts = new TimelineService();
   const allConcepts = db.getConceptsByGame.all(game.id).map(parseConcept);
+  const latestMessages = db.getLatestMessages.all(game.id, 500).reverse();
 
   return {
     ok: true,
@@ -244,7 +246,8 @@ function buildGameSnapshot(game, room, player) {
     player,
     timeline: ts.buildTimeline(allConcepts),
     pendingConcepts: db.getPendingConcepts.all(game.id).map(parseConcept),
-    messages: db.getMessagesByGame.all(game.id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') })),
+    messages: latestMessages.map(m => ({ ...m, meta: parseObject(m.meta, {}) })),
+    messageTruncated: db.getMessageCount.get(game.id)?.count > latestMessages.length,
     scores: Object.fromEntries(room.scores),
     turnState: hasMode(game, settings, 'turn-order') ? getTurnStatePayload(room) : null,
     challengeCard: room.challengeCard,
