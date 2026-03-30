@@ -269,14 +269,35 @@ export function deleteConcept(conceptId: string): Promise<{ ok?: boolean; error?
   }));
 }
 
-/** Elevate current socket session to admin (requires admin key) */
-export function adminJoinGame(gameId: string, adminKey: string): Promise<{ ok?: boolean; error?: string }> {
+/** Join the room as an admin observer (requires admin key). */
+export async function adminJoinGame(gameId: string, adminKey: string): Promise<JoinResponse> {
   slog('info', `adminJoinGame gameId=${gameId}`);
-  return new Promise(resolve => getSocket().emit('admin:join', { gameId, adminKey }, (res: { ok?: boolean; error?: string }) => {
-    if (res.error) slog('error', `adminJoinGame error: ${res.error}`);
-    else slog('info', `adminJoinGame OK`);
-    resolve(res);
-  }));
+  try {
+    await waitConnected(15000);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '连接超时，请检查网络后刷新重试';
+    slog('error', `adminJoinGame connection failed: ${msg}`);
+    return { error: msg };
+  }
+
+  return new Promise(resolve => {
+    const t0 = Date.now();
+    const timer = setTimeout(() => {
+      slog('error', `adminJoinGame ack TIMEOUT (15s)  elapsed=${Date.now() - t0}ms`);
+      resolve({ error: '服务器响应超时，请刷新页面重试' });
+    }, 15000);
+
+    getSocket().emit('admin:join', { gameId, adminKey }, (res: JoinResponse) => {
+      clearTimeout(timer);
+      const elapsed = Date.now() - t0;
+      if (res.error) {
+        slog('error', `adminJoinGame error="${res.error}"  elapsed=${elapsed}ms`);
+      } else {
+        slog('info', `adminJoinGame OK  gameId=${gameId}  elapsed=${elapsed}ms`);
+      }
+      resolve(res);
+    });
+  });
 }
 
 // ── Event listeners ───────────────────────────────────────────────────────────
@@ -314,4 +335,3 @@ export function onSocket<K extends keyof SocketEventMap>(
   s.on(event as string, handler as (...args: unknown[]) => void);
   return () => s.off(event as string, handler as (...args: unknown[]) => void);
 }
-

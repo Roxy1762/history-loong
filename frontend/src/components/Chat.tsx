@@ -11,12 +11,14 @@ interface Props {
   isTurnMode?: boolean;      // whether we are in turn-order mode
   turnPlayerName?: string | null; // whose turn it is (when it's not mine)
   fillInput?: string;        // when set, auto-fills the concept input (hint click)
+  readOnlyReason?: string | null;
 }
 
 const Chat = memo(function Chat({
   messages, me, gameFinished,
   isMyTurn = true, isTurnMode = false, turnPlayerName = null,
   fillInput = '',
+  readOnlyReason = null,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,11 +43,13 @@ const Chat = memo(function Chat({
 
   // In turn mode, concept input is blocked unless it's your turn
   const conceptBlocked = isTurnMode && !isMyTurn && mode === 'concept';
+  const readOnlyBlocked = Boolean(readOnlyReason);
+  const inputBlocked = conceptBlocked || readOnlyBlocked;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
-    if (!text || submitting || conceptBlocked) return;
+    if (!text || submitting || inputBlocked) return;
     setError(''); setSubmitting(true);
     try {
       const res = mode === 'concept' ? await submitConcept(text) : await sendMessage(text);
@@ -101,28 +105,34 @@ const Chat = memo(function Chat({
           </div>
 
           {/* Turn-order lock notice */}
-          {conceptBlocked && (
+          {inputBlocked && (
             <div className="flex items-center gap-2 text-xs px-3 py-2 bg-violet-50 border border-violet-100 rounded-xl text-violet-600">
               <span>⏳</span>
-              <span>等待 <strong>{turnPlayerName || '其他玩家'}</strong> 提交后轮到你...</span>
+              <span>
+                {readOnlyBlocked
+                  ? readOnlyReason
+                  : <>等待 <strong>{turnPlayerName || '其他玩家'}</strong> 提交后轮到你...</>}
+              </span>
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="flex gap-2">
             <input
               ref={inputRef}
-              className={`input flex-1 ${conceptBlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+              className={`input flex-1 ${inputBlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
               placeholder={
-                conceptBlocked
+                readOnlyBlocked
+                  ? readOnlyReason || '当前不可输入'
+                  : conceptBlocked
                   ? `等待 ${turnPlayerName || '其他玩家'} 的回合...`
                   : mode === 'concept' ? '输入历史概念、事件、人物...' : '发送消息...'
               }
               value={input}
               onChange={e => setInput(e.target.value)}
-              disabled={submitting || conceptBlocked}
+              disabled={submitting || inputBlocked}
               maxLength={100}
             />
-            <button type="submit" disabled={submitting || !input.trim() || conceptBlocked}
+            <button type="submit" disabled={submitting || !input.trim() || inputBlocked}
               className="btn-primary px-4 shrink-0">
               {submitting
                 ? <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
@@ -138,7 +148,7 @@ const Chat = memo(function Chat({
               {error}
             </div>
           )}
-          {mode === 'concept' && !error && !conceptBlocked && (
+          {mode === 'concept' && !error && !inputBlocked && (
             <p className="text-xs text-slate-400">AI 验证通过后自动归入时间轴</p>
           )}
         </div>

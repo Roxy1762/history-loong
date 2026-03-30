@@ -145,21 +145,46 @@ function searchChunksByFTS(query, limit = 20) {
     .filter(Boolean);
 }
 
+function getActiveKnowledgeOverrides() {
+  try {
+    const row = db.getActiveAIConfig.get();
+    if (!row) return {};
+    const extra = JSON.parse(row.extra || '{}');
+    return {
+      provider: typeof extra.kb_provider === 'string' ? extra.kb_provider.trim() : '',
+      enabled: typeof extra.kb_enabled === 'boolean' ? extra.kb_enabled : null,
+      apiKey: typeof extra.kb_api_key === 'string' ? extra.kb_api_key.trim() : '',
+      baseUrl: typeof extra.kb_base_url === 'string' ? extra.kb_base_url.trim() : '',
+      embeddingModel: typeof extra.kb_embedding_model === 'string' ? extra.kb_embedding_model.trim() : '',
+      rerankModel: typeof extra.kb_rerank_model === 'string' ? extra.kb_rerank_model.trim() : '',
+      rerankInstruction: typeof extra.kb_rerank_instruction === 'string' ? extra.kb_rerank_instruction.trim() : '',
+    };
+  } catch {
+    return {};
+  }
+}
+
 function getSiliconFlowConfig() {
-  const apiKey = process.env.SILICONFLOW_API_KEY || '';
-  const baseUrl = (process.env.SILICONFLOW_BASE_URL || DEFAULT_SILICONFLOW_BASE_URL).replace(/\/$/, '');
-  const embeddingModel = process.env.SILICONFLOW_EMBED_MODEL || '';
-  const rerankModel = process.env.SILICONFLOW_RERANK_MODEL || '';
+  const overrides = getActiveKnowledgeOverrides();
+  const apiKey = overrides.apiKey || process.env.SILICONFLOW_API_KEY || '';
+  const baseUrl = (overrides.baseUrl || process.env.SILICONFLOW_BASE_URL || DEFAULT_SILICONFLOW_BASE_URL).replace(/\/$/, '');
+  const embeddingModel = overrides.embeddingModel || process.env.SILICONFLOW_EMBED_MODEL || '';
+  const rerankModel = overrides.rerankModel || process.env.SILICONFLOW_RERANK_MODEL || '';
+  const rerankInstruction = overrides.rerankInstruction || process.env.SILICONFLOW_RERANK_INSTRUCTION || '';
   const enabledByEnv = String(process.env.KB_USE_SILICONFLOW || '').toLowerCase();
-  const allowEnhancement = enabledByEnv !== '0' && enabledByEnv !== 'false';
+  const allowEnhancement = overrides.enabled == null
+    ? enabledByEnv !== '0' && enabledByEnv !== 'false'
+    : overrides.enabled;
+  const provider = overrides.provider || 'siliconflow';
 
   return {
     apiKey,
     baseUrl,
     embeddingModel,
     rerankModel,
-    enableEmbedding: Boolean(apiKey && embeddingModel && allowEnhancement),
-    enableRerank: Boolean(apiKey && rerankModel && allowEnhancement),
+    rerankInstruction,
+    enableEmbedding: Boolean(provider === 'siliconflow' && apiKey && embeddingModel && allowEnhancement),
+    enableRerank: Boolean(provider === 'siliconflow' && apiKey && rerankModel && allowEnhancement),
   };
 }
 
@@ -246,19 +271,24 @@ async function embedTexts(config, texts) {
 }
 
 async function rerankWithSiliconFlow(config, query, candidates, topN) {
+  const requestBody = {
+    model: config.rerankModel,
+    query,
+    documents: candidates.map(c => c.content),
+    top_n: topN,
+    return_documents: false,
+  };
+  if (config.rerankInstruction) {
+    requestBody.instruction = config.rerankInstruction;
+  }
+
   const response = await fetch(`${config.baseUrl}/rerank`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: config.rerankModel,
-      query,
-      documents: candidates.map(c => c.content),
-      top_n: topN,
-      return_documents: false,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {

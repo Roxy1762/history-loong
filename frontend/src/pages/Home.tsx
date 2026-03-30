@@ -10,6 +10,14 @@ const EXAMPLE_TOPICS = [
   '资本主义世界殖民体系', '中国近代史', '古希腊文明',
 ];
 
+function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
+  return [...new Set(extraModes.filter(Boolean))].filter(mode => mode !== primaryMode);
+}
+
+function getCombinedModes(primaryMode: string, extraModes: string[]) {
+  return [primaryMode, ...normalizeExtraModes(primaryMode, extraModes)];
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<'create' | 'join'>('create');
@@ -48,14 +56,16 @@ export default function Home() {
 
   function toggleExtraMode(m: string) {
     setExtraModes(prev =>
-      prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]
+      normalizeExtraModes(mode, prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m])
     );
   }
 
-  // Determine if challenge/score-race features are active (primary or extra)
-  const hasChallengeMode = mode === 'challenge' || extraModes.includes('challenge');
-  const hasScoreMode = mode === 'score-race' || extraModes.includes('score-race');
+  const normalizedExtraModes = normalizeExtraModes(mode, extraModes);
+  const combinedModes = getCombinedModes(mode, extraModes);
+  const hasChallengeMode = combinedModes.includes('challenge');
+  const hasScoreMode = combinedModes.includes('score-race') || combinedModes.includes('challenge');
   const showChallengeSettings = hasChallengeMode;
+  const modeSummary = combinedModes.map(key => modes[key]?.label || combinableModes[key]?.label || key);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -63,15 +73,12 @@ export default function Home() {
     setCreating(true); setCreateError('');
     try {
       const settings: Record<string, unknown> = { validationMode };
-      // Extra modes for mode combination
-      if (extraModes.length > 0) settings.extraModes = extraModes.filter(m => m !== mode);
+      if (normalizedExtraModes.length > 0) settings.extraModes = normalizedExtraModes;
       // Challenge settings
       if (hasChallengeMode) {
         settings.challengeThreshold = challengeThreshold;
         settings.skipCooldownMs = skipCooldownMs;
       }
-      // Score mode (score-race or combined)
-      if (hasScoreMode && mode !== 'score-race') settings.extraModes = [...(settings.extraModes as string[] || []), 'score-race'];
 
       if (maxPlayers > 0) settings.maxPlayers = maxPlayers;
 
@@ -277,6 +284,35 @@ export default function Home() {
                         </div>
                       </div>
                     )}
+
+                    <div className="rounded-xl border p-3" style={{ background: 'var(--bg-muted)', borderColor: 'var(--border)' }}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>当前生效模式</span>
+                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                          {hasScoreMode ? '含积分结算' : '普通结算'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {modeSummary.map(label => (
+                          <span
+                            key={label}
+                            className="text-xs px-2.5 py-1 rounded-full border font-medium"
+                            style={{
+                              background: 'var(--bg-card)',
+                              color: 'var(--text-secondary)',
+                              borderColor: 'var(--border)',
+                            }}
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                      {hasChallengeMode && (
+                        <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>
+                          挑战玩法自带奖励结算，无需再重复勾选“积分竞速”。
+                        </p>
+                      )}
+                    </div>
 
                     {/* Validation mode */}
                     <div>
