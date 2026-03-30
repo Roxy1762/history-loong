@@ -8,7 +8,7 @@ const multer  = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { ingestDocument, deleteDocument, listAIConfirmedDocs } = require('../services/knowledgeService');
+const { ingestDocument, deleteDocument, listAIConfirmedDocs, vectorizeDocument } = require('../services/knowledgeService');
 const auditSvc = require('../services/auditService');
 const cacheSvc = require('../services/cacheService');
 const profileSvc = require('../services/profileService');
@@ -156,6 +156,50 @@ router.put('/games/:id/settings', (req, res) => {
   db.updateGameSettings.run(JSON.stringify(merged), id);
   console.log(`[Admin] Updated settings for ${id}`);
   res.json({ message: '设置已更新', settings: merged });
+});
+
+// Update survival lives for an online player in a game room
+router.post('/games/:id/players/:playerId/lives', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const playerId = req.params.playerId;
+  const lives = Number(req.body?.lives);
+  if (!Number.isFinite(lives)) return res.status(400).json({ error: '请提供有效的血量数值' });
+  const nextLives = Math.max(0, Math.min(10, Math.floor(lives)));
+
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  const setupSocket = require('../socket');
+  const rooms = setupSocket._rooms;
+  const io = setupSocket._io;
+  const room = rooms?.get(id);
+  if (!room) return res.status(400).json({ error: '房间当前未激活，无法调整实时血量' });
+  if (!room.players?.has(playerId)) return res.status(404).json({ error: '玩家不在该房间内' });
+
+  room.lives.set(playerId, nextLives);
+  const target = room.players.get(playerId);
+  const players = [...room.players.values()].map(p => ({
+    ...p,
+    score: room.scores.get(p.id) || 0,
+    lives: room.lives.get(p.id),
+  }));
+  io?.to(id).emit('players:update', { players });
+
+  const content = `管理员将 ${target?.name || playerId} 的生命值调整为 ${nextLives}`;
+  const msgId = uuidv4();
+  db.insertMessage.run(msgId, id, null, null, 'system', content, JSON.stringify({ type: 'admin_adjust_lives', playerId, lives: nextLives }));
+  io?.to(id).emit('message:new', {
+    id: msgId,
+    game_id: id,
+    player_id: null,
+    player_name: null,
+    type: 'system',
+    content,
+    meta: { type: 'admin_adjust_lives', playerId, lives: nextLives },
+    created_at: new Date().toISOString(),
+  });
+
+  res.json({ message: '血量已更新', playerId, lives: nextLives });
 });
 
 
@@ -405,6 +449,19 @@ router.delete('/knowledge/:id', (req, res) => {
   deleteDocument(req.params.id);
   console.log(`[Admin] Knowledge deleted id=${req.params.id} title="${doc.title}"`);
   res.json({ message: '已删除' });
+});
+
+router.post('/knowledge/:id/vectorize', async (req, res) => {
+  const doc = db.getDoc.get(req.params.id);
+  if (!doc) return res.status(404).json({ error: '文档不存在' });
+
+  try {
+    const result = await vectorizeDocument(req.params.id);
+    console.log(`[Admin] Knowledge vectorized id=${req.params.id} title="${doc.title}" chunks=${result.chunks}`);
+    res.json({ message: '向量化完成', ...result });
+  } catch (err) {
+    res.status(400).json({ error: err.message || '向量化失败' });
+  }
 });
 
 // ── AI-Confirmed Knowledge Base ───────────────────────────────────────────────

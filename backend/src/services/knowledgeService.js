@@ -1,7 +1,7 @@
 /**
  * Knowledge Base Service
  * Ingests documents into SQLite FTS5 and retrieves relevant context
- * for AI prompts. No vector embeddings required.
+ * for AI prompts.
  */
 
 const { v4: uuidv4 } = require('uuid');
@@ -55,6 +55,33 @@ function deleteDocument(docId) {
     db.deleteDoc.run(docId);
   });
   del();
+}
+
+/**
+ * Manually pre-vectorize all chunks for a document.
+ * This warms embedding cache for faster/stabler subsequent retrieval.
+ */
+async function vectorizeDocument(docId) {
+  const doc = db.getDoc.get(docId);
+  if (!doc) throw new Error('文档不存在');
+
+  const config = getSiliconFlowConfig();
+  if (!config.enableEmbedding) {
+    throw new Error('当前未启用可用的嵌入模型，请先在 AI 配置中开启知识库 Embedding');
+  }
+
+  const chunks = db.db.prepare(
+    `SELECT content FROM knowledge_chunks WHERE doc_id = ? ORDER BY chunk_idx ASC`
+  ).all(docId);
+  if (chunks.length === 0) return { docId, chunks: 0, vectorized: 0 };
+
+  const batchSize = 64;
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const texts = chunks.slice(i, i + batchSize).map(c => c.content || '');
+    await embedTexts(config, texts);
+  }
+
+  return { docId, chunks: chunks.length, vectorized: chunks.length };
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -535,6 +562,7 @@ module.exports = {
   searchContextAdvanced,
   getContextForConceptAdvanced,
   listDocuments,
+  vectorizeDocument,
   ingestAIConfirmedConcept,
   listAIConfirmedDocs,
   validateFromKnowledge,

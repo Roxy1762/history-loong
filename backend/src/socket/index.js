@@ -35,6 +35,7 @@ const { pluginEvents } = require('../plugins');
 const auditSvc = require('../services/auditService');
 const profileSvc = require('../services/profileService');
 const settlementSvc = require('../services/settlementService');
+const { parseArray, parseObject } = require('../utils/json');
 
 // ── In-memory rooms ───────────────────────────────────────────────────────────
 
@@ -57,6 +58,9 @@ const rooms = new Map();
  *   lastSkipAt: number,         // timestamp of last manual skip
  *   challengeStreak: number,    // consecutive challenge card completions
  *   lastChallengeCompleted: boolean, // did the last accepted concept complete the challenge?
+ *   lastSubmitAt: Map<playerId, number>, // submit cooldown timestamps
+ *   lastHintAt: Map<playerId, number>,   // hint cooldown timestamps
+ *   lives: Map<playerId, number>,        // used by survival mode
  * }
  */
 
@@ -96,6 +100,9 @@ function getRoom(gameId) {
       lastSkipAt: 0,
       challengeStreak: 0,
       lastChallengeCompleted: false,
+      lastSubmitAt: new Map(),
+      lastHintAt: new Map(),
+      lives: new Map(),
     });
   }
   return rooms.get(gameId);
@@ -124,6 +131,13 @@ function normalizePlayerId(raw) {
 
 function isObserverPlayer(player) {
   return Boolean(player?.isObserver);
+}
+
+function resolveCurrentPlayer(room, socketId, currentPlayer) {
+  if (currentPlayer) return currentPlayer;
+  const mappedPlayerId = room.socketToPlayer.get(socketId);
+  if (!mappedPlayerId) return null;
+  return room.players.get(mappedPlayerId) || null;
 }
 
 function hasAdminPrivileges(room, player) {
@@ -159,6 +173,7 @@ function broadcastPlayers(io, gameId) {
   const players = [...room.players.values()].map(p => ({
     ...p,
     score: room.scores.get(p.id) || 0,
+    lives: room.lives.get(p.id),
   }));
   console.log(`[Socket] broadcastPlayers gameId=${gameId} count=${players.length}`);
   io.to(gameId).emit('players:update', { players });
@@ -180,6 +195,19 @@ function broadcastChallenge(io, gameId) {
     card: room.challengeCard,
     round: room.challengeRound,
   });
+}
+
+function applyLifePenalty(io, gameId, room, playerId, playerName) {
+  const currentLives = Number(room.lives.get(playerId) ?? 0);
+  if (currentLives <= 0) return;
+  const nextLives = Math.max(0, currentLives - 1);
+  room.lives.set(playerId, nextLives);
+  broadcastPlayers(io, gameId);
+  if (nextLives <= 0) {
+    sysMessage(io, gameId, `💀 ${playerName} 生命值耗尽，进入旁观状态`);
+  } else {
+    sysMessage(io, gameId, `🩸 ${playerName} 被驳回，生命值剩余 ${nextLives}`);
+  }
 }
 
 function pickNextChallenge(room) {
@@ -230,13 +258,14 @@ function sysMessage(io, gameId, content, meta = {}) {
 }
 
 function parseConcept(row) {
-  return { ...row, tags: JSON.parse(row.tags || '[]'), extra: JSON.parse(row.extra || '{}') };
+  return { ...row, tags: parseArray(row.tags, []), extra: parseObject(row.extra, {}) };
 }
 
 function buildGameSnapshot(game, room, player) {
-  const settings = JSON.parse(game.settings || '{}');
+  const settings = parseObject(game.settings, {});
   const ts = new TimelineService();
   const allConcepts = db.getConceptsByGame.all(game.id).map(parseConcept);
+  const latestMessages = db.getLatestMessages.all(game.id, 500).reverse();
 
   return {
     ok: true,
@@ -244,7 +273,8 @@ function buildGameSnapshot(game, room, player) {
     player,
     timeline: ts.buildTimeline(allConcepts),
     pendingConcepts: db.getPendingConcepts.all(game.id).map(parseConcept),
-    messages: db.getMessagesByGame.all(game.id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') })),
+    messages: latestMessages.map(m => ({ ...m, meta: parseObject(m.meta, {}) })),
+    messageTruncated: db.getMessageCount.get(game.id)?.count > latestMessages.length,
     scores: Object.fromEntries(room.scores),
     turnState: hasMode(game, settings, 'turn-order') ? getTurnStatePayload(room) : null,
     challengeCard: room.challengeCard,
@@ -296,6 +326,10 @@ module.exports = function setupSocket(io) {
         };
 
         room.players.set(normalizedPlayerId, currentPlayer);
+        if (hasMode(game, settings, 'survival') && !room.lives.has(normalizedPlayerId)) {
+          const initialLives = Math.max(1, Math.min(10, Number(settings.initialLives) || 3));
+          room.lives.set(normalizedPlayerId, initialLives);
+        }
         if (!room.joinOrder.includes(normalizedPlayerId)) {
           room.joinOrder.push(normalizedPlayerId);
         }
@@ -354,6 +388,22 @@ module.exports = function setupSocket(io) {
       const settings = JSON.parse(game.settings || '{}');
       const isDeferred = settings.validationMode === 'deferred';
 
+      const submitCooldownSec = Number(settings.submitCooldownSec) || 0;
+      if (submitCooldownSec > 0) {
+        const last = room.lastSubmitAt.get(currentPlayer.id) || 0;
+        const now = Date.now();
+        const remain = Math.ceil((submitCooldownSec * 1000 - (now - last)) / 1000);
+        if (remain > 0) {
+          return callback?.({ error: `提交冷却中，请 ${remain} 秒后再试` });
+        }
+      }
+
+      if (hasMode(game, settings, 'survival')) {
+        const lives = Number(room.lives.get(currentPlayer.id) ?? Math.max(1, Number(settings.initialLives) || 3));
+        room.lives.set(currentPlayer.id, lives);
+        if (lives <= 0) return callback?.({ error: '你已出局，当前为旁观状态' });
+      }
+
       // ── Turn-order mode check ─────────────────────────────────────────────
       if (hasMode(game, settings, 'turn-order')) {
         const order = room.joinOrder.filter(pid => room.players.has(pid));
@@ -398,6 +448,7 @@ module.exports = function setupSocket(io) {
         };
         io.to(currentGameId).emit('concept:pending', { concept: pending });
         callback?.({ ok: true, pending: true, concept: pending });
+        room.lastSubmitAt.set(currentPlayer.id, Date.now());
 
         // Advance relay/turn-order state even for deferred
         _advanceTurnState(io, currentGameId, game, room, currentPlayer.id);
@@ -414,6 +465,7 @@ module.exports = function setupSocket(io) {
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
 
+        const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
         const kbCheck = validateFromKnowledge(input, game.topic);
         let result;
         let validationMethod = 'ai';
@@ -423,7 +475,7 @@ module.exports = function setupSocket(io) {
           result = kbCheck.result;
           validationMethod = 'kb';
         } else {
-          const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
+          validationMethod = knowledgeContext ? 'rag+ai' : 'ai';
           result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
         }
 
@@ -447,6 +499,10 @@ module.exports = function setupSocket(io) {
           };
           db.insertMessage.run(rejMsg.id, currentGameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
           io.to(currentGameId).emit('message:new', rejMsg);
+          room.lastSubmitAt.set(currentPlayer.id, Date.now());
+          if (hasMode(game, settings, 'survival')) {
+            applyLifePenalty(io, currentGameId, room, currentPlayer.id, currentPlayer.name);
+          }
           return callback?.({ ok: false, reason: result.reason });
         }
 
@@ -482,6 +538,14 @@ module.exports = function setupSocket(io) {
           content: confirmContent, meta: { conceptId, concept: true }, created_at: new Date().toISOString(),
         });
         io.to(currentGameId).emit('concept:new', { concept });
+        room.lastSubmitAt.set(currentPlayer.id, Date.now());
+
+        if (hasMode(game, settings, 'survival')) {
+          const prev = room.scores.get(currentPlayer.id) || 0;
+          room.scores.set(currentPlayer.id, prev + 1);
+          broadcastScores(io, currentGameId);
+          broadcastPlayers(io, currentGameId);
+        }
         callback?.({ ok: true, concept });
         pluginEvents.emit('concept:accepted', { game, concept, player: currentPlayer });
 
@@ -609,6 +673,7 @@ module.exports = function setupSocket(io) {
       callback?.({ ok: true, total: pending.length });
 
       try {
+        const settleSettings = JSON.parse(game.settings || '{}');
         const knowledgeContext = await searchContextAdvanced(game.topic, 2);
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
@@ -641,6 +706,12 @@ module.exports = function setupSocket(io) {
             };
             io.to(currentGameId).emit('concept:settled', { conceptId: r.id, accepted: true, concept });
             accepted++;
+            if (hasMode(game, settleSettings, 'survival')) {
+              const prev = room.scores.get(row.player_id) || 0;
+              room.scores.set(row.player_id, prev + 1);
+              broadcastScores(io, currentGameId);
+              broadcastPlayers(io, currentGameId);
+            }
             try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
           } else {
             db.rejectConcept.run(r.reason || '不符合主题', r.id);
@@ -651,6 +722,9 @@ module.exports = function setupSocket(io) {
               reason: r.reason || '不符合主题', playerName: row.player_name, rawInput: row.raw_input,
             });
             rejected++;
+            if (hasMode(game, settleSettings, 'survival')) {
+              applyLifePenalty(io, currentGameId, room, row.player_id, row.player_name);
+            }
           }
         }
 
@@ -726,6 +800,9 @@ module.exports = function setupSocket(io) {
           };
           db.insertMessage.run(rejMsg.id, currentGameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
           io.to(currentGameId).emit('message:new', rejMsg);
+          if (hasMode(game, settings, 'survival')) {
+            applyLifePenalty(io, currentGameId, room, row.player_id, row.player_name);
+          }
           return callback?.({ ok: true });
         }
 
@@ -748,6 +825,12 @@ module.exports = function setupSocket(io) {
         };
 
         io.to(currentGameId).emit('concept:settled', { conceptId, accepted: true, concept });
+        if (hasMode(game, settings, 'survival')) {
+          const prev = room.scores.get(row.player_id) || 0;
+          room.scores.set(row.player_id, prev + 1);
+          broadcastScores(io, currentGameId);
+          broadcastPlayers(io, currentGameId);
+        }
 
         const confirmContent = `✓ 「${result.name}」已加入时间轴（${result.dynasty || result.period || '年代不详'}）`;
         const confirmId = uuidv4();
@@ -785,9 +868,20 @@ module.exports = function setupSocket(io) {
     socket.on('game:hint', async (_, callback) => {
       if (!currentGameId) return callback?.({ error: '请先加入房间' });
       try {
-        const game     = db.getGame.get(currentGameId);
+        const game = db.getGame.get(currentGameId);
+        const room = getRoom(currentGameId);
+        const settings = JSON.parse(game?.settings || '{}');
+        const hintCooldownSec = Number(settings.hintCooldownSec) || 0;
+        if (hintCooldownSec > 0 && currentPlayer?.id) {
+          const last = room.lastHintAt.get(currentPlayer.id) || 0;
+          const now = Date.now();
+          const remain = Math.ceil((hintCooldownSec * 1000 - (now - last)) / 1000);
+          if (remain > 0) return callback?.({ error: `提示冷却中，请 ${remain} 秒后再试` });
+          room.lastHintAt.set(currentPlayer.id, now);
+        }
+
         const existing = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
-        const hints    = await ai.suggestConcepts(game.topic, existing);
+        const hints = await ai.suggestConcepts(game.topic, existing);
         callback?.({ ok: true, hints });
       } catch (err) {
         callback?.({ error: '获取提示失败' });
@@ -861,7 +955,7 @@ module.exports = function setupSocket(io) {
 
     // ── concept: delete (player deletes own pending concept; admin deletes any) ─
     socket.on('concept:delete', ({ conceptId }, callback) => {
-      if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      if (!currentGameId) return callback?.({ error: '请先加入房间' });
       const game = db.getGame.get(currentGameId);
       if (!game) return callback?.({ error: '房间不存在' });
 
@@ -870,9 +964,12 @@ module.exports = function setupSocket(io) {
       if (row.game_id !== currentGameId) return callback?.({ error: '概念不属于本游戏' });
 
       const room = getRoom(currentGameId);
-      const isAdmin = hasAdminPrivileges(room, currentPlayer);
+      const effectivePlayer = resolveCurrentPlayer(room, socket.id, currentPlayer)
+        || (wantsAdmin ? { id: `admin_${socket.id}`, isAdmin: true } : null);
+      if (!effectivePlayer) return callback?.({ error: '请先加入房间' });
+      const isAdmin = hasAdminPrivileges(room, effectivePlayer);
 
-      if (!isAdmin && row.player_id !== currentPlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
+      if (!isAdmin && row.player_id !== effectivePlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
       if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法删除，请联系管理员' });
 
       db.prepare('DELETE FROM concepts WHERE id=?').run(conceptId);
@@ -951,6 +1048,7 @@ module.exports = function setupSocket(io) {
         if (!leavingPlayer) return;
 
         room.players.delete(disconnectedPlayerId);
+        room.lives.delete(disconnectedPlayerId);
         room.roundSubmitted.delete(disconnectedPlayerId);
         // Remove from joinOrder to avoid dead slots in turn rotation
         room.joinOrder = room.joinOrder.filter(id => id !== disconnectedPlayerId);

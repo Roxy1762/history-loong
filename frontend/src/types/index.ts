@@ -35,6 +35,7 @@ export interface Player {
   isAdmin?: boolean;
   isObserver?: boolean;
   score?: number; // present in score-race / challenge modes
+  lives?: number; // present in survival mode
 }
 
 export interface Concept {
@@ -101,6 +102,7 @@ export interface JoinResponse {
   timeline?: Concept[];
   pendingConcepts?: Concept[];
   messages?: Message[];
+  messageTruncated?: boolean;
   scores?: Record<string, number>;
   turnState?: TurnState | null;
   challengeCard?: ChallengeCard | null;

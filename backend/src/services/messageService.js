@@ -3,8 +3,10 @@
  */
 
 const db = require('../db');
+const { parseObject, toBoundedInt } = require('../utils/json');
 
 const DEFAULT_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 500;
 
 /**
  * Get paginated messages for a game (active table).
@@ -13,8 +15,10 @@ const DEFAULT_PAGE_SIZE = 100;
  * @param {number} offset
  */
 function getMessages(gameId, limit = DEFAULT_PAGE_SIZE, offset = 0) {
-  const rows = db.getRecentMessages.all(gameId, limit, offset);
-  return rows.map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+  const safeLimit = toBoundedInt(limit, { defaultValue: DEFAULT_PAGE_SIZE, min: 1, max: MAX_PAGE_SIZE });
+  const safeOffset = toBoundedInt(offset, { defaultValue: 0, min: 0, max: Number.MAX_SAFE_INTEGER });
+  const rows = db.getRecentMessages.all(gameId, safeLimit, safeOffset);
+  return rows.map(m => ({ ...m, meta: parseObject(m.meta, {}) }));
 }
 
 /**
@@ -31,8 +35,10 @@ function getMessageCount(gameId) {
  * @param {number} offset
  */
 function getArchivedMessages(gameId, limit = 50, offset = 0) {
-  const rows = db.getArchivedMessages.all(gameId, limit, offset);
-  return rows.map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+  const safeLimit = toBoundedInt(limit, { defaultValue: 50, min: 1, max: MAX_PAGE_SIZE });
+  const safeOffset = toBoundedInt(offset, { defaultValue: 0, min: 0, max: Number.MAX_SAFE_INTEGER });
+  const rows = db.getArchivedMessages.all(gameId, safeLimit, safeOffset);
+  return rows.map(m => ({ ...m, meta: parseObject(m.meta, {}) }));
 }
 
 /**

@@ -391,7 +391,9 @@ module.exports = {
   archiveMessages:      stmt(`INSERT INTO messages_archive SELECT *, datetime('now') FROM messages WHERE game_id=? AND created_at < datetime('now','-30 days')`),
   deleteArchivedMessages:stmt(`DELETE FROM messages WHERE game_id=? AND created_at < datetime('now','-30 days')`),
   getArchivedMessages:  stmt(`SELECT * FROM messages_archive WHERE game_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?`),
+  getArchivedMessageCount: stmt(`SELECT COUNT(*) as count FROM messages_archive WHERE game_id=?`),
   getRecentMessages:    stmt(`SELECT * FROM messages WHERE game_id=? ORDER BY created_at ASC LIMIT ? OFFSET ?`),
+  getLatestMessages:    stmt(`SELECT * FROM messages WHERE game_id=? ORDER BY created_at DESC LIMIT ?`),
   getRecentMessageCount:stmt(`SELECT COUNT(*) as count FROM messages WHERE game_id=?`),
 
   // Concept categories (curation)

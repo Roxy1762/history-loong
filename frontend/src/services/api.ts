@@ -35,9 +35,21 @@ export async function getGameConcepts(id: string) {
   return data.concepts;
 }
 
-export async function getGameMessages(id: string) {
-  const { data } = await api.get<{ messages: Message[] }>(`/games/${id}/messages`);
-  return data.messages;
+export async function getGameMessages(
+  id: string,
+  options?: { limit?: number; offset?: number; includeArchived?: boolean }
+) {
+  const params = {
+    limit: options?.limit,
+    offset: options?.offset,
+    includeArchived: options?.includeArchived ? 1 : 0,
+  };
+  const { data } = await api.get<{
+    messages: Message[];
+    archivedMessages?: Message[];
+    pagination: { limit: number; offset: number; total: number; hasMore: boolean; archivedTotal?: number };
+  }>(`/games/${id}/messages`, { params });
+  return data;
 }
 
 export async function getGameModes() {
@@ -172,6 +184,11 @@ export async function adminDeleteDoc(id: string) {
   return data;
 }
 
+export async function adminVectorizeDoc(id: string) {
+  const { data } = await api.post(`/admin/knowledge/${id}/vectorize`, {}, { headers: adminHeaders() });
+  return data as { message: string; docId: string; chunks: number; vectorized: number };
+}
+
 // ── Admin: Game Management ───────────────────────────────────────────────────
 
 export interface AdminGame extends Game {
@@ -218,6 +235,11 @@ export async function adminUpdateGameNotes(id: string, notes: string) {
 export async function adminUpdateGameSettings(id: string, settings: Record<string, unknown>) {
   const { data } = await api.put(`/admin/games/${id}/settings`, { settings }, { headers: adminHeaders() });
   return data as { message: string; settings: Record<string, unknown> };
+}
+
+export async function adminSetPlayerLives(gameId: string, playerId: string, lives: number) {
+  const { data } = await api.post(`/admin/games/${gameId}/players/${playerId}/lives`, { lives }, { headers: adminHeaders() });
+  return data as { message: string; playerId: string; lives: number };
 }
 
 export async function adminUpdateGameModes(id: string, mode: string, extraModes: string[]) {
