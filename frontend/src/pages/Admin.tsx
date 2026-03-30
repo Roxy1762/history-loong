@@ -14,9 +14,9 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
-  adminListGames, adminFinishGame, adminDeleteGame,
-  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc,
+  adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
+  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
   adminGetLogs, getGameModes,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
   adminGetCurationPending, adminGetCurationActive,
@@ -248,6 +248,7 @@ function ModeChip({ mode, extraModes = [] }: { mode: string; extraModes?: string
     'turn-order': '轮流',
     'score-race': '积分',
     challenge: '挑战',
+    survival: '生存',
   };
   const modes = [mode, ...extraModes.filter(m => m !== mode)];
   return (
@@ -282,6 +283,18 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
   const [savingNotes, setSavingNotes] = useState(false);
   const [settingsStr, setSettingsStr] = useState(JSON.stringify(game.settings, null, 2));
   const [savingSettings, setSavingSettings] = useState(false);
+  const [showModeEditor, setShowModeEditor] = useState(true);
+  const [showQuickSettings, setShowQuickSettings] = useState(true);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const parsedSettings = (game.settings || {}) as Record<string, unknown>;
+  const [quickSettings, setQuickSettings] = useState({
+    maxPlayers: Number(parsedSettings.maxPlayers) || 0,
+    submitCooldownSec: Number(parsedSettings.submitCooldownSec) || 0,
+    hintCooldownSec: Number(parsedSettings.hintCooldownSec) || 0,
+    initialLives: Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3)),
+  });
+  const [detailPlayers, setDetailPlayers] = useState<Array<{ id: string; name: string }>>([]);
+  const [editingLives, setEditingLives] = useState<Record<string, number>>({});
   const [modeDraft, setModeDraft] = useState(game.mode);
   const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
     normalizeExtraModes(game.mode, Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : [])
@@ -303,7 +316,18 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
         setCombinableModeOptions(data.combinableModes || {});
       })
       .catch(() => {});
-  }, [expanded]);
+
+    adminGetGame(game.id)
+      .then((detail: { players: Array<{ id: string; name: string }> }) => {
+        const players = (detail.players || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
+        setDetailPlayers(players);
+        const initLives = Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3));
+        setEditingLives(Object.fromEntries(players.map((p: { id: string; name: string }) => [p.id, initLives])));
+      })
+      .catch(() => {
+        setDetailPlayers([]);
+      });
+  }, [expanded, game.id, parsedSettings.initialLives]);
 
   async function saveNotes() {
     setSavingNotes(true);
@@ -324,6 +348,37 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
       onAction(err instanceof SyntaxError ? 'JSON 格式有误' : '更新失败');
     }
     setSavingSettings(false);
+  }
+
+  async function saveQuickSettings() {
+    let base: Record<string, unknown> = {};
+    try { base = JSON.parse(settingsStr || '{}') as Record<string, unknown>; } catch { /* ignore */ }
+    const next = {
+      ...base,
+      maxPlayers: Math.max(0, Math.min(20, quickSettings.maxPlayers || 0)),
+      submitCooldownSec: Math.max(0, Math.min(60, quickSettings.submitCooldownSec || 0)),
+      hintCooldownSec: Math.max(0, Math.min(120, quickSettings.hintCooldownSec || 0)),
+      initialLives: Math.max(1, Math.min(10, quickSettings.initialLives || 3)),
+    };
+    setSettingsStr(JSON.stringify(next, null, 2));
+    setSavingSettings(true);
+    try {
+      await adminUpdateGameSettings(game.id, next);
+      onAction('快捷设置已更新');
+    } catch {
+      onAction('快捷设置更新失败');
+    }
+    setSavingSettings(false);
+  }
+
+  async function handleSavePlayerLives(playerId: string, playerName: string) {
+    const lives = Math.max(0, Math.min(10, editingLives[playerId] ?? quickSettings.initialLives));
+    try {
+      await adminSetPlayerLives(game.id, playerId, lives);
+      onAction(`已将 ${playerName} 血量调整为 ${lives}`);
+    } catch (err: unknown) {
+      onAction(err instanceof Error ? err.message : '血量调整失败');
+    }
   }
 
   async function saveModes() {
@@ -414,7 +469,7 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
       {expanded && (
         <tr>
           <td colSpan={8} className="bg-slate-50 border-b border-slate-100 px-4 py-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
+            <div className="space-y-3 max-w-3xl">
               {/* Notes */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">📝 管理备注</label>
@@ -431,10 +486,114 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                   {savingNotes ? '保存中...' : '保存备注'}
                 </button>
               </div>
+
+              {/* Quick settings */}
+              <div className="rounded-xl border border-slate-200 bg-white">
+                <button
+                  onClick={() => setShowQuickSettings(v => !v)}
+                  className="w-full px-3 py-2.5 flex items-center justify-between text-left"
+                >
+                  <span className="text-xs font-semibold text-slate-600">⚡ 快捷设置（减少滚动）</span>
+                  <span className="text-slate-400 text-xs">{showQuickSettings ? '收起' : '展开'}</span>
+                </button>
+                {showQuickSettings && (
+                  <div className="px-3 pb-3 grid grid-cols-1 sm:grid-cols-4 gap-2">
+                    <label className="text-xs text-slate-600 space-y-1">
+                      <span>最大玩家数</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={20}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5"
+                        value={quickSettings.maxPlayers}
+                        onChange={e => setQuickSettings(prev => ({ ...prev, maxPlayers: parseInt(e.target.value) || 0 }))}
+                      />
+                    </label>
+                    <label className="text-xs text-slate-600 space-y-1">
+                      <span>提交冷却(秒)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={60}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5"
+                        value={quickSettings.submitCooldownSec}
+                        onChange={e => setQuickSettings(prev => ({ ...prev, submitCooldownSec: parseInt(e.target.value) || 0 }))}
+                      />
+                    </label>
+                    <label className="text-xs text-slate-600 space-y-1">
+                      <span>提示冷却(秒)</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={120}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5"
+                        value={quickSettings.hintCooldownSec}
+                        onChange={e => setQuickSettings(prev => ({ ...prev, hintCooldownSec: parseInt(e.target.value) || 0 }))}
+                      />
+                    </label>
+                    <label className="text-xs text-slate-600 space-y-1">
+                      <span>生存初始血量</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5"
+                        value={quickSettings.initialLives}
+                        onChange={e => setQuickSettings(prev => ({ ...prev, initialLives: parseInt(e.target.value) || 3 }))}
+                      />
+                    </label>
+                    <div className="sm:col-span-3 flex justify-end">
+                      <button onClick={saveQuickSettings} disabled={savingSettings}
+                        className="text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
+                        {savingSettings ? '保存中...' : '保存快捷设置'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {modeDraft === 'survival' && (
+                <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-3 space-y-2">
+                  <div className="text-xs font-semibold text-rose-700">🛡️ 生存模式血量管理（在线实时）</div>
+                  {detailPlayers.length === 0 ? (
+                    <div className="text-xs text-rose-500">暂无可调整玩家（房间未激活或无人在线）</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {detailPlayers.map(p => (
+                        <div key={p.id} className="flex items-center gap-2">
+                          <div className="text-sm text-slate-700 w-28 truncate" title={p.name}>{p.name}</div>
+                          <input
+                            type="number"
+                            min={0}
+                            max={10}
+                            className="w-20 text-sm border border-slate-200 rounded-lg px-2 py-1.5 bg-white"
+                            value={editingLives[p.id] ?? quickSettings.initialLives}
+                            onChange={e => setEditingLives(prev => ({ ...prev, [p.id]: parseInt(e.target.value) || 0 }))}
+                          />
+                          <button
+                            onClick={() => handleSavePlayerLives(p.id, p.name)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg bg-rose-100 text-rose-700 hover:bg-rose-200 transition-colors"
+                          >
+                            保存血量
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Mode editor */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">🎮 游戏模式</label>
-                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="rounded-xl border border-slate-200 bg-white">
+                <button
+                  onClick={() => setShowModeEditor(v => !v)}
+                  className="w-full px-3 py-2.5 flex items-center justify-between text-left"
+                >
+                  <span className="text-xs font-semibold text-slate-600">🎮 游戏模式</span>
+                  <span className="text-slate-400 text-xs">{showModeEditor ? '收起' : '展开'}</span>
+                </button>
+                {showModeEditor && (
+                  <div className="space-y-3 px-3 pb-3">
                   <div>
                     <div className="text-xs text-slate-500 mb-1.5">主模式</div>
                     <select
@@ -500,21 +659,33 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                     className="text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
                     {savingModes ? '更新中...' : '保存模式'}
                   </button>
-                </div>
+                  </div>
+                )}
               </div>
-              {/* Settings */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1.5">⚙️ 游戏设置 (JSON)</label>
-                <textarea
-                  className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                  rows={3}
-                  value={settingsStr}
-                  onChange={e => setSettingsStr(e.target.value)}
-                />
-                <button onClick={saveSettings} disabled={savingSettings}
-                  className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
-                  {savingSettings ? '更新中...' : '更新设置'}
+
+              {/* Advanced JSON settings */}
+              <div className="rounded-xl border border-slate-200 bg-white">
+                <button
+                  onClick={() => setShowAdvancedSettings(v => !v)}
+                  className="w-full px-3 py-2.5 flex items-center justify-between text-left"
+                >
+                  <span className="text-xs font-semibold text-slate-600">⚙️ 高级设置(JSON)</span>
+                  <span className="text-slate-400 text-xs">{showAdvancedSettings ? '收起' : '展开'}</span>
                 </button>
+                {showAdvancedSettings && (
+                  <div className="px-3 pb-3">
+                    <textarea
+                      className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2 bg-white resize-none focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      rows={4}
+                      value={settingsStr}
+                      onChange={e => setSettingsStr(e.target.value)}
+                    />
+                    <button onClick={saveSettings} disabled={savingSettings}
+                      className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
+                      {savingSettings ? '更新中...' : '更新设置'}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </td>
@@ -1192,6 +1363,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
 function KnowledgePanel() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [vectorizingDocId, setVectorizingDocId] = useState<string | null>(null);
   const [showTextForm, setShowTextForm] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -1218,6 +1390,19 @@ function KnowledgePanel() {
     if (!confirm(`确认删除「${title}」？`)) return;
     await adminDeleteDoc(id);
     reload();
+  }
+
+  async function handleVectorize(id: string, title: string) {
+    setVectorizingDocId(id);
+    setMsg('');
+    try {
+      const res = await adminVectorizeDoc(id);
+      setMsg(`✅ 「${title}」向量化完成，共处理 ${res.vectorized} 个片段`);
+    } catch (err: unknown) {
+      setMsg(`❌ ${err instanceof Error ? err.message : '向量化失败'}`);
+    } finally {
+      setVectorizingDocId(null);
+    }
   }
 
   return (
@@ -1265,9 +1450,18 @@ function KnowledgePanel() {
                     {doc.filename} · {doc.total_chunks} 个片段 · {doc.created_at.slice(0, 10)}
                   </div>
                 </div>
-                <button onClick={() => handleDelete(doc.id, doc.title)} className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">
-                  删除
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleVectorize(doc.id, doc.title)}
+                    disabled={vectorizingDocId === doc.id}
+                    className="text-xs text-indigo-500 hover:text-indigo-700 transition-colors px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {vectorizingDocId === doc.id ? '向量化中...' : '手动向量化'}
+                  </button>
+                  <button onClick={() => handleDelete(doc.id, doc.title)} className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">
+                    删除
+                  </button>
+                </div>
               </div>
             ))}
           </div>

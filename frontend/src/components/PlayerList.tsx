@@ -19,6 +19,11 @@ export default function PlayerList({ players, me }: Props) {
         >
           <span className="w-1.5 h-1.5 rounded-full bg-white/50" />
           {p.name}
+          {typeof p.lives === 'number' && (
+            <span className={`text-[10px] px-1 py-0.5 rounded-full ${p.lives > 1 ? 'bg-white/20' : 'bg-red-500/70'}`}>
+              ❤️ {p.lives}
+            </span>
+          )}
           {p.id === me?.id && <span className="text-white/60 font-normal">你</span>}
         </div>
       ))}

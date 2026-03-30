@@ -184,6 +184,11 @@ export async function adminDeleteDoc(id: string) {
   return data;
 }
 
+export async function adminVectorizeDoc(id: string) {
+  const { data } = await api.post(`/admin/knowledge/${id}/vectorize`, {}, { headers: adminHeaders() });
+  return data as { message: string; docId: string; chunks: number; vectorized: number };
+}
+
 // ── Admin: Game Management ───────────────────────────────────────────────────
 
 export interface AdminGame extends Game {
@@ -230,6 +235,11 @@ export async function adminUpdateGameNotes(id: string, notes: string) {
 export async function adminUpdateGameSettings(id: string, settings: Record<string, unknown>) {
   const { data } = await api.put(`/admin/games/${id}/settings`, { settings }, { headers: adminHeaders() });
   return data as { message: string; settings: Record<string, unknown> };
+}
+
+export async function adminSetPlayerLives(gameId: string, playerId: string, lives: number) {
+  const { data } = await api.post(`/admin/games/${gameId}/players/${playerId}/lives`, { lives }, { headers: adminHeaders() });
+  return data as { message: string; playerId: string; lives: number };
 }
 
 export async function adminUpdateGameModes(id: string, mode: string, extraModes: string[]) {

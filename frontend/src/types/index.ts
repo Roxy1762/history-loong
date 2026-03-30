@@ -35,6 +35,7 @@ export interface Player {
   isAdmin?: boolean;
   isObserver?: boolean;
   score?: number; // present in score-race / challenge modes
+  lives?: number; // present in survival mode
 }
 
 export interface Concept {

@@ -271,6 +271,7 @@ export default function Game() {
   const [challengeRound, setChallengeRound] = useState(0);
   const [bonusToast, setBonusToast] = useState<{ bonus: number; playerName: string | null } | null>(null);
   const [chatFill, setChatFill] = useState('');
+  const [onlyMine, setOnlyMine] = useState(false);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
   const [editingInput, setEditingInput] = useState('');
 
@@ -285,10 +286,11 @@ export default function Game() {
   const activeModes = getActiveModeSet(game);
   const isDeferred = game?.settings?.validationMode === 'deferred';
   const gameFinished = game?.status === 'finished';
-  const isScoreMode = activeModes.has('score-race') || activeModes.has('challenge');
+  const isScoreMode = activeModes.has('score-race') || activeModes.has('challenge') || activeModes.has('survival');
   const isTurnMode  = activeModes.has('turn-order');
   const isRelayMode = activeModes.has('relay');
   const isChallengeMode = activeModes.has('challenge');
+  const isSurvivalMode = activeModes.has('survival');
   const isOrderedMode = activeModes.has('ordered');
   const isChainMode = activeModes.has('chain');
   const isAdminObserver = Boolean(isAdmin && me?.isObserver);
@@ -297,6 +299,8 @@ export default function Game() {
   const isMyTurn = isTurnMode
     ? (turnState?.currentPlayerId === me?.id)
     : true; // other modes: always allowed
+  const visibleTimeline = onlyMine && me ? timeline.filter(c => c.player_id === me.id) : timeline;
+  const visiblePending = onlyMine && me ? pendingConcepts.filter(c => c.player_id === me.id) : pendingConcepts;
 
   const applyJoinState = useCallback((res: {
     game?: Game;
@@ -523,6 +527,16 @@ export default function Game() {
     setHintLoading(false);
   }
 
+  async function handleCopyRoomId() {
+    if (!game?.id) return;
+    try {
+      await navigator.clipboard.writeText(game.id);
+      alert(`房间号 ${game.id} 已复制`);
+    } catch {
+      alert('复制失败，请手动复制房间号');
+    }
+  }
+
   // ── Validate single ───────────────────────────────────────────────────────
   async function handleValidateSingle(conceptId: string) {
     setValidatingConceptIds(prev => new Set([...prev, conceptId]));
@@ -649,6 +663,9 @@ export default function Game() {
                     {isChallengeMode ? '🃏 挑战模式' : '🏆 积分模式'}
                   </span>
                 )}
+                {isSurvivalMode && !gameFinished && (
+                  <span className="text-xs px-2 py-0.5 bg-rose-100 text-rose-700 rounded-full border border-rose-200 font-medium">🛡️ 生存模式</span>
+                )}
                 {gameFinished && (
                   <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-medium">已结束</span>
                 )}
@@ -699,6 +716,9 @@ export default function Game() {
               <button onClick={handleHint} disabled={hintLoading}
                 className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
                 {hintLoading ? '...' : '💡'}
+              </button>
+              <button onClick={handleCopyRoomId} className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
+                复制房号
               </button>
 
               {/* Multi-select batch validate button */}
@@ -818,6 +838,14 @@ export default function Game() {
           </div>
         )}
 
+        {isSurvivalMode && !gameFinished && (
+          <div className="bg-rose-50 border-b border-rose-100 px-4 py-2 text-center flex-shrink-0">
+            <span className="text-xs text-rose-600">
+              🛡️ <strong>生存模式</strong> — 被驳回会扣生命值，生命值归零后只能旁观
+            </span>
+          </div>
+        )}
+
         {/* Mobile tab bar */}
         <div className="flex border-b border-slate-100 bg-white md:hidden flex-shrink-0">
           {(['chat', 'timeline'] as const).map(t => (
@@ -869,6 +897,18 @@ export default function Game() {
                 )}
               </h2>
               <div className="flex-1" />
+              {me && (
+                <button
+                  onClick={() => setOnlyMine(v => !v)}
+                  className={`text-xs px-2 py-1 rounded-lg border transition-colors ${
+                    onlyMine
+                      ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                      : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {onlyMine ? '只看我的：开' : '只看我的'}
+                </button>
+              )}
               {/* Selected batch validate (timeline header, mobile) */}
               {isDeferred && !gameFinished && selectedPendingIds.size > 0 && (
                 <button
@@ -894,8 +934,8 @@ export default function Game() {
             </div>
             <div className="flex-1 overflow-hidden min-h-0">
               <Timeline
-                timeline={timeline}
-                pendingConcepts={pendingConcepts}
+                timeline={visibleTimeline}
+                pendingConcepts={visiblePending}
                 newestId={newestId}
                 onValidateConcept={!gameFinished ? handleValidateSingle : undefined}
                 validatingConceptIds={validatingConceptIds}
