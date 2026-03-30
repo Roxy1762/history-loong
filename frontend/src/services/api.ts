@@ -220,6 +220,11 @@ export async function adminUpdateGameSettings(id: string, settings: Record<strin
   return data as { message: string; settings: Record<string, unknown> };
 }
 
+export async function adminUpdateGameModes(id: string, mode: string, extraModes: string[]) {
+  const { data } = await api.put(`/admin/games/${id}/modes`, { mode, extraModes }, { headers: adminHeaders() });
+  return data as { message: string; game: AdminGame };
+}
+
 export async function adminRestoreGame(id: string) {
   const { data } = await api.post(`/admin/games/${id}/restore`, {}, { headers: adminHeaders() });
   return data as { message: string };

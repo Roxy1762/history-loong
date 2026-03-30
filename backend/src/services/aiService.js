@@ -366,11 +366,15 @@ async function validateConcept(concept, topic, existing = [], gameMode = {}, kno
 
   const recentNames = existing.slice(-5).map(c => c.name).join('、') || '无';
 
-  const modeHint = gameMode.mode === 'ordered'
-    ? '时序模式：须晚于已有最新时间。'
-    : gameMode.mode === 'chain'
-    ? '关联模式：须与上一概念有历史关联。'
-    : '';
+  const activeModes = new Set([
+    gameMode.mode,
+    ...(Array.isArray(gameMode.modes) ? gameMode.modes : []),
+  ].filter(Boolean));
+
+  const modeHints = [];
+  if (activeModes.has('ordered')) modeHints.push('时序模式：须晚于已有最新时间。');
+  if (activeModes.has('chain')) modeHints.push('关联模式：须与上一概念有历史关联。');
+  const modeHint = modeHints.join('');
 
   const kb = knowledgeContext ? `参考：${knowledgeContext.slice(0, 200)}\n` : '';
 

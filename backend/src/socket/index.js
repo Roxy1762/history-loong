@@ -101,6 +101,10 @@ function hasMode(game, settings, mode) {
   return false;
 }
 
+function getActiveModes(game, settings) {
+  return [...new Set([game.mode, ...(Array.isArray(settings?.extraModes) ? settings.extraModes : [])].filter(Boolean))];
+}
+
 function pickColor(room) {
   const used = new Set([...room.players.values()].map(p => p.color));
   return COLORS.find(c => !used.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -226,7 +230,7 @@ module.exports = function setupSocket(io) {
         const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
 
         // Init challenge card if needed
-        if (game.mode === 'challenge' && !room.challengeCard) {
+        if (hasMode(game, settings, 'challenge') && !room.challengeCard) {
           pickNextChallenge(room); // start with generic card immediately
           // Generate topic-specific cards in background (replaces card when ready)
           if (!room.topicCards) {
@@ -254,7 +258,7 @@ module.exports = function setupSocket(io) {
           pendingConcepts,
           messages,
           scores,
-          turnState: game.mode === 'turn-order' ? {
+          turnState: hasMode(game, settings, 'turn-order') ? {
             currentPlayerId: room.joinOrder.filter(pid => room.players.has(pid))[room.turnIndex % Math.max(room.joinOrder.filter(pid => room.players.has(pid)).length, 1)] || null,
             order: room.joinOrder.filter(pid => room.players.has(pid)),
           } : null,
@@ -266,8 +270,8 @@ module.exports = function setupSocket(io) {
         pluginEvents.emit('player:join', { game, player: currentPlayer });
 
         // Broadcast turn/challenge state to newcomer
-        if (game.mode === 'turn-order') broadcastTurnState(io, id);
-        if (game.mode === 'challenge' && room.challengeCard) broadcastChallenge(io, id);
+        if (hasMode(game, settings, 'turn-order')) broadcastTurnState(io, id);
+        if (hasMode(game, settings, 'challenge') && room.challengeCard) broadcastChallenge(io, id);
 
       } catch (err) {
         console.error(`[Socket] game:join ERROR socketId=${socket.id} gameId=${id}:`, err);
@@ -295,7 +299,7 @@ module.exports = function setupSocket(io) {
       const isDeferred = settings.validationMode === 'deferred';
 
       // ── Turn-order mode check ─────────────────────────────────────────────
-      if (game.mode === 'turn-order') {
+      if (hasMode(game, settings, 'turn-order')) {
         const order = room.joinOrder.filter(pid => room.players.has(pid));
         if (order.length > 0) {
           const currentTurnIdx = room.turnIndex % order.length;
@@ -308,7 +312,7 @@ module.exports = function setupSocket(io) {
       }
 
       // ── Relay mode check ──────────────────────────────────────────────────
-      if (game.mode === 'relay') {
+      if (hasMode(game, settings, 'relay')) {
         if (room.roundSubmitted.has(currentPlayer.id)) {
           return callback?.({ error: '你本轮已提交过概念，等待其他玩家提交后开启新一轮' });
         }
@@ -364,7 +368,7 @@ module.exports = function setupSocket(io) {
           validationMethod = 'kb';
         } else {
           const knowledgeContext = getContextForConcept(input, game.topic);
-          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
         }
 
         const msElapsed = Date.now() - tsAI;
@@ -647,7 +651,7 @@ module.exports = function setupSocket(io) {
           result = kbCheck.result;
         } else {
           const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
-          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, ...settings }, knowledgeContext);
+          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
         }
 
         const ts = new TimelineService();
@@ -867,7 +871,10 @@ module.exports = function setupSocket(io) {
         pluginEvents.emit('player:leave', { gameId: currentGameId, player: currentPlayer });
 
         const game = db.getGame.get(currentGameId);
-        if (game?.mode === 'turn-order') broadcastTurnState(io, currentGameId);
+        if (game) {
+          const settings = JSON.parse(game.settings || '{}');
+          if (hasMode(game, settings, 'turn-order')) broadcastTurnState(io, currentGameId);
+        }
       } catch (err) {
         console.error(`[Socket] disconnect cleanup ERROR socketId=${socket.id}:`, err);
       }
@@ -878,7 +885,9 @@ module.exports = function setupSocket(io) {
 // ── Turn/relay state advancement (internal helper) ────────────────────────────
 
 function _advanceTurnState(io, gameId, game, room, playerId) {
-  if (game.mode === 'turn-order') {
+  const settings = JSON.parse(game.settings || '{}');
+
+  if (hasMode(game, settings, 'turn-order')) {
     const order = room.joinOrder.filter(pid => room.players.has(pid));
     if (order.length > 0) {
       room.turnIndex = (room.turnIndex + 1) % order.length;
@@ -887,7 +896,7 @@ function _advanceTurnState(io, gameId, game, room, playerId) {
       const nextName = room.players.get(nextId)?.name || '下一位玩家';
       sysMessage(io, gameId, `轮到 ${nextName} 提交概念了`);
     }
-  } else if (game.mode === 'relay') {
+  } else if (hasMode(game, settings, 'relay')) {
     room.roundSubmitted.add(playerId);
     const activePlayers = [...room.players.keys()];
     const allSubmitted = activePlayers.every(pid => room.roundSubmitted.has(pid));

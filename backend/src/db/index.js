@@ -278,6 +278,7 @@ module.exports = {
   createGame:        stmt(`INSERT INTO games (id, topic, mode, settings) VALUES (?, ?, ?, ?)`),
   getGame:           stmt(`SELECT * FROM games WHERE id = ?`),
   updateGameStatus:  stmt(`UPDATE games SET status = ?, updated_at = datetime('now') WHERE id = ?`),
+  updateGameMode:    stmt(`UPDATE games SET mode = ?, updated_at = datetime('now') WHERE id = ?`),
   updateGameSettings:stmt(`UPDATE games SET settings = ?, updated_at = datetime('now') WHERE id = ?`),
   updateGameNotes:   stmt(`UPDATE games SET notes = ?, updated_at = datetime('now') WHERE id = ?`),
   listGames:         stmt(`SELECT id, topic, mode, status, created_at FROM games ORDER BY created_at DESC LIMIT 50`),

@@ -16,8 +16,8 @@ import {
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc,
   adminListGames, adminFinishGame, adminDeleteGame,
-  adminUpdateGameNotes, adminUpdateGameSettings, adminRestoreGame,
-  adminGetLogs,
+  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame,
+  adminGetLogs, getGameModes,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
   adminGetCurationPending, adminGetCurationActive,
   adminApproveConcept, adminApproveAll, adminArchiveConcept, adminRejectConcept,
@@ -27,7 +27,7 @@ import {
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision,
 } from '../services/api';
-import type { Game } from '../types';
+import type { Game, GameModeConfig } from '../types';
 
 // ── Login screen ──────────────────────────────────────────────────────────────
 
@@ -223,7 +223,7 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
                   <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
                   <td className="px-4 py-3 text-slate-700">{g.topic}</td>
                   <td className="px-4 py-3">
-                    <ModeChip mode={g.mode} />
+                    <ModeChip mode={g.mode} extraModes={Array.isArray(g.settings?.extraModes) ? g.settings.extraModes as string[] : []} />
                   </td>
                   <td className="px-4 py-3">
                     <StatusChip status={g.status} />
@@ -239,9 +239,26 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
   );
 }
 
-function ModeChip({ mode }: { mode: string }) {
-  const map: Record<string, string> = { free: '自由', chain: '关联', ordered: '时序' };
-  return <span className="px-2 py-0.5 text-xs bg-slate-100 text-slate-600 rounded">{map[mode] || mode}</span>;
+function ModeChip({ mode, extraModes = [] }: { mode: string; extraModes?: string[] }) {
+  const map: Record<string, string> = {
+    free: '自由',
+    chain: '关联',
+    ordered: '时序',
+    relay: '接力',
+    'turn-order': '轮流',
+    'score-race': '积分',
+    challenge: '挑战',
+  };
+  const modes = [mode, ...extraModes.filter(m => m !== mode)];
+  return (
+    <div className="flex flex-wrap gap-1">
+      {modes.map((item, idx) => (
+        <span key={`${item}-${idx}`} className={`px-2 py-0.5 text-xs rounded ${idx === 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+          {map[item] || item}
+        </span>
+      ))}
+    </div>
+  );
 }
 function StatusChip({ status }: { status: string }) {
   const cfg: Record<string, string> = {
@@ -261,6 +278,23 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
   const [savingNotes, setSavingNotes] = useState(false);
   const [settingsStr, setSettingsStr] = useState(JSON.stringify(game.settings, null, 2));
   const [savingSettings, setSavingSettings] = useState(false);
+  const [modeDraft, setModeDraft] = useState(game.mode);
+  const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
+    Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : []
+  );
+  const [savingModes, setSavingModes] = useState(false);
+  const [modeOptions, setModeOptions] = useState<Record<string, GameModeConfig>>({});
+  const [combinableModeOptions, setCombinableModeOptions] = useState<Record<string, GameModeConfig>>({});
+
+  useEffect(() => {
+    if (!expanded) return;
+    getGameModes()
+      .then(data => {
+        setModeOptions(data.modes || {});
+        setCombinableModeOptions(data.combinableModes || {});
+      })
+      .catch(() => {});
+  }, [expanded]);
 
   async function saveNotes() {
     setSavingNotes(true);
@@ -281,6 +315,22 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
       onAction(err instanceof SyntaxError ? 'JSON 格式有误' : '更新失败');
     }
     setSavingSettings(false);
+  }
+
+  async function saveModes() {
+    setSavingModes(true);
+    try {
+      const normalizedExtraModes = [...new Set(extraModeDraft)].filter(m => m !== modeDraft);
+      await adminUpdateGameModes(game.id, modeDraft, normalizedExtraModes);
+      setExtraModeDraft(normalizedExtraModes);
+      const parsedSettings = JSON.parse(settingsStr || '{}');
+      parsedSettings.extraModes = normalizedExtraModes;
+      setSettingsStr(JSON.stringify(parsedSettings, null, 2));
+      onAction('游戏模式已更新');
+    } catch {
+      onAction('更新游戏模式失败');
+    }
+    setSavingModes(false);
   }
 
   async function handleFinish() {
@@ -316,7 +366,7 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
             <span className="text-xs text-amber-600 truncate block">📝 {(game as AdminGame & { notes?: string }).notes}</span>
           )}
         </td>
-        <td className="px-4 py-3"><ModeChip mode={game.mode} /></td>
+        <td className="px-4 py-3"><ModeChip mode={game.mode} extraModes={Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : []} /></td>
         <td className="px-4 py-3"><StatusChip status={game.status} /></td>
         <td className="px-4 py-3 text-slate-600">
           <span className="font-medium">{game.conceptCount}</span>
@@ -371,6 +421,63 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                   className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
                   {savingNotes ? '保存中...' : '保存备注'}
                 </button>
+              </div>
+              {/* Mode editor */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1.5">🎮 游戏模式</label>
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1.5">主模式</div>
+                    <select
+                      className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                      value={modeDraft}
+                      onChange={e => {
+                        const nextMode = e.target.value;
+                        setModeDraft(nextMode);
+                        setExtraModeDraft(prev => prev.filter(m => m !== nextMode));
+                      }}
+                    >
+                      {Object.entries(modeOptions).map(([key, cfg]) => (
+                        <option key={key} value={key}>{cfg.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1.5">附加模式</div>
+                    <div className="space-y-2 max-h-40 overflow-auto pr-1">
+                      {Object.entries(combinableModeOptions).map(([key, cfg]) => {
+                        const checked = extraModeDraft.includes(key);
+                        const disabled = key === modeDraft;
+                        return (
+                          <label key={key} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${checked ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200 bg-slate-50'} ${disabled ? 'opacity-50' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked || disabled}
+                              disabled={disabled}
+                              onChange={() => {
+                                if (disabled) return;
+                                setExtraModeDraft(prev =>
+                                  prev.includes(key) ? prev.filter(m => m !== key) : [...prev, key]
+                                );
+                              }}
+                              className="mt-0.5"
+                            />
+                            <div>
+                              <div className="text-sm font-medium text-slate-700">{cfg.label}</div>
+                              <div className="text-xs text-slate-500 mt-0.5">{cfg.description}</div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <button onClick={saveModes} disabled={savingModes}
+                    className="text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
+                    {savingModes ? '更新中...' : '保存模式'}
+                  </button>
+                </div>
               </div>
               {/* Settings */}
               <div>

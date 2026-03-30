@@ -15,6 +15,7 @@ const profileSvc = require('../services/profileService');
 const messageSvc = require('../services/messageService');
 const settlementSvc = require('../services/settlementService');
 const curationSvc = require('../services/curationService');
+const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
 
 const router = express.Router();
 const upload = multer({
@@ -155,6 +156,61 @@ router.put('/games/:id/settings', (req, res) => {
   db.updateGameSettings.run(JSON.stringify(merged), id);
   console.log(`[Admin] Updated settings for ${id}`);
   res.json({ message: '设置已更新', settings: merged });
+});
+
+
+// Update primary mode + extra modes
+router.put('/games/:id/modes', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const { mode, extraModes = [] } = req.body;
+  console.log(`[Admin] PUT /games/${id}/modes mode=${mode} extraModes=${JSON.stringify(extraModes)}`);
+
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  if (!mode || !GAME_MODES[mode]) {
+    return res.status(400).json({ error: '请提供有效的主模式' });
+  }
+  if (!Array.isArray(extraModes)) {
+    return res.status(400).json({ error: 'extraModes 必须是数组' });
+  }
+
+  const normalizedExtraModes = [...new Set(extraModes)]
+    .filter(Boolean)
+    .filter(em => em !== mode);
+
+  for (const em of normalizedExtraModes) {
+    if (!COMBINABLE_MODES[em] && !GAME_MODES[em]) {
+      return res.status(400).json({ error: `未知附加模式: ${em}` });
+    }
+  }
+
+  const existingSettings = JSON.parse(game.settings || '{}');
+  const nextSettings = { ...existingSettings, extraModes: normalizedExtraModes };
+
+  db.updateGameMode.run(mode, id);
+  db.updateGameSettings.run(JSON.stringify(nextSettings), id);
+
+  const updated = db.getGame.get(id);
+  const payload = {
+    ...updated,
+    settings: JSON.parse(updated.settings || '{}'),
+  };
+
+  db.insertMessage.run(
+    uuidv4(),
+    id,
+    null,
+    null,
+    'system',
+    `管理员已更新游戏模式：主模式「${mode}」${normalizedExtraModes.length > 0 ? `，附加模式 ${normalizedExtraModes.join('、')}` : ''}`,
+    JSON.stringify({ type: 'admin_mode_update', mode, extraModes: normalizedExtraModes })
+  );
+
+  res.json({
+    message: '游戏模式已更新',
+    game: payload,
+  });
 });
 
 // Restore a finished/errored game back to playing

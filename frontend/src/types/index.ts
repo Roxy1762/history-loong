@@ -24,6 +24,7 @@ export type ValidationMode = 'realtime' | 'deferred';
 
 export interface GameSettings {
   validationMode?: ValidationMode;
+  extraModes?: string[];
   [key: string]: unknown;
 }
 
