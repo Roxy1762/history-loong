@@ -304,6 +304,7 @@ export default function Game() {
     timeline?: Concept[];
     pendingConcepts?: Concept[];
     messages?: Message[];
+    messageTruncated?: boolean;
     scores?: Record<string, number>;
     turnState?: TurnState | null;
     challengeCard?: ChallengeCard | null;
@@ -318,11 +319,27 @@ export default function Game() {
     }
     if (res.timeline) setTimeline(res.timeline);
     if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
-    if (res.messages) setMessages(res.messages);
+    if (res.messages) {
+      if (res.messageTruncated) {
+        const notice: Message = {
+          id: `sys_history_trimmed_${Date.now()}`,
+          game_id: res.game?.id || gameId || '',
+          player_id: null,
+          player_name: null,
+          type: 'system',
+          content: '历史消息较多，当前仅加载最近 500 条。更早消息可通过接口分页获取。',
+          meta: { truncated: true },
+          created_at: new Date().toISOString(),
+        };
+        setMessages([...res.messages, notice]);
+      } else {
+        setMessages(res.messages);
+      }
+    }
     if (res.scores) setScores(res.scores);
     if (res.turnState !== undefined) setTurnState(res.turnState);
     if (res.challengeCard !== undefined) setChallengeCard(res.challengeCard);
-  }, [setChallengeCard, setGame, setIsAdmin, setMe, setMessages, setPendingConcepts, setScores, setTimeline, setTurnState]);
+  }, [gameId, setChallengeCard, setGame, setIsAdmin, setMe, setMessages, setPendingConcepts, setScores, setTimeline, setTurnState]);
 
   const joinAsRegularPlayer = useCallback(async (playerName: string, explicitPlayerId?: string) => {
     if (!gameId) return { error: '缺少房间号' };

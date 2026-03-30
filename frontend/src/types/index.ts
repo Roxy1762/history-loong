@@ -101,6 +101,7 @@ export interface JoinResponse {
   timeline?: Concept[];
   pendingConcepts?: Concept[];
   messages?: Message[];
+  messageTruncated?: boolean;
   scores?: Record<string, number>;
   turnState?: TurnState | null;
   challengeCard?: ChallengeCard | null;

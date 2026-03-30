@@ -2,6 +2,8 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
+const messageSvc = require('../services/messageService');
+const { parseArray, parseObject, toBoundedInt } = require('../utils/json');
 
 const router = express.Router();
 
@@ -42,7 +44,7 @@ router.get('/:id', (req, res) => {
   const game = db.getGame.get(req.params.id.toUpperCase());
   if (!game) return res.status(404).json({ error: '房间不存在' });
 
-  game.settings = JSON.parse(game.settings || '{}');
+  game.settings = parseObject(game.settings, {});
   const players = db.getPlayers.all(game.id);
   const conceptCount = db.getConceptCount.get(game.id).count;
   res.json({ game, players, conceptCount });
@@ -55,8 +57,8 @@ router.get('/:id/concepts', (req, res) => {
 
   const concepts = db.getConceptsByGame.all(game.id).map((c) => ({
     ...c,
-    tags: JSON.parse(c.tags || '[]'),
-    extra: JSON.parse(c.extra || '{}'),
+    tags: parseArray(c.tags, []),
+    extra: parseObject(c.extra, {}),
   }));
   res.json({ concepts });
 });
@@ -66,11 +68,30 @@ router.get('/:id/messages', (req, res) => {
   const game = db.getGame.get(req.params.id.toUpperCase());
   if (!game) return res.status(404).json({ error: '房间不存在' });
 
-  const messages = db.getMessagesByGame.all(game.id).map((m) => ({
-    ...m,
-    meta: JSON.parse(m.meta || '{}'),
-  }));
-  res.json({ messages });
+  const limit = toBoundedInt(req.query.limit, { defaultValue: 100, min: 1, max: 500 });
+  const offset = toBoundedInt(req.query.offset, { defaultValue: 0, min: 0, max: 1000000 });
+  const includeArchived = String(req.query.includeArchived || '') === '1';
+
+  const messages = messageSvc.getMessages(game.id, limit, offset);
+  const total = messageSvc.getMessageCount(game.id);
+  const archivedMessages = includeArchived
+    ? messageSvc.getArchivedMessages(game.id, limit, offset)
+    : [];
+  const archivedTotal = includeArchived
+    ? db.getArchivedMessageCount.get(game.id)?.count ?? 0
+    : undefined;
+
+  res.json({
+    messages,
+    pagination: {
+      limit,
+      offset,
+      total,
+      hasMore: offset + messages.length < total,
+      ...(includeArchived ? { archivedTotal } : {}),
+    },
+    ...(includeArchived ? { archivedMessages } : {}),
+  });
 });
 
 // GET /api/games/:id/modes — list available game modes
@@ -146,7 +167,7 @@ router.post('/import', (req, res) => {
   console.log(`[Games] POST /import created gameId=${newId} concepts=${importedConcepts} messages=${importedMessages}`);
   const game = db.getGame.get(newId);
   res.json({
-    game: { ...game, settings: JSON.parse(game.settings || '{}') },
+    game: { ...game, settings: parseObject(game.settings, {}) },
     importedConcepts,
     importedMessages,
   });
