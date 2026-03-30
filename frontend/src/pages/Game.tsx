@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useGameStore } from '../store/gameStore';
 import {
   joinGame, onSocket, onConnectionState, disconnectSocket,
-  requestHints, finishGame, settleConcepts, validateSingleConcept,
+  requestHints, finishGame, settleConcepts, validateSingleConcept, skipChallenge,
   type ConnectionState,
 } from '../services/socket';
 import Timeline from '../components/Timeline';
@@ -120,14 +120,62 @@ function ScoreBoard({ players, scores, me }: { players: { id: string; name: stri
 
 // ── Challenge card banner ─────────────────────────────────────────────────────
 
-function ChallengeBanner({ card, round }: { card: { text: string } | null; round?: number }) {
+function ChallengeBanner({ card, round, onSkip }: {
+  card: { text: string } | null;
+  round?: number;
+  onSkip?: () => void;
+}) {
+  const [skipCooldown, setSkipCooldown] = useState(0); // seconds remaining
+  const [skipping, setSkipping] = useState(false);
+
+  useEffect(() => {
+    if (skipCooldown <= 0) return;
+    const t = setTimeout(() => setSkipCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [skipCooldown]);
+
+  async function handleSkip() {
+    if (skipping || skipCooldown > 0 || !onSkip) return;
+    setSkipping(true);
+    onSkip();
+    setSkipping(false);
+    setSkipCooldown(30);
+  }
+
   if (!card) return null;
   const remaining = Math.max(0, 5 - (round || 0));
   return (
-    <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-purple-100 px-4 py-2.5 flex items-center gap-2 flex-wrap">
+    <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-purple-100 px-4 py-2 flex items-center gap-2 flex-wrap">
       <span className="text-xs font-bold text-purple-700 shrink-0">🃏 当前挑战：</span>
       <span className="text-xs text-purple-800 font-medium flex-1">{card.text}</span>
-      <span className="text-xs text-purple-400 shrink-0">还需 {remaining} 个概念换牌</span>
+      <span className="text-xs text-purple-400 shrink-0">还需 {remaining} 个换牌</span>
+      {onSkip && (
+        <button
+          onClick={handleSkip}
+          disabled={skipping || skipCooldown > 0}
+          className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-colors shrink-0
+            ${skipCooldown > 0
+              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+              : 'bg-purple-100 text-purple-600 border-purple-200 hover:bg-purple-200'}`}
+          title={skipCooldown > 0 ? `换题冷却中 (${skipCooldown}s)` : '手动换题 (30s 冷却)'}>
+          {skipCooldown > 0 ? `🔀 ${skipCooldown}s` : '🔀 换题'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Challenge bonus toast ─────────────────────────────────────────────────────
+
+function BonusToast({ bonus, playerName }: { bonus: number; playerName: string | null }) {
+  return (
+    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-slide-up">
+      <div className="bg-purple-600 text-white px-5 py-3 rounded-2xl shadow-2xl text-center animate-pop-in">
+        <div className="text-2xl font-black text-yellow-300">+{bonus}分</div>
+        <div className="text-xs mt-0.5 opacity-90">
+          {playerName ? `${playerName} 完成挑战！` : '挑战完成！'}
+        </div>
+      </div>
     </div>
   );
 }
@@ -184,6 +232,8 @@ export default function Game() {
   const [connState,   setConnState]   = useState<ConnectionState | null>(null);
   const [validatingConceptIds, setValidatingConceptIds] = useState<Set<string>>(new Set());
   const [challengeRound, setChallengeRound] = useState(0);
+  const [bonusToast, setBonusToast] = useState<{ bonus: number; playerName: string | null } | null>(null);
+  const [chatFill, setChatFill] = useState('');
 
   const meRef     = useRef(me);
   const gameIdRef = useRef(gameId);
@@ -230,7 +280,18 @@ export default function Game() {
         console.error('[Game] connect_error:', err.message);
       }),
       onSocket('disconnect', () => setConnected(false)),
-      onSocket('message:new', msg => addMessage(msg)),
+      onSocket('message:new', msg => {
+        addMessage(msg);
+        // Show bonus toast when a challenge is completed
+        const meta = msg.meta as Record<string, unknown>;
+        if (meta?.type === 'challenge_complete' && typeof meta.bonus === 'number') {
+          // Extract player name from message content (format: "🎯 {name} 完成了挑战...")
+          const match = msg.content?.match(/^🎯 (.+?) 完成了挑战/);
+          const pName = match ? match[1] : null;
+          setBonusToast({ bonus: meta.bonus as number, playerName: pName });
+          setTimeout(() => setBonusToast(null), 2500);
+        }
+      }),
 
       onSocket('concept:new', ({ concept }: { concept: Concept }) => {
         addConcept(concept);
@@ -346,6 +407,12 @@ export default function Game() {
     }
   }
 
+  // ── Skip challenge card ───────────────────────────────────────────────────
+  async function handleSkipChallenge() {
+    const res = await skipChallenge();
+    if (res.error) alert(res.error);
+  }
+
   // ── Finish ────────────────────────────────────────────────────────────────
   async function handleFinish() {
     if (!confirm('确认结束游戏？结束后可导出成果。')) return;
@@ -371,6 +438,7 @@ export default function Game() {
     <>
       {showName  && <NameDialog onConfirm={handleJoin} />}
       {showExport && gameId && <ExportPanel gameId={gameId} onClose={() => setShowExport(false)} />}
+      {bonusToast && <BonusToast bonus={bonusToast.bonus} playerName={bonusToast.playerName} />}
       <SettleOverlay />
       {settleResult && (
         <SettleResult
@@ -533,7 +601,16 @@ export default function Game() {
           <div className="bg-gradient-to-r from-amber-50 to-yellow-50 border-b border-amber-100 px-4 py-2.5 flex items-center gap-2 flex-wrap flex-shrink-0">
             <span className="text-xs text-amber-700 font-semibold shrink-0">💡 AI 建议：</span>
             {hints.map(h => (
-              <span key={h} className="text-xs px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-200 font-medium">{h}</span>
+              <button
+                key={h}
+                onClick={() => {
+                  setChatFill(h);
+                  setActiveTab('chat');
+                  setTimeout(() => setChatFill(''), 100);
+                }}
+                className="text-xs px-2.5 py-1 bg-amber-100 text-amber-800 rounded-full border border-amber-200 font-medium hover:bg-amber-200 hover:border-amber-300 transition-colors cursor-pointer"
+                title="点击填入输入框"
+              >{h}</button>
             ))}
             <button onClick={() => setHints([])} className="ml-auto text-amber-400 hover:text-amber-600 text-xs p-1">✕</button>
           </div>
@@ -546,7 +623,7 @@ export default function Game() {
 
         {/* Challenge card banner */}
         {isChallengeMode && challengeCard && !gameFinished && (
-          <ChallengeBanner card={challengeCard} round={challengeRound} />
+          <ChallengeBanner card={challengeCard} round={challengeRound} onSkip={handleSkipChallenge} />
         )}
 
         {/* Turn indicator (turn-order mode) */}
@@ -600,6 +677,7 @@ export default function Game() {
               isMyTurn={isMyTurn}
               isTurnMode={isTurnMode}
               turnPlayerName={turnState?.currentPlayerName ?? null}
+              fillInput={chatFill}
             />
           </div>
 

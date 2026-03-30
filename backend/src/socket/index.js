@@ -73,6 +73,8 @@ function getRoom(gameId) {
       scores: new Map(),
       challengeCard: null,
       challengeRound: 0,
+      topicCards: null,       // AI-generated topic-specific challenge cards
+      lastSkipAt: 0,          // timestamp of last manual card skip (for cooldown)
     });
   }
   return rooms.get(gameId);
@@ -122,7 +124,18 @@ function broadcastChallenge(io, gameId) {
 }
 
 function pickNextChallenge(room) {
-  const card = CHALLENGE_CARDS[Math.floor(Math.random() * CHALLENGE_CARDS.length)];
+  // Prefer AI-generated topic-specific cards; fall back to generic pool
+  const pool = (room.topicCards && room.topicCards.length > 0)
+    ? room.topicCards
+    : CHALLENGE_CARDS;
+  // Avoid repeating the same card consecutively if pool is large enough
+  let card;
+  if (pool.length > 1 && room.challengeCard) {
+    const others = pool.filter(c => c.id !== room.challengeCard.id);
+    card = others[Math.floor(Math.random() * others.length)];
+  } else {
+    card = pool[Math.floor(Math.random() * pool.length)];
+  }
   room.challengeCard = card;
   room.challengeRound = 0;
   return card;
@@ -193,7 +206,21 @@ module.exports = function setupSocket(io) {
 
         // Init challenge card if needed
         if (game.mode === 'challenge' && !room.challengeCard) {
-          pickNextChallenge(room);
+          pickNextChallenge(room); // start with generic card immediately
+          // Generate topic-specific cards in background (replaces card when ready)
+          if (!room.topicCards) {
+            ai.generateChallengeCards(game.topic).then(cards => {
+              if (cards && cards.length > 0) {
+                room.topicCards = cards;
+                // Replace current card with a topic-specific one
+                pickNextChallenge(room);
+                broadcastChallenge(io, id);
+                console.log(`[Socket] Generated ${cards.length} topic cards for "${game.topic}"`);
+              }
+            }).catch(err => {
+              console.warn(`[Socket] Topic cards generation failed (using generic): ${err.message}`);
+            });
+          }
         }
 
         const scores = Object.fromEntries(room.scores);
@@ -648,6 +675,27 @@ module.exports = function setupSocket(io) {
       } catch (err) {
         callback?.({ error: '获取提示失败' });
       }
+    });
+
+    // ── challenge: manual card skip ───────────────────────────────────────────
+    socket.on('challenge:skip', (_, callback) => {
+      if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      const game = db.getGame.get(currentGameId);
+      if (!game || game.mode !== 'challenge') return callback?.({ error: '当前不是挑战模式' });
+
+      const room = getRoom(currentGameId);
+      const SKIP_COOLDOWN_MS = 30000; // 30s cooldown between manual skips
+      const now = Date.now();
+      if (now - room.lastSkipAt < SKIP_COOLDOWN_MS) {
+        const remaining = Math.ceil((SKIP_COOLDOWN_MS - (now - room.lastSkipAt)) / 1000);
+        return callback?.({ error: `换题冷却中，请等待 ${remaining} 秒` });
+      }
+
+      room.lastSkipAt = now;
+      const newCard = pickNextChallenge(room);
+      sysMessage(io, currentGameId, `🔀 ${currentPlayer.name} 换了新挑战：${newCard.text}`);
+      broadcastChallenge(io, currentGameId);
+      callback?.({ ok: true, card: newCard });
     });
 
     // ── finish ────────────────────────────────────────────────────────────────
