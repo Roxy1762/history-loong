@@ -24,7 +24,12 @@
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { getContextForConcept, searchContext, ingestAIConfirmedConcept, validateFromKnowledge } = require('../services/knowledgeService');
+const {
+  getContextForConceptAdvanced,
+  searchContextAdvanced,
+  ingestAIConfirmedConcept,
+  validateFromKnowledge,
+} = require('../services/knowledgeService');
 const { TimelineService } = require('../services/timelineService');
 const { pluginEvents } = require('../plugins');
 const auditSvc = require('../services/auditService');
@@ -39,6 +44,8 @@ const rooms = new Map();
  * Room shape:
  * {
  *   players: Map<playerId, { id, name, color, isAdmin? }>,
+ *   playerSockets: Map<playerId, socketId>,
+ *   socketToPlayer: Map<socketId, playerId>,
  *   joinOrder: string[],
  *   settling: boolean,
  *   turnIndex: number,
@@ -76,6 +83,8 @@ function getRoom(gameId) {
   if (!rooms.has(gameId)) {
     rooms.set(gameId, {
       players: new Map(),
+      playerSockets: new Map(),
+      socketToPlayer: new Map(),
       joinOrder: [],
       settling: false,
       turnIndex: 0,
@@ -103,6 +112,14 @@ function hasMode(game, settings, mode) {
 
 function getActiveModes(game, settings) {
   return [...new Set([game.mode, ...(Array.isArray(settings?.extraModes) ? settings.extraModes : [])].filter(Boolean))];
+}
+
+function normalizePlayerId(raw) {
+  if (typeof raw !== 'string') return null;
+  const id = raw.trim();
+  if (!id) return null;
+  if (!/^[A-Za-z0-9_-]{6,100}$/.test(id)) return null;
+  return id;
 }
 
 function pickColor(room) {
@@ -188,33 +205,49 @@ module.exports = function setupSocket(io) {
   io.on('connection', (socket) => {
     let currentGameId = null;
     let currentPlayer = null;
+    let wantsAdmin = false;
 
     console.log(`[Socket] new connection socketId=${socket.id} transport=${socket.conn?.transport?.name}`);
 
     // ── join ──────────────────────────────────────────────────────────────────
-    socket.on('game:join', ({ gameId, playerName }, callback) => {
+    socket.on('game:join', ({ gameId, playerName, playerId }, callback) => {
       const id = (gameId || '').toUpperCase();
-      console.log(`[Socket] game:join socketId=${socket.id} gameId=${id} playerName=${playerName}`);
+      console.log(`[Socket] game:join socketId=${socket.id} gameId=${id} playerName=${playerName} playerId=${playerId || '-'}`);
 
       try {
         const game = db.getGame.get(id);
         if (!game) return callback?.({ error: '房间不存在' });
 
-        const room    = getRoom(id);
-        const color   = pickColor(room);
-        const playerId = socket.id;
+        const room = getRoom(id);
+        const normalizedPlayerId = normalizePlayerId(playerId) || socket.id;
+        const existingPlayer = room.players.get(normalizedPlayerId);
+        const color = existingPlayer?.color || pickColor(room);
+        const previousSocketId = room.playerSockets.get(normalizedPlayerId);
 
-        currentGameId  = id;
-        currentPlayer  = { id: playerId, name: playerName || '匿名玩家', color };
+        currentGameId = id;
+        currentPlayer = {
+          id: normalizedPlayerId,
+          name: (playerName || existingPlayer?.name || '匿名玩家').slice(0, 32),
+          color,
+          isAdmin: Boolean(existingPlayer?.isAdmin || wantsAdmin),
+        };
 
-        room.players.set(playerId, currentPlayer);
-        if (!room.joinOrder.includes(playerId)) {
-          room.joinOrder.push(playerId);
+        room.players.set(normalizedPlayerId, currentPlayer);
+        if (!room.joinOrder.includes(normalizedPlayerId)) {
+          room.joinOrder.push(normalizedPlayerId);
         }
+        if (previousSocketId && previousSocketId !== socket.id) {
+          room.socketToPlayer.delete(previousSocketId);
+          const prevSocket = io.sockets.sockets.get(previousSocketId);
+          if (prevSocket) prevSocket.leave(id);
+          console.log(`[Socket] replaced stale socket playerId=${normalizedPlayerId} old=${previousSocketId} new=${socket.id}`);
+        }
+        room.playerSockets.set(normalizedPlayerId, socket.id);
+        room.socketToPlayer.set(socket.id, normalizedPlayerId);
         socket.join(id);
 
-        db.upsertPlayer.run(playerId, id, currentPlayer.name, color);
-        profileSvc.ensureProfile(playerId, currentPlayer.name, color);
+        db.upsertPlayer.run(normalizedPlayerId, id, currentPlayer.name, color);
+        profileSvc.ensureProfile(normalizedPlayerId, currentPlayer.name, color);
 
         if (game.status === 'waiting') {
           db.updateGameStatus.run('playing', id);
@@ -367,7 +400,7 @@ module.exports = function setupSocket(io) {
           result = kbCheck.result;
           validationMethod = 'kb';
         } else {
-          const knowledgeContext = getContextForConcept(input, game.topic);
+          const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
           result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
         }
 
@@ -553,7 +586,7 @@ module.exports = function setupSocket(io) {
       callback?.({ ok: true, total: pending.length });
 
       try {
-        const knowledgeContext = searchContext(game.topic, 2);
+        const knowledgeContext = await searchContextAdvanced(game.topic, 2);
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
         const ts = new TimelineService();
@@ -650,7 +683,7 @@ module.exports = function setupSocket(io) {
         if (kbCheck.confident) {
           result = kbCheck.result;
         } else {
-          const knowledgeContext = getContextForConcept(row.raw_input, game.topic);
+          const knowledgeContext = await getContextForConceptAdvanced(row.raw_input, game.topic);
           result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
         }
 
@@ -828,6 +861,7 @@ module.exports = function setupSocket(io) {
     socket.on('admin:join', ({ gameId, adminKey }, callback) => {
       const ADMIN_KEY = process.env.ADMIN_KEY || 'admin';
       if (adminKey !== ADMIN_KEY) return callback?.({ error: '管理员密钥错误' });
+      wantsAdmin = true;
 
       const id = (gameId || '').toUpperCase();
       const game = db.getGame.get(id);
@@ -840,8 +874,9 @@ module.exports = function setupSocket(io) {
         room.players.set(currentPlayer.id, currentPlayer);
         broadcastPlayers(io, id);
         sysMessage(io, id, `👑 管理员已进入游戏`);
+        return callback?.({ ok: true });
       }
-      callback?.({ ok: true });
+      callback?.({ ok: true, pending: true });
     });
 
     // ── finish ────────────────────────────────────────────────────────────────
@@ -856,19 +891,34 @@ module.exports = function setupSocket(io) {
     // ── disconnect ────────────────────────────────────────────────────────────
     socket.on('disconnect', (reason) => {
       console.log(`[Socket] disconnect socketId=${socket.id} gameId=${currentGameId} player=${currentPlayer?.name} reason=${reason}`);
-      if (!currentGameId || !currentPlayer) return;
+      if (!currentGameId) return;
       try {
         const room = getRoom(currentGameId);
-        room.players.delete(currentPlayer.id);
+        const disconnectedPlayerId = room.socketToPlayer.get(socket.id) || currentPlayer?.id;
+        if (!disconnectedPlayerId) return;
+
+        room.socketToPlayer.delete(socket.id);
+        const activeSocketId = room.playerSockets.get(disconnectedPlayerId);
+        if (activeSocketId && activeSocketId !== socket.id) {
+          console.log(`[Socket] stale disconnect ignored socketId=${socket.id} playerId=${disconnectedPlayerId}`);
+          return;
+        }
+
+        room.playerSockets.delete(disconnectedPlayerId);
+        const leavingPlayer = room.players.get(disconnectedPlayerId) || currentPlayer;
+        if (!leavingPlayer) return;
+
+        room.players.delete(disconnectedPlayerId);
+        room.roundSubmitted.delete(disconnectedPlayerId);
         // Remove from joinOrder to avoid dead slots in turn rotation
-        room.joinOrder = room.joinOrder.filter(id => id !== currentPlayer.id);
+        room.joinOrder = room.joinOrder.filter(id => id !== disconnectedPlayerId);
         // Recalculate turn index to not skip players
         if (room.joinOrder.length > 0) {
           room.turnIndex = room.turnIndex % room.joinOrder.length;
         }
         broadcastPlayers(io, currentGameId);
-        sysMessage(io, currentGameId, `${currentPlayer.name} 离开了游戏`);
-        pluginEvents.emit('player:leave', { gameId: currentGameId, player: currentPlayer });
+        sysMessage(io, currentGameId, `${leavingPlayer.name} 离开了游戏`);
+        pluginEvents.emit('player:leave', { gameId: currentGameId, player: leavingPlayer });
 
         const game = db.getGame.get(currentGameId);
         if (game) {

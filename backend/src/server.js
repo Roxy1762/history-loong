@@ -13,7 +13,7 @@ const exportRouter = require('./routes/export');
 const adminRouter  = require('./routes/admin');
 const profileRouter = require('./routes/profile');
 const setupSocket  = require('./socket');
-const { loadPlugins, GAME_MODES } = require('./plugins');
+const { loadPlugins, GAME_MODES, COMBINABLE_MODES } = require('./plugins');
 
 // ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ app.use('/api/export', exportRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/profile', profileRouter);
 
-app.get('/api/modes', (_req, res) => res.json({ modes: GAME_MODES }));
+app.get('/api/modes', (_req, res) => res.json({ modes: GAME_MODES, combinableModes: COMBINABLE_MODES }));
 
 app.get('/api/health', (_req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })

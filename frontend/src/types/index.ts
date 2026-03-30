@@ -32,6 +32,7 @@ export interface Player {
   id: string;
   name: string;
   color: string;
+  isAdmin?: boolean;
   score?: number; // present in score-race / challenge modes
 }
 
@@ -89,7 +90,7 @@ export interface ChallengeCard {
 
 // ── Socket event payloads ─────────────────────────────────────────────────────
 
-export interface JoinPayload { gameId: string; playerName: string; }
+export interface JoinPayload { gameId: string; playerName: string; playerId?: string; }
 
 export interface JoinResponse {
   ok?: boolean;
