@@ -41,8 +41,8 @@ export async function getGameMessages(id: string) {
 }
 
 export async function getGameModes() {
-  const { data } = await api.get<{ modes: Record<string, GameModeConfig> }>('/modes');
-  return data.modes;
+  const { data } = await api.get<{ modes: Record<string, GameModeConfig>; combinableModes: Record<string, GameModeConfig> }>('/modes');
+  return data;
 }
 
 /** Import a previously exported JSON file to create a new restored game. */

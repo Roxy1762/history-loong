@@ -10,6 +10,15 @@ interface Props {
   validatingConceptIds?: Set<string>;
   isDeferred?: boolean;
   selectedPendingIds?: Set<string>;
+  me?: { id: string } | null;
+  isAdmin?: boolean;
+  editingConceptId?: string | null;
+  editingInput?: string;
+  onStartEdit?: (id: string, current: string) => void;
+  onEditInputChange?: (v: string) => void;
+  onConfirmEdit?: () => void;
+  onCancelEdit?: () => void;
+  onDeleteConcept?: (id: string, name: string) => void;
 }
 
 // ── Era color mapping ─────────────────────────────────────────────────────────
@@ -76,6 +85,15 @@ const Timeline = memo(function Timeline({
   validatingConceptIds = new Set(),
   isDeferred = false,
   selectedPendingIds,
+  me,
+  isAdmin = false,
+  editingConceptId,
+  editingInput = '',
+  onStartEdit,
+  onEditInputChange,
+  onConfirmEdit,
+  onCancelEdit,
+  onDeleteConcept,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const { toggleSelectedPending } = useGameStore();
@@ -147,59 +165,91 @@ const Timeline = memo(function Timeline({
             {pendingConcepts.map(c => {
               const isValidating = validatingConceptIds.has(c.id);
               const isSelected = effectiveSelected.has(c.id);
+              const isEditing = editingConceptId === c.id;
+              const canEdit = !isValidating && (isAdmin || c.player_id === me?.id);
               return (
                 <div key={c.id} className="relative animate-spring-in">
                   <div className={`absolute -left-[26px] top-3.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow z-10
                     ${isValidating ? 'bg-indigo-400 animate-pulse' : isSelected ? 'bg-violet-500' : 'bg-amber-400'}`} />
                   <div
-                    className={`border rounded-2xl px-4 py-3 transition-all duration-200 cursor-pointer
-                      ${isSelected
-                        ? 'bg-violet-50/80 border-violet-200 ring-1 ring-violet-300'
-                        : 'bg-amber-50/80 border-amber-100 hover:border-amber-200'}`}
+                    className={`border rounded-2xl px-4 py-3 transition-all duration-200
+                      ${isEditing ? 'bg-blue-50/80 border-blue-200 ring-1 ring-blue-300' :
+                        isSelected
+                          ? 'bg-violet-50/80 border-violet-200 ring-1 ring-violet-300 cursor-pointer'
+                          : 'bg-amber-50/80 border-amber-100 hover:border-amber-200 cursor-pointer'}`}
                     style={{ opacity: isValidating ? 0.7 : 1 }}
-                    onClick={() => isDeferred && toggleSelectedPending(c.id)}
+                    onClick={() => !isEditing && isDeferred && toggleSelectedPending(c.id)}
                   >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {/* Checkbox (deferred mode) */}
-                      {isDeferred && (
+                    {isEditing ? (
+                      /* Inline edit mode */
+                      <div className="space-y-2" onClick={e => e.stopPropagation()}>
                         <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleSelectedPending(c.id)}
-                          onClick={e => e.stopPropagation()}
-                          className="rounded border-amber-300 text-violet-500 focus:ring-violet-400 w-3.5 h-3.5 flex-shrink-0"
+                          className="w-full text-sm border border-blue-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          value={editingInput}
+                          onChange={e => onEditInputChange?.(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') onConfirmEdit?.(); if (e.key === 'Escape') onCancelEdit?.(); }}
+                          autoFocus
                         />
-                      )}
-                      <span className="font-semibold text-slate-700 text-sm">{c.raw_input}</span>
-                      {isValidating ? (
-                        <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1">
-                          <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                          验证中
-                        </span>
-                      ) : (
-                        <span className={`text-xs px-2 py-0.5 rounded-full border
-                          ${isSelected ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-amber-100 text-amber-600 border-amber-200'}`}>
-                          {isSelected ? '✓ 已选' : '⏳ 待验证'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between mt-1.5">
-                      <div className="text-xs text-slate-400">{c.player_name}</div>
-                      {onValidateConcept && !isValidating && (
-                        <button
-                          onClick={e => { e.stopPropagation(); onValidateConcept(c.id); }}
-                          className="text-xs px-2.5 py-1 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg
-                            hover:bg-indigo-100 hover:border-indigo-300 transition-all duration-150 font-medium flex items-center gap-1"
-                        >
-                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          立即验证
-                        </button>
-                      )}
-                    </div>
+                        <div className="flex gap-1.5 justify-end">
+                          <button onClick={onCancelEdit} className="text-xs px-2.5 py-1 rounded-lg border text-slate-500 hover:bg-slate-100 transition-colors">取消</button>
+                          <button onClick={onConfirmEdit} className="text-xs px-2.5 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors font-medium">保存</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {isDeferred && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectedPending(c.id)}
+                              onClick={e => e.stopPropagation()}
+                              className="rounded border-amber-300 text-violet-500 focus:ring-violet-400 w-3.5 h-3.5 flex-shrink-0"
+                            />
+                          )}
+                          <span className="font-semibold text-slate-700 text-sm">{c.raw_input}</span>
+                          {isValidating ? (
+                            <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1">
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                              <span className="w-1 h-1 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                              验证中
+                            </span>
+                          ) : (
+                            <span className={`text-xs px-2 py-0.5 rounded-full border
+                              ${isSelected ? 'bg-violet-100 text-violet-700 border-violet-200' : 'bg-amber-100 text-amber-600 border-amber-200'}`}>
+                              {isSelected ? '✓ 已选' : '⏳ 待验证'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between mt-1.5 gap-2">
+                          <div className="text-xs text-slate-400">{c.player_name}</div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            {onValidateConcept && !isValidating && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onValidateConcept(c.id); }}
+                                className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-lg
+                                  hover:bg-indigo-100 hover:border-indigo-300 transition-all duration-150 font-medium"
+                              >✓ 验证</button>
+                            )}
+                            {canEdit && onStartEdit && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onStartEdit(c.id, c.raw_input); }}
+                                className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg
+                                  hover:bg-blue-100 transition-colors font-medium"
+                              >✏️</button>
+                            )}
+                            {canEdit && onDeleteConcept && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onDeleteConcept(c.id, c.raw_input); }}
+                                className="text-xs px-2 py-0.5 bg-red-50 text-red-500 border border-red-200 rounded-lg
+                                  hover:bg-red-100 transition-colors font-medium"
+                              >🗑️</button>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -231,6 +281,8 @@ const Timeline = memo(function Timeline({
                   isNew={c.id === newestId}
                   expanded={expandedId === c.id}
                   onToggle={setExpandedId}
+                  isAdmin={isAdmin}
+                  onDelete={onDeleteConcept}
                 />
               ))}
             </div>
@@ -251,9 +303,11 @@ interface CardProps {
   isNew: boolean;
   expanded: boolean;
   onToggle: (id: string | null) => void;
+  isAdmin?: boolean;
+  onDelete?: (id: string, name: string) => void;
 }
 
-const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle }: CardProps) {
+const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle, isAdmin, onDelete }: CardProps) {
   const handleToggle = useCallback(
     () => onToggle(expanded ? null : c.id),
     [onToggle, expanded, c.id],
@@ -300,6 +354,13 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
               <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full border border-slate-100">
                 {c.player_name}
               </span>
+              {isAdmin && onDelete && (
+                <button
+                  onClick={e => { e.stopPropagation(); onDelete(c.id, c.name); }}
+                  className="text-xs px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  title="管理员删除"
+                >🗑️</button>
+              )}
               <svg className={`w-4 h-4 text-slate-300 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

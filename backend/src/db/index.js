@@ -307,6 +307,7 @@ module.exports = {
       description=?, tags=?, extra=? WHERE id=?
   `),
   rejectConcept: stmt(`UPDATE concepts SET validated=0, rejected=1, reject_reason=? WHERE id=?`),
+  getConceptById: stmt(`SELECT * FROM concepts WHERE id = ?`),
 
   // Messages
   insertMessage:    stmt(`INSERT INTO messages (id, game_id, player_id, player_name, type, content, meta) VALUES (?, ?, ?, ?, ?, ?, ?)`),

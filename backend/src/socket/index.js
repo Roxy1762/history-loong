@@ -13,6 +13,12 @@
  *   'turn-order'  — strict rotation: players take turns in join order
  *   'score-race'  — free submission, AI rates difficulty 1-5; scores accumulate
  *   'challenge'   — free submission + rotating challenge cards; bonus score for completing challenge
+ *
+ * Mode combination: game.settings.extraModes = string[] enables stacking multiple mode effects.
+ *
+ * Challenge settings (in game.settings):
+ *   challengeThreshold  — how many accepted concepts before card rotates (default: 2)
+ *   skipCooldownMs      — milliseconds between manual card skips (default: 0 = no limit)
  */
 
 const { v4: uuidv4 } = require('uuid');
@@ -32,14 +38,18 @@ const rooms = new Map();
 /**
  * Room shape:
  * {
- *   players: Map<playerId, { id, name, color }>,
- *   joinOrder: string[],      // player ids in join order (for turn-order)
+ *   players: Map<playerId, { id, name, color, isAdmin? }>,
+ *   joinOrder: string[],
  *   settling: boolean,
- *   turnIndex: number,        // current turn index (turn-order mode)
- *   roundSubmitted: Set<string>, // player ids that submitted in current relay round
- *   scores: Map<playerId, number>, // score-race / challenge scores
- *   challengeCard: { id, text, tag } | null,  // current challenge card
- *   challengeRound: number,   // how many accepted concepts in this challenge card round
+ *   turnIndex: number,
+ *   roundSubmitted: Set<string>,
+ *   scores: Map<playerId, number>,
+ *   challengeCard: { id, text, tag, periodHint? } | null,
+ *   challengeRound: number,     // accepted concepts in current card round
+ *   topicCards: Array | null,   // AI-generated topic-specific cards
+ *   lastSkipAt: number,         // timestamp of last manual skip
+ *   challengeStreak: number,    // consecutive challenge card completions
+ *   lastChallengeCompleted: boolean, // did the last accepted concept complete the challenge?
  * }
  */
 
@@ -73,11 +83,22 @@ function getRoom(gameId) {
       scores: new Map(),
       challengeCard: null,
       challengeRound: 0,
-      topicCards: null,       // AI-generated topic-specific challenge cards
-      lastSkipAt: 0,          // timestamp of last manual card skip (for cooldown)
+      topicCards: null,
+      lastSkipAt: 0,
+      challengeStreak: 0,
+      lastChallengeCompleted: false,
     });
   }
   return rooms.get(gameId);
+}
+
+/**
+ * Check if game has a particular mode enabled (primary or combined extra mode).
+ */
+function hasMode(game, settings, mode) {
+  if (game.mode === mode) return true;
+  if (Array.isArray(settings?.extraModes) && settings.extraModes.includes(mode)) return true;
+  return false;
 }
 
 function pickColor(room) {
@@ -405,13 +426,16 @@ module.exports = function setupSocket(io) {
         pluginEvents.emit('concept:accepted', { game, concept, player: currentPlayer });
 
         // ── Score-race / challenge scoring ────────────────────────────────
-        if (game.mode === 'score-race' || game.mode === 'challenge') {
+        if (hasMode(game, settings, 'score-race') || hasMode(game, settings, 'challenge')) {
           let points = difficulty * 10;
           let bonus = 0;
 
-          // Challenge card bonus
-          if (game.mode === 'challenge' && room.challengeCard) {
+          // Challenge card bonus (challenge mode)
+          if (hasMode(game, settings, 'challenge') && room.challengeCard) {
             const cardTag = room.challengeCard.tag;
+            const cardPeriodHint = room.challengeCard.periodHint || '';
+
+            // Match against tags, description, name, dynasty/period
             const matchesTags = (result.tags || []).some(t =>
               t.includes(cardTag) || cardTag.includes(t)
             );
@@ -420,15 +444,47 @@ module.exports = function setupSocket(io) {
             const matchesDynasty = (result.dynasty || '').includes(cardTag) ||
               (result.period || '').includes(cardTag);
 
-            if (matchesTags || matchesDesc || matchesDynasty) {
-              bonus = 50;
-              const bonusMsg = `🎯 ${currentPlayer.name} 完成了挑战「${room.challengeCard.text}」+${bonus}分！`;
-              sysMessage(io, currentGameId, bonusMsg, { type: 'challenge_complete', bonus });
+            const challengeCompleted = matchesTags || matchesDesc || matchesDynasty;
+
+            if (challengeCompleted) {
+              // Opt-1: Streak bonus — consecutive completions grant multiplier
+              room.challengeStreak++;
+              const streakBonus = Math.min(room.challengeStreak - 1, 5) * 10; // +10 per streak, max +50
+
+              // Opt-2: Progressive early-bird bonus — complete early in card round for bigger reward
+              const roundProgress = room.challengeRound; // 0 = first submission
+              const earlyBonus = Math.max(0, (2 - roundProgress) * 15); // max +30 for first submission
+
+              // Opt-3: Theme coherence bonus — card periodHint matches concept's dynasty/period
+              let coherenceBonus = 0;
+              if (cardPeriodHint) {
+                const matchesPeriodHint = (result.dynasty || '').includes(cardPeriodHint) ||
+                  (result.period || '').includes(cardPeriodHint) ||
+                  cardPeriodHint.includes(result.dynasty || '') ||
+                  (result.tags || []).some(t => cardPeriodHint.includes(t));
+                if (matchesPeriodHint) coherenceBonus = 20;
+              }
+
+              bonus = 50 + streakBonus + earlyBonus + coherenceBonus;
+              const streakLabel = room.challengeStreak > 1 ? ` (连续${room.challengeStreak}次🔥)` : '';
+              const bonusMsg = `🎯 ${currentPlayer.name} 完成了挑战「${room.challengeCard.text}」+${bonus}分${streakLabel}！`;
+              sysMessage(io, currentGameId, bonusMsg, { type: 'challenge_complete', bonus, streak: room.challengeStreak });
+
+              room.lastChallengeCompleted = true;
+            } else {
+              // Missed this slot — break streak
+              if (room.lastChallengeCompleted === false && room.challengeRound > 0) {
+                room.challengeStreak = 0;
+              }
+              room.lastChallengeCompleted = false;
             }
 
-            // Rotate challenge every 5 accepted concepts
+            // Rotate card when threshold reached (configurable, default 2)
+            const threshold = typeof settings.challengeThreshold === 'number'
+              ? settings.challengeThreshold
+              : 2;
             room.challengeRound++;
-            if (room.challengeRound >= 5) {
+            if (room.challengeRound >= threshold) {
               const newCard = pickNextChallenge(room);
               sysMessage(io, currentGameId, `🃏 新挑战：${newCard.text}`);
               broadcastChallenge(io, currentGameId);
@@ -681,21 +737,107 @@ module.exports = function setupSocket(io) {
     socket.on('challenge:skip', (_, callback) => {
       if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
       const game = db.getGame.get(currentGameId);
-      if (!game || game.mode !== 'challenge') return callback?.({ error: '当前不是挑战模式' });
+      if (!game) return callback?.({ error: '房间不存在' });
+      const settings = JSON.parse(game.settings || '{}');
+      if (!hasMode(game, settings, 'challenge')) return callback?.({ error: '当前不是挑战模式' });
 
       const room = getRoom(currentGameId);
-      const SKIP_COOLDOWN_MS = 30000; // 30s cooldown between manual skips
-      const now = Date.now();
-      if (now - room.lastSkipAt < SKIP_COOLDOWN_MS) {
-        const remaining = Math.ceil((SKIP_COOLDOWN_MS - (now - room.lastSkipAt)) / 1000);
-        return callback?.({ error: `换题冷却中，请等待 ${remaining} 秒` });
+      // skipCooldownMs: 0 (or undefined) = no cooldown; positive value = ms cooldown
+      const cooldownMs = typeof settings.skipCooldownMs === 'number' ? settings.skipCooldownMs : 0;
+      if (cooldownMs > 0) {
+        const now = Date.now();
+        if (now - room.lastSkipAt < cooldownMs) {
+          const remaining = Math.ceil((cooldownMs - (now - room.lastSkipAt)) / 1000);
+          return callback?.({ error: `换题冷却中，请等待 ${remaining} 秒` });
+        }
+        room.lastSkipAt = now;
       }
 
-      room.lastSkipAt = now;
+      // Reset streak on manual skip
+      room.challengeStreak = 0;
+      room.lastChallengeCompleted = false;
       const newCard = pickNextChallenge(room);
       sysMessage(io, currentGameId, `🔀 ${currentPlayer.name} 换了新挑战：${newCard.text}`);
       broadcastChallenge(io, currentGameId);
       callback?.({ ok: true, card: newCard });
+    });
+
+    // ── concept: edit (player edits own pending concept; admin edits any) ─────
+    socket.on('concept:edit', ({ conceptId, newInput }, callback) => {
+      if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      const game = db.getGame.get(currentGameId);
+      if (!game || game.status === 'finished') return callback?.({ error: '游戏已结束' });
+
+      const row = db.getConceptById.get(conceptId);
+      if (!row) return callback?.({ error: '概念不存在' });
+      if (row.game_id !== currentGameId) return callback?.({ error: '概念不属于本游戏' });
+
+      const room = getRoom(currentGameId);
+      const isAdmin = room.players.get(currentPlayer.id)?.isAdmin === true;
+
+      // Only allow editing pending (unvalidated) concepts; admins can also edit validated ones
+      if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法修改' });
+      if (!isAdmin && row.player_id !== currentPlayer.id) return callback?.({ error: '只能修改自己提交的概念' });
+
+      const text = (newInput || '').trim();
+      if (!text) return callback?.({ error: '概念内容不能为空' });
+
+      // Update raw_input and name (reset validation state to pending)
+      db.prepare(`UPDATE concepts SET raw_input=?, name=?, validated=0, rejected=0, reject_reason=NULL,
+        year=NULL, dynasty=NULL, period=NULL, description=NULL, tags='[]', extra='{}'
+        WHERE id=?`).run(text, text, conceptId);
+
+      const updated = {
+        id: conceptId, game_id: currentGameId,
+        player_id: row.player_id, player_name: row.player_name,
+        raw_input: text, name: text, validated: 0, rejected: 0,
+        tags: [], extra: {}, created_at: row.created_at,
+      };
+      io.to(currentGameId).emit('concept:edited', { concept: updated });
+      sysMessage(io, currentGameId, `✏️ 「${row.raw_input}」已被修改为「${text}」`);
+      callback?.({ ok: true, concept: updated });
+    });
+
+    // ── concept: delete (player deletes own pending concept; admin deletes any) ─
+    socket.on('concept:delete', ({ conceptId }, callback) => {
+      if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      const game = db.getGame.get(currentGameId);
+      if (!game) return callback?.({ error: '房间不存在' });
+
+      const row = db.getConceptById.get(conceptId);
+      if (!row) return callback?.({ error: '概念不存在' });
+      if (row.game_id !== currentGameId) return callback?.({ error: '概念不属于本游戏' });
+
+      const room = getRoom(currentGameId);
+      const isAdmin = room.players.get(currentPlayer.id)?.isAdmin === true;
+
+      if (!isAdmin && row.player_id !== currentPlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
+      if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法删除，请联系管理员' });
+
+      db.prepare('DELETE FROM concepts WHERE id=?').run(conceptId);
+      io.to(currentGameId).emit('concept:deleted', { conceptId });
+      sysMessage(io, currentGameId, `🗑️ 「${row.name || row.raw_input}」已被删除`);
+      callback?.({ ok: true });
+    });
+
+    // ── admin join (enter game with admin privileges) ─────────────────────────
+    socket.on('admin:join', ({ gameId, adminKey }, callback) => {
+      const ADMIN_KEY = process.env.ADMIN_KEY || 'admin';
+      if (adminKey !== ADMIN_KEY) return callback?.({ error: '管理员密钥错误' });
+
+      const id = (gameId || '').toUpperCase();
+      const game = db.getGame.get(id);
+      if (!game) return callback?.({ error: '房间不存在' });
+
+      const room = getRoom(id);
+      // Mark the current player (if already joined) as admin
+      if (currentPlayer) {
+        currentPlayer.isAdmin = true;
+        room.players.set(currentPlayer.id, currentPlayer);
+        broadcastPlayers(io, id);
+        sysMessage(io, id, `👑 管理员已进入游戏`);
+      }
+      callback?.({ ok: true });
     });
 
     // ── finish ────────────────────────────────────────────────────────────────

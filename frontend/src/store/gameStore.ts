@@ -42,6 +42,11 @@ interface GameState {
   setPendingConcepts: (p: Concept[]) => void;
   addPendingConcept: (c: Concept) => void;
   removePendingConcept: (id: string) => void;
+  updatePendingConcept: (c: Concept) => void;
+
+  // Admin flag
+  isAdmin: boolean;
+  setIsAdmin: (v: boolean) => void;
 
   // Multi-select for batch validation
   selectedPendingIds: Set<string>;
@@ -116,6 +121,12 @@ export const useGameStore = create<GameState>((set) => ({
     pendingConcepts: s.pendingConcepts.filter(c => c.id !== id),
     selectedPendingIds: new Set([...s.selectedPendingIds].filter(sid => sid !== id)),
   })),
+  updatePendingConcept: c => set(s => ({
+    pendingConcepts: s.pendingConcepts.map(p => p.id === c.id ? c : p),
+  })),
+
+  isAdmin: false,
+  setIsAdmin: v => set({ isAdmin: v }),
 
   selectedPendingIds: new Set(),
   toggleSelectedPending: (id) => set(s => {
@@ -168,6 +179,6 @@ export const useGameStore = create<GameState>((set) => ({
     messages: [], validating: null,
     settle: INITIAL_SETTLE,
     turnState: null, scores: {}, challengeCard: null,
-    activeTab: 'chat',
+    activeTab: 'chat', isAdmin: false,
   }),
 }));
