@@ -10,18 +10,30 @@ interface Props {
   isMyTurn?: boolean;        // turn-order mode: is it this player's turn?
   isTurnMode?: boolean;      // whether we are in turn-order mode
   turnPlayerName?: string | null; // whose turn it is (when it's not mine)
+  fillInput?: string;        // when set, auto-fills the concept input (hint click)
 }
 
 const Chat = memo(function Chat({
   messages, me, gameFinished,
   isMyTurn = true, isTurnMode = false, turnPlayerName = null,
+  fillInput = '',
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState<'concept' | 'chat'>('concept');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const validating = useGameStore(s => s.validating);
+
+  // Auto-fill input when a hint is clicked
+  useEffect(() => {
+    if (fillInput) {
+      setInput(fillInput);
+      setMode('concept');
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [fillInput]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -98,6 +110,7 @@ const Chat = memo(function Chat({
 
           <form onSubmit={handleSubmit} className="flex gap-2">
             <input
+              ref={inputRef}
               className={`input flex-1 ${conceptBlocked ? 'opacity-50 cursor-not-allowed' : ''}`}
               placeholder={
                 conceptBlocked

@@ -149,8 +149,11 @@ async function callGoogle(config, prompt, maxTokens) {
 
 async function callGLM(config, prompt, maxTokens) {
   // GLM (智谱AI) — OpenAI-compatible endpoint at https://open.bigmodel.cn/api/paas/v4
-  const base = (config.base_url || 'https://open.bigmodel.cn/api/paas/v4').replace(/\/$/, '');
-  const url = `${base}/chat/completions`;
+  const rawBase = (config.base_url || 'https://open.bigmodel.cn/api/paas/v4').replace(/\/$/, '');
+  // If base_url already contains the completions path (user pasted full URL), use it directly
+  const url = rawBase.includes('/chat/completions')
+    ? rawBase
+    : `${rawBase}/chat/completions`;
 
   const messages = [];
   if (config.system_prompt) {
@@ -259,7 +262,7 @@ function resolveConfigs() {
       provider_type: 'glm',
       base_url: process.env.GLM_BASE_URL || 'https://open.bigmodel.cn/api/paas/v4',
       api_key: process.env.GLM_API_KEY,
-      model: process.env.GLM_MODEL || 'glm-4-flash',
+      model: process.env.GLM_MODEL || 'glm-4.5-flash',
       is_active: configs.length === 0 ? 1 : 0,
       extra: {},
     });
@@ -350,7 +353,7 @@ ${kb}验证「${concept}」是否为有效历史概念，返回JSON（禁止mark
 无效：{"valid":false,"reason":"原因"}
 year：BC负数，AD正数，时间段取起始，不确定null。difficulty：概念冷僻程度1(常见)~5(冷僻)。`;
 
-  const text = await completeWithFailover(prompt, 200);
+  const text = await completeWithFailover(prompt, 1024);
   const result = extractJSON(text);
 
   if (result && result.valid) {
@@ -391,7 +394,7 @@ async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
 ${list}
 格式：[{"index":1,"valid":true,"name":"名","year":-356,"dynasty":"朝","period":"时","description":"≤30字","tags":["t"],"difficulty":3},{"index":2,"valid":false,"reason":"原因"}]`;
 
-      const text = await completeWithFailover(prompt, 400);
+      const text = await completeWithFailover(prompt, 1024);
       const arr = extractJSON(text);
       if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
 
@@ -412,11 +415,42 @@ ${list}
   return results;
 }
 
+/**
+ * Generate topic-specific challenge cards for challenge mode.
+ * Returns an array of { id, text, tag } objects tailored to the game topic.
+ */
+async function generateChallengeCards(topic, count = 10) {
+  const prompt = `你是历史接龙游戏的出题人。当前游戏主题是「${topic}」。
+请针对该主题生成${count}个挑战卡，每个挑战卡是一个具体的子类别或角度，要求与主题紧密相关。
+返回JSON数组（禁止markdown）：
+[{"id":"card1","text":"提交一个[具体描述]相关概念","tag":"[简短标签]"},...]
+要求：
+1. 每张卡的text必须和主题「${topic}」直接相关
+2. tag是1-4个字的简短分类词
+3. 覆盖多种角度，避免重复
+4. text格式统一：以"提交一个"或"提交一位"开头`;
+
+  try {
+    const text = await completeWithFailover(prompt, 1024);
+    const arr = extractJSON(text);
+    if (Array.isArray(arr) && arr.length > 0) {
+      return arr.map((c, i) => ({
+        id: c.id || `topic_${i}`,
+        text: c.text || '',
+        tag: c.tag || '',
+      })).filter(c => c.text && c.tag);
+    }
+  } catch (err) {
+    console.warn(`[AI] generateChallengeCards failed: ${err.message}`);
+  }
+  return null; // caller falls back to default cards
+}
+
 async function suggestConcepts(topic, existing = [], count = 3) {
   const existingNames = existing.slice(-8).map(c => c.name).join('、') || '无';
   // Compact hints prompt
   const prompt = `历史接龙主题：${topic}。已有：${existingNames}。推荐${count}个未出现的相关历史概念，每行一个名称，不加编号。`;
-  const text = await complete(prompt, 100);
+  const text = await complete(prompt, 1024);
   return text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, count);
 }
 
@@ -439,6 +473,7 @@ module.exports = {
   validateConcept,
   batchValidateConcepts,
   suggestConcepts,
+  generateChallengeCards,
   testConfig,
   resolveConfig,
   resolveConfigs,

@@ -229,6 +229,16 @@ export function finishGame(): Promise<{ ok?: boolean; error?: string }> {
   return new Promise(resolve => getSocket().emit('game:finish', {}, resolve));
 }
 
+/** Skip the current challenge card and pick a new one (challenge mode, 30s cooldown) */
+export function skipChallenge(): Promise<{ ok?: boolean; error?: string; card?: { id: string; text: string; tag: string } }> {
+  slog('info', 'skipChallenge emit');
+  return new Promise(resolve => getSocket().emit('challenge:skip', {}, (res: { ok?: boolean; error?: string; card?: { id: string; text: string; tag: string } }) => {
+    if (res.error) slog('error', `skipChallenge error: ${res.error}`);
+    else slog('info', `skipChallenge OK`);
+    resolve(res);
+  }));
+}
+
 /** Validate a single pending concept without ending the game (free-validation mode) */
 export function validateSingleConcept(conceptId: string): Promise<{ ok?: boolean; error?: string }> {
   slog('info', `validateSingleConcept conceptId=${conceptId}`);

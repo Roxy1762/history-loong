@@ -629,7 +629,7 @@ function AIConfigPanel() {
           <li><strong>Anthropic</strong> — 填入 API Key，选择 claude-* 模型</li>
           <li><strong>OpenAI Compatible</strong> — 填入 Base URL + API Key，支持 OpenAI、DeepSeek、Qwen、月之暗面、本地 Ollama 等所有兼容接口</li>
           <li><strong>Google AI Studio</strong> — 填入 Google AI Studio API Key，模型填 <code>gemini-2.0-flash</code></li>
-          <li><strong>智谱AI (GLM)</strong> — 填入 BigModel API Key，模型默认 <code>glm-4-flash</code>（可选自定义 Base URL）</li>
+          <li><strong>智谱AI (GLM)</strong> — 填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>，可分别配置 API 主机和路径</li>
           <li>可为每个配置设置<strong>自定义提示词</strong>，调整验证风格和严格程度</li>
         </ul>
       </InfoBox>
@@ -637,19 +637,41 @@ function AIConfigPanel() {
   );
 }
 
+/** Split a GLM base_url into [host, path]. E.g. "https://host/v4/chat/completions" → ["https://host/v4", "/chat/completions"] */
+function splitGlmUrl(url: string): [string, string] {
+  const pathIdx = url.indexOf('/chat/completions');
+  if (pathIdx !== -1) return [url.slice(0, pathIdx), url.slice(pathIdx)];
+  // Try other common path patterns
+  const altIdx = url.indexOf('/v1/');
+  if (altIdx !== -1) {
+    const parts = url.split('/v1/');
+    return [`${parts[0]}/v1`, `/${parts.slice(1).join('/v1/')}`];
+  }
+  return [url, '/chat/completions'];
+}
+
 function AIConfigForm({ initial, onClose, onSaved }: {
   initial: AIConfig | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // For GLM, split the stored base_url into host + api_path for the UI
+  const initialGlmHost = initial?.provider_type === 'glm' && initial.base_url
+    ? splitGlmUrl(initial.base_url)[0]
+    : 'https://open.bigmodel.cn/api/paas/v4';
+  const initialGlmPath = initial?.provider_type === 'glm' && initial.base_url
+    ? splitGlmUrl(initial.base_url)[1]
+    : '/chat/completions';
+
   const [form, setForm] = useState({
     name:          initial?.name          ?? '',
     provider_type: initial?.provider_type ?? 'openai-compatible',
-    base_url:      initial?.base_url      ?? '',
+    base_url:      (initial?.provider_type === 'glm' ? initialGlmHost : initial?.base_url) ?? '',
     api_key:       initial ? '••••••••' : '',
     model:         initial?.model         ?? '',
     system_prompt: (initial as (AIConfig & { system_prompt?: string }) | null)?.system_prompt ?? '',
   });
+  const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
@@ -662,15 +684,20 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     { label: 'Qwen',      base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
     { label: 'Moonshot',  base_url: 'https://api.moonshot.cn/v1',        model: 'moonshot-v1-8k' },
     { label: 'Ollama',    base_url: 'http://localhost:11434/v1',          model: 'llama3' },
-    { label: 'GLM',       base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+    { label: 'GLM',       base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.5-flash' },
   ];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true); setErr('');
     try {
+      // For GLM, combine host + path into base_url
+      const effectiveBaseUrl = form.provider_type === 'glm'
+        ? `${form.base_url.replace(/\/$/, '')}${glmApiPath.startsWith('/') ? glmApiPath : `/${glmApiPath}`}`
+        : form.base_url;
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
+        base_url: effectiveBaseUrl,
         system_prompt: form.system_prompt || undefined,
       };
       if (initial) {
@@ -687,7 +714,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     }
   }
 
-  const needsBaseUrl = form.provider_type === 'openai-compatible' || form.provider_type === 'glm';
+  const needsBaseUrl = form.provider_type === 'openai-compatible';
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
@@ -712,7 +739,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
             <div className="space-y-2">
               <input className="input font-mono text-sm" placeholder="https://api.openai.com/v1" value={form.base_url} onChange={e => update('base_url', e.target.value)} required />
               <div className="flex flex-wrap gap-1">
-                {PRESETS.map(p => (
+                {PRESETS.filter(p => p.label !== 'GLM').map(p => (
                   <button key={p.label} type="button" onClick={() => setForm(f => ({ ...f, base_url: p.base_url, model: p.model }))}
                     className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100 hover:text-indigo-700 transition-colors">
                     {p.label}
@@ -723,6 +750,42 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </FormField>
         )}
 
+        {/* GLM: split host + path fields */}
+        {form.provider_type === 'glm' && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <FormField label="API 主机">
+                <input
+                  className="input font-mono text-sm"
+                  placeholder="https://open.bigmodel.cn/api/paas/v4"
+                  value={form.base_url}
+                  onChange={e => update('base_url', e.target.value)}
+                  required
+                />
+              </FormField>
+              <FormField label="API 路径">
+                <input
+                  className="input font-mono text-sm"
+                  placeholder="/chat/completions"
+                  value={glmApiPath}
+                  onChange={e => setGlmApiPath(e.target.value)}
+                  required
+                />
+              </FormField>
+            </div>
+            <p className="text-xs text-slate-400 font-mono px-1">
+              完整地址：{form.base_url.replace(/\/$/, '')}{glmApiPath.startsWith('/') ? glmApiPath : `/${glmApiPath}`}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              <button type="button"
+                onClick={() => { setForm(f => ({ ...f, base_url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.5-flash' })); setGlmApiPath('/chat/completions'); }}
+                className="text-xs px-2 py-0.5 bg-cyan-50 text-cyan-700 rounded-full border border-cyan-200 hover:bg-cyan-100 transition-colors">
+                BigModel 默认
+              </button>
+            </div>
+          </div>
+        )}
+
         {form.provider_type === 'google' && (
           <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
             💡 Google AI Studio：在 <strong>API Key</strong> 填入 Google AI Studio 的 API Key，<strong>模型</strong> 填写 <code>gemini-2.0-flash</code> 或 <code>gemini-1.5-pro</code>
@@ -731,7 +794,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
 
         {form.provider_type === 'glm' && (
           <div className="text-xs text-slate-500 bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2">
-            💡 智谱AI (GLM)：在 <strong>API Key</strong> 填入 BigModel 的 API Key，<strong>模型</strong> 默认填 <code>glm-4-flash</code>，<strong>Base URL</strong> 可自定义或使用默认值 <code>https://open.bigmodel.cn/api/paas/v4</code>
+            💡 智谱AI (GLM)：填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>、<code>glm-4.7-flash</code> 等最新型号。API 主机 + 路径拼成完整地址。
           </div>
         )}
 
