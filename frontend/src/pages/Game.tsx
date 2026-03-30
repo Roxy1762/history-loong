@@ -12,7 +12,7 @@ import Chat from '../components/Chat';
 import PlayerList from '../components/PlayerList';
 import ExportPanel from '../components/ExportPanel';
 import ThemeSwitcher from '../components/ThemeSwitcher';
-import type { Concept, Game } from '../types';
+import type { ChallengeCard, Concept, Game, Message, Player, TurnState } from '../types';
 
 function getActiveModeSet(game: Game | null | undefined): Set<string> {
   if (!game) return new Set();
@@ -21,6 +21,7 @@ function getActiveModeSet(game: Game | null | undefined): Set<string> {
 }
 
 const PLAYER_ID_STORAGE_KEY = 'history_loong_player_id';
+const PLAYER_NAME_STORAGE_KEY = 'history_loong_player_name';
 
 function createLocalPlayerId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -37,6 +38,16 @@ function getStablePlayerId(): string {
   return next;
 }
 
+function getStoredPlayerName(): string {
+  return localStorage.getItem(PLAYER_NAME_STORAGE_KEY) || '';
+}
+
+function rememberPlayerName(name: string) {
+  const normalized = name.trim();
+  if (!normalized) return;
+  localStorage.setItem(PLAYER_NAME_STORAGE_KEY, normalized.slice(0, 20));
+}
+
 function getAdminKeyFromUrl(): string | null {
   const params = new URLSearchParams(window.location.search);
   const key = params.get('adminKey');
@@ -45,8 +56,8 @@ function getAdminKeyFromUrl(): string | null {
 
 // ── Name dialog ───────────────────────────────────────────────────────────────
 
-function NameDialog({ onConfirm }: { onConfirm: (name: string) => void }) {
-  const [name, setName] = useState('');
+function NameDialog({ initialName, onConfirm }: { initialName?: string; onConfirm: (name: string) => void }) {
+  const [name, setName] = useState(initialName || '');
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-7 animate-slide-up">
@@ -226,6 +237,7 @@ function TurnBanner({ turnState, me }: { turnState: { currentPlayerId: string | 
 export default function Game() {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate   = useNavigate();
+  const adminKey = getAdminKeyFromUrl();
 
   const {
     game, me, players, timeline, pendingConcepts,
@@ -245,7 +257,7 @@ export default function Game() {
     reset,
   } = useGameStore();
 
-  const [showName,    setShowName]    = useState(true);
+  const [showName,    setShowName]    = useState(!adminKey);
   const [showExport,  setShowExport]  = useState(false);
   const [hints,       setHints]       = useState<string[]>([]);
   const [newestId,    setNewestId]    = useState<string | undefined>();
@@ -268,6 +280,7 @@ export default function Game() {
   useEffect(() => { meRef.current = me; },     [me]);
   useEffect(() => { gameIdRef.current = gameId; }, [gameId]);
   useEffect(() => { gameRef.current = game; }, [game]);
+  useEffect(() => { if (adminKey) setShowName(false); }, [adminKey]);
 
   const activeModes = getActiveModeSet(game);
   const isDeferred = game?.settings?.validationMode === 'deferred';
@@ -278,11 +291,76 @@ export default function Game() {
   const isChallengeMode = activeModes.has('challenge');
   const isOrderedMode = activeModes.has('ordered');
   const isChainMode = activeModes.has('chain');
+  const isAdminObserver = Boolean(isAdmin && me?.isObserver);
 
   // Is it my turn right now?
   const isMyTurn = isTurnMode
     ? (turnState?.currentPlayerId === me?.id)
     : true; // other modes: always allowed
+
+  const applyJoinState = useCallback((res: {
+    game?: Game;
+    player?: Player;
+    timeline?: Concept[];
+    pendingConcepts?: Concept[];
+    messages?: Message[];
+    scores?: Record<string, number>;
+    turnState?: TurnState | null;
+    challengeCard?: ChallengeCard | null;
+  }, options?: { persistPlayerId?: boolean }) => {
+    if (res.game) setGame(res.game);
+    if (res.player) {
+      setMe(res.player);
+      setIsAdmin(Boolean(res.player.isAdmin));
+      if (options?.persistPlayerId !== false && !res.player.isObserver && res.player.id) {
+        localStorage.setItem(PLAYER_ID_STORAGE_KEY, res.player.id);
+      }
+    }
+    if (res.timeline) setTimeline(res.timeline);
+    if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
+    if (res.messages) setMessages(res.messages);
+    if (res.scores) setScores(res.scores);
+    if (res.turnState !== undefined) setTurnState(res.turnState);
+    if (res.challengeCard !== undefined) setChallengeCard(res.challengeCard);
+  }, [setChallengeCard, setGame, setIsAdmin, setMe, setMessages, setPendingConcepts, setScores, setTimeline, setTurnState]);
+
+  const joinAsRegularPlayer = useCallback(async (playerName: string, explicitPlayerId?: string) => {
+    if (!gameId) return { error: '缺少房间号' };
+
+    setJoinError('');
+    setShowName(false);
+
+    const normalizedName = (playerName || getStoredPlayerName() || '匿名玩家').trim().slice(0, 20) || '匿名玩家';
+    const stablePlayerId = explicitPlayerId || getStablePlayerId();
+    const res = await joinGame({ gameId, playerName: normalizedName, playerId: stablePlayerId });
+    if (res.error) {
+      setJoinError(res.error);
+      setShowName(true);
+      return res;
+    }
+
+    rememberPlayerName(normalizedName);
+    applyJoinState(res);
+    return res;
+  }, [applyJoinState, gameId]);
+
+  const joinAsAdminObserver = useCallback(async (targetGameId?: string) => {
+    const nextGameId = targetGameId || gameId;
+    if (!nextGameId || !adminKey) return { error: '缺少管理员密钥或房间号' };
+
+    setJoinError('');
+    setShowName(false);
+
+    const res = await adminJoinGame(nextGameId, adminKey);
+    if (res.error) {
+      setJoinError(res.error);
+      return res;
+    }
+
+    applyJoinState(res, { persistPlayerId: false });
+    setIsAdmin(true);
+    return res;
+  }, [adminKey, applyJoinState, gameId, setIsAdmin]);
 
   // ── Socket listeners ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -292,26 +370,12 @@ export default function Game() {
         setConnError('');
         const gid = gameIdRef.current;
         const player = meRef.current;
+        if (gid && player?.isObserver && adminKey) {
+          await joinAsAdminObserver(gid);
+          return;
+        }
         if (gid && player) {
-          const res = await joinGame({ gameId: gid, playerName: player.name, playerId: player.id || getStablePlayerId() });
-          if (res.error) return;
-          if (res.game)            setGame(res.game);
-          if (res.player)          setMe(res.player);
-          if (res.timeline)        setTimeline(res.timeline);
-          if (res.pendingConcepts) setPendingConcepts(res.pendingConcepts);
-          if (res.messages)        setMessages(res.messages);
-          if (res.scores)          setScores(res.scores);
-          if (res.turnState)       setTurnState(res.turnState);
-          if (res.challengeCard)   setChallengeCard(res.challengeCard);
-          if (res.player?.id) {
-            localStorage.setItem(PLAYER_ID_STORAGE_KEY, res.player.id);
-          }
-
-          const adminKey = getAdminKeyFromUrl();
-          if (adminKey) {
-            const adminRes = await adminJoinGame(gid, adminKey);
-            setIsAdmin(Boolean(adminRes.ok));
-          }
+          await joinAsRegularPlayer(player.name, player.id || getStablePlayerId());
         }
       }),
       onSocket('connect_error', (err) => {
@@ -399,7 +463,7 @@ export default function Game() {
       }),
     ];
     return () => offs.forEach(off => off());
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [addConcept, addMessage, adminKey, addPendingConcept, clearSelectedPending, incrementSettleDone, joinAsAdminObserver, joinAsRegularPlayer, removePendingConcept, resetSettle, setActiveTab, setChallengeCard, setConnected, setGame, setMessages, setPendingConcepts, setPlayers, setScores, setSettleRunning, setTimeline, setTurnState, setValidating, updatePendingConcept]);
 
   useEffect(() => {
     const off = onConnectionState(setConnState);
@@ -408,31 +472,15 @@ export default function Game() {
 
   useEffect(() => { return () => { disconnectSocket(); reset(); }; }, []);
 
+  useEffect(() => {
+    if (!gameId || !adminKey || me) return;
+    void joinAsAdminObserver(gameId);
+  }, [adminKey, gameId, joinAsAdminObserver, me]);
+
   // ── Join ──────────────────────────────────────────────────────────────────
   const handleJoin = useCallback(async (playerName: string) => {
-    if (!gameId) return;
-    setShowName(false);
-    const stablePlayerId = getStablePlayerId();
-    const res = await joinGame({ gameId, playerName, playerId: stablePlayerId });
-    if (res.error) { setJoinError(res.error); return; }
-    if (res.game)             setGame(res.game);
-    if (res.player)           setMe(res.player);
-    if (res.timeline)         setTimeline(res.timeline);
-    if (res.pendingConcepts)  setPendingConcepts(res.pendingConcepts);
-    if (res.messages)         setMessages(res.messages);
-    if (res.scores)           setScores(res.scores);
-    if (res.turnState)        setTurnState(res.turnState);
-    if (res.challengeCard)    setChallengeCard(res.challengeCard);
-    if (res.player?.id) {
-      localStorage.setItem(PLAYER_ID_STORAGE_KEY, res.player.id);
-    }
-
-    const adminKey = getAdminKeyFromUrl();
-    if (adminKey) {
-      const adminRes = await adminJoinGame(gameId, adminKey);
-      setIsAdmin(Boolean(adminRes.ok));
-    }
-  }, [gameId]);
+    await joinAsRegularPlayer(playerName);
+  }, [joinAsRegularPlayer]);
 
   // ── Settle ────────────────────────────────────────────────────────────────
   async function handleSettle(endGame = false, onlySelected = false) {
@@ -518,7 +566,7 @@ export default function Game() {
 
   return (
     <>
-      {showName  && <NameDialog onConfirm={handleJoin} />}
+      {showName  && <NameDialog initialName={getStoredPlayerName()} onConfirm={handleJoin} />}
       {showExport && gameId && <ExportPanel gameId={gameId} onClose={() => setShowExport(false)} />}
       {bonusToast && <BonusToast bonus={bonusToast.bonus} playerName={bonusToast.playerName} />}
       <SettleOverlay />
@@ -620,7 +668,7 @@ export default function Game() {
                   </span>
                 )}
                 {/* My score badge */}
-                {isScoreMode && me && (
+                {isScoreMode && me && !me.isObserver && (
                   <span className="text-xs text-amber-600 font-bold">
                     <span className="text-slate-200 mr-1">·</span>🏆 {scores[me.id] || 0} 分
                   </span>
@@ -686,6 +734,14 @@ export default function Game() {
             </div>
           )}
         </header>
+
+        {isAdminObserver && (
+          <div className="bg-yellow-50 border-b border-yellow-100 px-4 py-2 text-center flex-shrink-0">
+            <span className="text-xs text-yellow-700">
+              👑 管理员观察模式已开启：不会占用玩家名额，也不会参与回合与聊天，可直接审核、修改、删除概念。
+            </span>
+          </div>
+        )}
 
         {/* Hints banner */}
         {hints.length > 0 && (
@@ -774,6 +830,7 @@ export default function Game() {
               isTurnMode={isTurnMode}
               turnPlayerName={turnState?.currentPlayerName ?? null}
               fillInput={chatFill}
+              readOnlyReason={isAdminObserver ? '管理员观察模式不可发送聊天或提交概念' : null}
             />
           </div>
 

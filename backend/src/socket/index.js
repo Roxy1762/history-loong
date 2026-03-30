@@ -122,6 +122,33 @@ function normalizePlayerId(raw) {
   return id;
 }
 
+function isObserverPlayer(player) {
+  return Boolean(player?.isObserver);
+}
+
+function hasAdminPrivileges(room, player) {
+  if (!player) return false;
+  if (player.isAdmin === true) return true;
+  return room.players.get(player.id)?.isAdmin === true;
+}
+
+function getActivePlayerIds(room) {
+  return room.joinOrder.filter(id => room.players.has(id));
+}
+
+function getTurnStatePayload(room) {
+  const order = getActivePlayerIds(room);
+  const currentIdx = room.turnIndex % Math.max(order.length, 1);
+  const currentPlayerId = order[currentIdx] || null;
+  const currentPlayer = currentPlayerId ? room.players.get(currentPlayerId) : null;
+  return {
+    currentPlayerId,
+    currentPlayerName: currentPlayer?.name || null,
+    turnIndex: currentIdx,
+    order,
+  };
+}
+
 function pickColor(room) {
   const used = new Set([...room.players.values()].map(p => p.color));
   return COLORS.find(c => !used.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
@@ -138,17 +165,7 @@ function broadcastPlayers(io, gameId) {
 }
 
 function broadcastTurnState(io, gameId) {
-  const room = getRoom(gameId);
-  const order = room.joinOrder.filter(id => room.players.has(id));
-  const currentIdx = room.turnIndex % Math.max(order.length, 1);
-  const currentPlayerId = order[currentIdx] || null;
-  const currentPlayer = currentPlayerId ? room.players.get(currentPlayerId) : null;
-  io.to(gameId).emit('turn:update', {
-    currentPlayerId,
-    currentPlayerName: currentPlayer?.name || null,
-    turnIndex: currentIdx,
-    order,
-  });
+  io.to(gameId).emit('turn:update', getTurnStatePayload(getRoom(gameId)));
 }
 
 function broadcastScores(io, gameId) {
@@ -183,6 +200,25 @@ function pickNextChallenge(room) {
   return card;
 }
 
+function ensureChallengeState(io, gameId, game, settings, room) {
+  if (!hasMode(game, settings, 'challenge') || room.challengeCard) return;
+
+  pickNextChallenge(room); // start with generic card immediately
+
+  if (room.topicCards) return;
+
+  ai.generateChallengeCards(game.topic).then(cards => {
+    if (cards && cards.length > 0) {
+      room.topicCards = cards;
+      pickNextChallenge(room);
+      broadcastChallenge(io, gameId);
+      console.log(`[Socket] Generated ${cards.length} topic cards for "${game.topic}"`);
+    }
+  }).catch(err => {
+    console.warn(`[Socket] Topic cards generation failed (using generic): ${err.message}`);
+  });
+}
+
 function sysMessage(io, gameId, content, meta = {}) {
   const msg = {
     id: uuidv4(), game_id: gameId, player_id: null, player_name: null,
@@ -195,6 +231,24 @@ function sysMessage(io, gameId, content, meta = {}) {
 
 function parseConcept(row) {
   return { ...row, tags: JSON.parse(row.tags || '[]'), extra: JSON.parse(row.extra || '{}') };
+}
+
+function buildGameSnapshot(game, room, player) {
+  const settings = JSON.parse(game.settings || '{}');
+  const ts = new TimelineService();
+  const allConcepts = db.getConceptsByGame.all(game.id).map(parseConcept);
+
+  return {
+    ok: true,
+    game: { ...game, settings },
+    player,
+    timeline: ts.buildTimeline(allConcepts),
+    pendingConcepts: db.getPendingConcepts.all(game.id).map(parseConcept),
+    messages: db.getMessagesByGame.all(game.id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') })),
+    scores: Object.fromEntries(room.scores),
+    turnState: hasMode(game, settings, 'turn-order') ? getTurnStatePayload(room) : null,
+    challengeCard: room.challengeCard,
+  };
 }
 
 /** Expose rooms map so admin can inspect / force-end games */
@@ -219,10 +273,19 @@ module.exports = function setupSocket(io) {
         if (!game) return callback?.({ error: '房间不存在' });
 
         const room = getRoom(id);
+        const settings = JSON.parse(game.settings || '{}');
         const normalizedPlayerId = normalizePlayerId(playerId) || socket.id;
         const existingPlayer = room.players.get(normalizedPlayerId);
+        const activePlayerIds = getActivePlayerIds(room);
+        const maxPlayers = Number(settings.maxPlayers) || 0;
+
+        if (!existingPlayer && maxPlayers > 0 && activePlayerIds.length >= maxPlayers) {
+          return callback?.({ error: `房间已满（最多 ${maxPlayers} 人）` });
+        }
+
         const color = existingPlayer?.color || pickColor(room);
         const previousSocketId = room.playerSockets.get(normalizedPlayerId);
+        const isReconnect = Boolean(existingPlayer && previousSocketId && previousSocketId !== socket.id);
 
         currentGameId = id;
         currentPlayer = {
@@ -254,52 +317,11 @@ module.exports = function setupSocket(io) {
           game.status = 'playing';
         }
 
-        const settings = JSON.parse(game.settings || '{}');
-        const ts       = new TimelineService();
-
-        const allConcepts    = db.getConceptsByGame.all(id).map(parseConcept);
-        const timeline       = ts.buildTimeline(allConcepts);
-        const pendingConcepts = db.getPendingConcepts.all(id).map(parseConcept);
-        const messages = db.getMessagesByGame.all(id).map(m => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
-
-        // Init challenge card if needed
-        if (hasMode(game, settings, 'challenge') && !room.challengeCard) {
-          pickNextChallenge(room); // start with generic card immediately
-          // Generate topic-specific cards in background (replaces card when ready)
-          if (!room.topicCards) {
-            ai.generateChallengeCards(game.topic).then(cards => {
-              if (cards && cards.length > 0) {
-                room.topicCards = cards;
-                // Replace current card with a topic-specific one
-                pickNextChallenge(room);
-                broadcastChallenge(io, id);
-                console.log(`[Socket] Generated ${cards.length} topic cards for "${game.topic}"`);
-              }
-            }).catch(err => {
-              console.warn(`[Socket] Topic cards generation failed (using generic): ${err.message}`);
-            });
-          }
-        }
-
-        const scores = Object.fromEntries(room.scores);
-
-        callback?.({
-          ok: true,
-          game: { ...game, settings },
-          player: currentPlayer,
-          timeline,
-          pendingConcepts,
-          messages,
-          scores,
-          turnState: hasMode(game, settings, 'turn-order') ? {
-            currentPlayerId: room.joinOrder.filter(pid => room.players.has(pid))[room.turnIndex % Math.max(room.joinOrder.filter(pid => room.players.has(pid)).length, 1)] || null,
-            order: room.joinOrder.filter(pid => room.players.has(pid)),
-          } : null,
-          challengeCard: room.challengeCard,
-        });
+        ensureChallengeState(io, id, game, settings, room);
+        callback?.(buildGameSnapshot(game, room, currentPlayer));
 
         broadcastPlayers(io, id);
-        sysMessage(io, id, `${currentPlayer.name} 加入了游戏`);
+        sysMessage(io, id, isReconnect ? `${currentPlayer.name} 重新连接到游戏` : `${currentPlayer.name} 加入了游戏`);
         pluginEvents.emit('player:join', { game, player: currentPlayer });
 
         // Broadcast turn/challenge state to newcomer
@@ -317,6 +339,7 @@ module.exports = function setupSocket(io) {
       console.log(`[Socket] concept:submit socketId=${socket.id} gameId=${currentGameId} input="${rawInput}"`);
 
       if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      if (isObserverPlayer(currentPlayer)) return callback?.({ error: '管理员观察模式不可提交概念' });
 
       const game = db.getGame.get(currentGameId);
       if (!game) return callback?.({ error: '房间不存在' });
@@ -745,6 +768,7 @@ module.exports = function setupSocket(io) {
     // ── chat message ──────────────────────────────────────────────────────────
     socket.on('message:send', ({ content }, callback) => {
       if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
+      if (isObserverPlayer(currentPlayer)) return callback?.({ error: '管理员观察模式不可发送聊天消息' });
       const text = (content || '').trim();
       if (!text) return;
       const msg = {
@@ -810,7 +834,7 @@ module.exports = function setupSocket(io) {
       if (row.game_id !== currentGameId) return callback?.({ error: '概念不属于本游戏' });
 
       const room = getRoom(currentGameId);
-      const isAdmin = room.players.get(currentPlayer.id)?.isAdmin === true;
+      const isAdmin = hasAdminPrivileges(room, currentPlayer);
 
       // Only allow editing pending (unvalidated) concepts; admins can also edit validated ones
       if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法修改' });
@@ -846,7 +870,7 @@ module.exports = function setupSocket(io) {
       if (row.game_id !== currentGameId) return callback?.({ error: '概念不属于本游戏' });
 
       const room = getRoom(currentGameId);
-      const isAdmin = room.players.get(currentPlayer.id)?.isAdmin === true;
+      const isAdmin = hasAdminPrivileges(room, currentPlayer);
 
       if (!isAdmin && row.player_id !== currentPlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
       if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法删除，请联系管理员' });
@@ -868,15 +892,28 @@ module.exports = function setupSocket(io) {
       if (!game) return callback?.({ error: '房间不存在' });
 
       const room = getRoom(id);
-      // Mark the current player (if already joined) as admin
-      if (currentPlayer) {
+      const settings = JSON.parse(game.settings || '{}');
+
+      if (currentPlayer && !isObserverPlayer(currentPlayer) && room.players.has(currentPlayer.id)) {
         currentPlayer.isAdmin = true;
         room.players.set(currentPlayer.id, currentPlayer);
         broadcastPlayers(io, id);
-        sysMessage(io, id, `👑 管理员已进入游戏`);
-        return callback?.({ ok: true });
+        ensureChallengeState(io, id, game, settings, room);
+        return callback?.(buildGameSnapshot(game, room, currentPlayer));
       }
-      callback?.({ ok: true, pending: true });
+
+      currentGameId = id;
+      currentPlayer = {
+        id: `admin_${socket.id}`,
+        name: '管理员',
+        color: '#f59e0b',
+        isAdmin: true,
+        isObserver: true,
+      };
+      socket.join(id);
+
+      ensureChallengeState(io, id, game, settings, room);
+      callback?.(buildGameSnapshot(game, room, currentPlayer));
     });
 
     // ── finish ────────────────────────────────────────────────────────────────
@@ -893,6 +930,11 @@ module.exports = function setupSocket(io) {
       console.log(`[Socket] disconnect socketId=${socket.id} gameId=${currentGameId} player=${currentPlayer?.name} reason=${reason}`);
       if (!currentGameId) return;
       try {
+        if (isObserverPlayer(currentPlayer)) {
+          socket.leave(currentGameId);
+          return;
+        }
+
         const room = getRoom(currentGameId);
         const disconnectedPlayerId = room.socketToPlayer.get(socket.id) || currentPlayer?.id;
         if (!disconnectedPlayerId) return;
@@ -938,7 +980,7 @@ function _advanceTurnState(io, gameId, game, room, playerId) {
   const settings = JSON.parse(game.settings || '{}');
 
   if (hasMode(game, settings, 'turn-order')) {
-    const order = room.joinOrder.filter(pid => room.players.has(pid));
+    const order = getActivePlayerIds(room);
     if (order.length > 0) {
       room.turnIndex = (room.turnIndex + 1) % order.length;
       broadcastTurnState(io, gameId);
@@ -948,7 +990,7 @@ function _advanceTurnState(io, gameId, game, room, playerId) {
     }
   } else if (hasMode(game, settings, 'relay')) {
     room.roundSubmitted.add(playerId);
-    const activePlayers = [...room.players.keys()];
+    const activePlayers = getActivePlayerIds(room);
     const allSubmitted = activePlayers.every(pid => room.roundSubmitted.has(pid));
     if (allSubmitted) {
       room.roundSubmitted = new Set();

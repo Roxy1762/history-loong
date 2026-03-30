@@ -33,6 +33,7 @@ export interface Player {
   name: string;
   color: string;
   isAdmin?: boolean;
+  isObserver?: boolean;
   score?: number; // present in score-race / challenge modes
 }
 

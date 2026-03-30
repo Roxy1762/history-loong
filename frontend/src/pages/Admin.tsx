@@ -270,6 +270,10 @@ function StatusChip({ status }: { status: string }) {
   return <span className={`px-2 py-0.5 text-xs rounded ${cfg[status] || 'bg-slate-100 text-slate-500'}`}>{labels[status] || status}</span>;
 }
 
+function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
+  return [...new Set(extraModes.filter(Boolean))].filter(mode => mode !== primaryMode);
+}
+
 // ── Panel: Games Management ──────────────────────────────────────────────────
 
 function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) => void }) {
@@ -280,11 +284,16 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
   const [savingSettings, setSavingSettings] = useState(false);
   const [modeDraft, setModeDraft] = useState(game.mode);
   const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
-    Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : []
+    normalizeExtraModes(game.mode, Array.isArray(game.settings?.extraModes) ? game.settings.extraModes as string[] : [])
   );
   const [savingModes, setSavingModes] = useState(false);
   const [modeOptions, setModeOptions] = useState<Record<string, GameModeConfig>>({});
   const [combinableModeOptions, setCombinableModeOptions] = useState<Record<string, GameModeConfig>>({});
+  const normalizedExtraModeDraft = normalizeExtraModes(modeDraft, extraModeDraft);
+  const modePreview = [modeDraft, ...normalizedExtraModeDraft].map(key => ({
+    key,
+    label: modeOptions[key]?.label || combinableModeOptions[key]?.label || key,
+  }));
 
   useEffect(() => {
     if (!expanded) return;
@@ -320,7 +329,7 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
   async function saveModes() {
     setSavingModes(true);
     try {
-      const normalizedExtraModes = [...new Set(extraModeDraft)].filter(m => m !== modeDraft);
+      const normalizedExtraModes = normalizeExtraModes(modeDraft, extraModeDraft);
       await adminUpdateGameModes(game.id, modeDraft, normalizedExtraModes);
       setExtraModeDraft(normalizedExtraModes);
       const parsedSettings = JSON.parse(settingsStr || '{}');
@@ -389,8 +398,8 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs px-2 py-1 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 transition-colors border border-yellow-200"
-              title="以管理员身份进入游戏（拥有编辑权限）">
-              👑 进入
+              title="以管理员观察模式进入游戏（不会占用玩家名额，拥有编辑权限）">
+              👑 观察
             </a>
             {game.status !== 'finished'
               ? <button onClick={handleFinish} className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">结束</button>
@@ -447,7 +456,7 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                     <div className="text-xs text-slate-500 mb-1.5">附加模式</div>
                     <div className="space-y-2 max-h-40 overflow-auto pr-1">
                       {Object.entries(combinableModeOptions).map(([key, cfg]) => {
-                        const checked = extraModeDraft.includes(key);
+                        const checked = normalizedExtraModeDraft.includes(key);
                         const disabled = key === modeDraft;
                         return (
                           <label key={key} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${checked ? 'border-indigo-200 bg-indigo-50' : 'border-slate-200 bg-slate-50'} ${disabled ? 'opacity-50' : ''}`}>
@@ -458,7 +467,7 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                               onChange={() => {
                                 if (disabled) return;
                                 setExtraModeDraft(prev =>
-                                  prev.includes(key) ? prev.filter(m => m !== key) : [...prev, key]
+                                  normalizeExtraModes(modeDraft, prev.includes(key) ? prev.filter(m => m !== key) : [...prev, key])
                                 );
                               }}
                               className="mt-0.5"
@@ -470,6 +479,20 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                           </label>
                         );
                       })}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="text-xs text-slate-500 mb-2">当前生效模式</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {modePreview.map((item, idx) => (
+                        <span
+                          key={`${item.key}-${idx}`}
+                          className={`px-2 py-0.5 text-xs rounded-full ${idx === 0 ? 'bg-indigo-100 text-indigo-700' : 'bg-white text-slate-600 border border-slate-200'}`}
+                        >
+                          {item.label}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
@@ -621,6 +644,62 @@ function GamesPanel() {
 
 // ── Panel: AI Config ──────────────────────────────────────────────────────────
 
+const SECRET_MASK = '••••••••';
+
+function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
+  return {
+    provider: typeof extra?.kb_provider === 'string' ? extra.kb_provider : 'siliconflow',
+    enabled: Boolean(extra?.kb_enabled),
+    apiKey: typeof extra?.kb_api_key === 'string' ? extra.kb_api_key : '',
+    baseUrl: typeof extra?.kb_base_url === 'string' ? extra.kb_base_url : '',
+    embeddingModel: typeof extra?.kb_embedding_model === 'string' ? extra.kb_embedding_model : '',
+    rerankModel: typeof extra?.kb_rerank_model === 'string' ? extra.kb_rerank_model : '',
+    rerankInstruction: typeof extra?.kb_rerank_instruction === 'string' ? extra.kb_rerank_instruction : '',
+  };
+}
+
+function writeKnowledgeExtra(
+  existingExtra: Record<string, unknown>,
+  next: {
+    enabled: boolean;
+    apiKey: string;
+    baseUrl: string;
+    embeddingModel: string;
+    rerankModel: string;
+    rerankInstruction: string;
+  },
+  preservedApiKey = ''
+) {
+  const merged = { ...existingExtra };
+
+  delete merged.kb_provider;
+  delete merged.kb_enabled;
+  delete merged.kb_api_key;
+  delete merged.kb_base_url;
+  delete merged.kb_embedding_model;
+  delete merged.kb_rerank_model;
+  delete merged.kb_rerank_instruction;
+
+  const apiKey = next.apiKey === SECRET_MASK ? preservedApiKey : next.apiKey.trim();
+  const baseUrl = next.baseUrl.trim().replace(/\/$/, '');
+  const embeddingModel = next.embeddingModel.trim();
+  const rerankModel = next.rerankModel.trim();
+  const rerankInstruction = next.rerankInstruction.trim();
+
+  const hasAnyValue = Boolean(apiKey || baseUrl || embeddingModel || rerankModel || rerankInstruction || next.enabled);
+  if (!hasAnyValue) return merged;
+
+  merged.kb_provider = 'siliconflow';
+  merged.kb_enabled = next.enabled;
+  if (apiKey) merged.kb_api_key = apiKey;
+  if (baseUrl) merged.kb_base_url = baseUrl;
+  if (embeddingModel) merged.kb_embedding_model = embeddingModel;
+  if (rerankModel) merged.kb_rerank_model = rerankModel;
+  if (rerankInstruction) merged.kb_rerank_instruction = rerankInstruction;
+
+  return merged;
+}
+
 function AIConfigPanel() {
   const [configs, setConfigs] = useState<AIConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -676,65 +755,86 @@ function AIConfigPanel() {
         <EmptyState icon="🤖" title="暂无 AI 配置" desc="点击「添加配置」接入 Claude、DeepSeek、Qwen、本地 Ollama 等任意接口" />
       ) : (
         <div className="space-y-3">
-          {configs.map(cfg => (
-            <div
-              key={cfg.id}
-              className={`bg-white rounded-2xl border shadow-sm p-5 transition-all
-                ${cfg.is_active ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-100'}`}
-            >
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                    ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : cfg.provider_type === 'glm' ? 'bg-cyan-50' : 'bg-indigo-50'}`}>
-                    {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : cfg.provider_type === 'glm' ? '💙' : '🔷'}
-                  </div>
-                  <div>
-                    <div className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
-                      {cfg.name}
-                      {cfg.is_active === 1 && (
-                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-normal">当前使用</span>
-                      )}
-                      {(cfg as AIConfig & { system_prompt?: string }).system_prompt && (
-                        <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-normal border border-purple-100">自定义提示词</span>
-                      )}
+          {configs.map(cfg => {
+            const knowledge = readKnowledgeExtra(cfg.extra);
+            return (
+              <div
+                key={cfg.id}
+                className={`bg-white rounded-2xl border shadow-sm p-5 transition-all
+                  ${cfg.is_active ? 'border-indigo-300 ring-1 ring-indigo-200' : 'border-slate-100'}`}
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl
+                      ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : cfg.provider_type === 'glm' ? 'bg-cyan-50' : 'bg-indigo-50'}`}>
+                      {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : cfg.provider_type === 'glm' ? '💙' : '🔷'}
                     </div>
-                    <div className="text-xs text-slate-500 mt-0.5">
-                      {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.provider_type === 'glm' ? '智谱AI (BigModel)' : cfg.base_url}
-                      <span className="ml-2 font-mono">{cfg.model}</span>
+                    <div>
+                      <div className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
+                        {cfg.name}
+                        {cfg.is_active === 1 && (
+                          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-normal">当前使用</span>
+                        )}
+                        {(cfg as AIConfig & { system_prompt?: string }).system_prompt && (
+                          <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-normal border border-purple-100">自定义提示词</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-0.5">
+                        {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.provider_type === 'glm' ? '智谱AI (BigModel)' : cfg.base_url}
+                        <span className="ml-2 font-mono">{cfg.model}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => handleTest(cfg)}
-                    disabled={testing === cfg.id}
-                    className="btn-secondary text-xs py-1.5"
-                  >
-                    {testing === cfg.id ? '测试中...' : '测试连接'}
-                  </button>
-                  {cfg.is_active !== 1 && (
-                    <button onClick={() => handleActivate(cfg.id)} className="btn-secondary text-xs py-1.5 text-indigo-600">
-                      设为当前
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => handleTest(cfg)}
+                      disabled={testing === cfg.id}
+                      className="btn-secondary text-xs py-1.5"
+                    >
+                      {testing === cfg.id ? '测试中...' : '测试连接'}
                     </button>
-                  )}
-                  <button onClick={() => { setEditing(cfg); setShowForm(false); }} className="btn-secondary text-xs py-1.5">
-                    编辑
-                  </button>
-                  <button onClick={() => handleDelete(cfg.id)} className="btn-secondary text-xs py-1.5 text-red-500">
-                    删除
-                  </button>
+                    {cfg.is_active !== 1 && (
+                      <button onClick={() => handleActivate(cfg.id)} className="btn-secondary text-xs py-1.5 text-indigo-600">
+                        设为当前
+                      </button>
+                    )}
+                    <button onClick={() => { setEditing(cfg); setShowForm(false); }} className="btn-secondary text-xs py-1.5">
+                      编辑
+                    </button>
+                    <button onClick={() => handleDelete(cfg.id)} className="btn-secondary text-xs py-1.5 text-red-500">
+                      删除
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {testResult[cfg.id] && (
-                <div className={`mt-3 text-xs px-3 py-2 rounded-lg
-                  ${testResult[cfg.id].startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-                  {testResult[cfg.id]}
-                </div>
-              )}
-            </div>
-          ))}
+                {(knowledge.enabled || knowledge.embeddingModel || knowledge.rerankModel) && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${knowledge.enabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
+                      知识库增强{knowledge.enabled ? '已启用' : '已配置'}
+                    </span>
+                    {knowledge.embeddingModel && (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-cyan-50 text-cyan-700 border-cyan-200">
+                        Embedding: <span className="font-mono">{knowledge.embeddingModel}</span>
+                      </span>
+                    )}
+                    {knowledge.rerankModel && (
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
+                        Rerank: <span className="font-mono">{knowledge.rerankModel}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {testResult[cfg.id] && (
+                  <div className={`mt-3 text-xs px-3 py-2 rounded-lg
+                    ${testResult[cfg.id].startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                    {testResult[cfg.id]}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -745,6 +845,7 @@ function AIConfigPanel() {
           <li><strong>OpenAI Compatible</strong> — 填入 Base URL + API Key，支持 OpenAI、DeepSeek、Qwen、月之暗面、本地 Ollama 等所有兼容接口</li>
           <li><strong>Google AI Studio</strong> — 填入 Google AI Studio API Key，模型填 <code>gemini-2.0-flash</code></li>
           <li><strong>智谱AI (GLM)</strong> — 填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>，可分别配置 API 主机和路径</li>
+          <li><strong>知识库增强检索</strong> — 可为当前 AI 配置单独填写 SiliconFlow 的嵌入模型与重排序模型，服务端会优先读取后台配置，环境变量作为兜底</li>
           <li>可为每个配置设置<strong>自定义提示词</strong>，调整验证风格和严格程度</li>
         </ul>
       </InfoBox>
@@ -777,14 +878,23 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const initialGlmPath = initial?.provider_type === 'glm' && initial.base_url
     ? splitGlmUrl(initial.base_url)[1]
     : '/chat/completions';
+  const initialKnowledge = readKnowledgeExtra(initial?.extra);
 
   const [form, setForm] = useState({
     name:          initial?.name          ?? '',
     provider_type: initial?.provider_type ?? 'openai-compatible',
     base_url:      (initial?.provider_type === 'glm' ? initialGlmHost : initial?.base_url) ?? '',
-    api_key:       initial ? '••••••••' : '',
+    api_key:       initial ? SECRET_MASK : '',
     model:         initial?.model         ?? '',
     system_prompt: (initial as (AIConfig & { system_prompt?: string }) | null)?.system_prompt ?? '',
+  });
+  const [knowledge, setKnowledge] = useState({
+    enabled: initialKnowledge.enabled,
+    apiKey: initialKnowledge.apiKey ? SECRET_MASK : '',
+    baseUrl: initialKnowledge.baseUrl,
+    embeddingModel: initialKnowledge.embeddingModel,
+    rerankModel: initialKnowledge.rerankModel,
+    rerankInstruction: initialKnowledge.rerankInstruction,
   });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
@@ -792,6 +902,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const [showPrompt, setShowPrompt] = useState(false);
 
   function update(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
+  function updateKnowledge<K extends keyof typeof knowledge>(key: K, value: typeof knowledge[K]) {
+    setKnowledge(prev => ({ ...prev, [key]: value }));
+  }
 
   const PRESETS: { label: string; base_url: string; model: string }[] = [
     { label: 'OpenAI',    base_url: 'https://api.openai.com/v1',         model: 'gpt-4o' },
@@ -810,16 +923,25 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       const effectiveBaseUrl = form.provider_type === 'glm'
         ? `${form.base_url.replace(/\/$/, '')}${glmApiPath.startsWith('/') ? glmApiPath : `/${glmApiPath}`}`
         : form.base_url;
+      const knowledgeApiKey = knowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : knowledge.apiKey.trim();
+      if (knowledge.enabled && !knowledgeApiKey) {
+        throw new Error('启用知识库增强时，请填写 SiliconFlow API Key');
+      }
+      if (knowledge.enabled && !knowledge.embeddingModel.trim() && !knowledge.rerankModel.trim()) {
+        throw new Error('启用知识库增强时，至少填写一个嵌入模型或重排序模型');
+      }
+
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
         base_url: effectiveBaseUrl,
         system_prompt: form.system_prompt || undefined,
+        extra: writeKnowledgeExtra(initial?.extra || {}, knowledge, initialKnowledge.apiKey),
       };
       if (initial) {
-        if (form.api_key === '••••••••') delete payload.api_key;
+        if (form.api_key === SECRET_MASK) delete payload.api_key;
         await adminUpdateAIConfig(initial.id, payload);
       } else {
-        await adminCreateAIConfig({ ...payload, extra: {} } as Omit<AIConfig, 'id' | 'is_active' | 'created_at'>);
+        await adminCreateAIConfig({ ...payload, extra: (payload.extra || {}) } as Omit<AIConfig, 'id' | 'is_active' | 'created_at'>);
       }
       onSaved();
     } catch (e: unknown) {
@@ -943,6 +1065,83 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               form.provider_type === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'
             } value={form.model} onChange={e => update('model', e.target.value)} required />
           </FormField>
+        </div>
+
+        <div className="border border-emerald-100 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 bg-emerald-50 border-b border-emerald-100">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-semibold text-emerald-800">知识库增强检索（SiliconFlow）</div>
+                <p className="text-xs text-emerald-700 mt-0.5">
+                  为当前 AI 配置补充独立的嵌入模型与重排序模型。服务端会优先读取这里的配置，环境变量作为兜底。
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm font-medium text-emerald-800">
+                <input
+                  type="checkbox"
+                  checked={knowledge.enabled}
+                  onChange={e => updateKnowledge('enabled', e.target.checked)}
+                />
+                启用增强检索
+              </label>
+            </div>
+          </div>
+          <div className="p-4 space-y-4 bg-white">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField label="SiliconFlow API Key">
+                <input
+                  className="input font-mono text-sm"
+                  type="password"
+                  placeholder="sk-sf-..."
+                  value={knowledge.apiKey}
+                  onChange={e => updateKnowledge('apiKey', e.target.value)}
+                />
+              </FormField>
+              <FormField label="Base URL">
+                <input
+                  className="input font-mono text-sm"
+                  placeholder="https://api.siliconflow.cn/v1"
+                  value={knowledge.baseUrl}
+                  onChange={e => updateKnowledge('baseUrl', e.target.value)}
+                />
+              </FormField>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField label="嵌入模型">
+                <input
+                  className="input font-mono text-sm"
+                  placeholder="例如：BAAI/bge-large-zh-v1.5"
+                  value={knowledge.embeddingModel}
+                  onChange={e => updateKnowledge('embeddingModel', e.target.value)}
+                />
+              </FormField>
+              <FormField label="重排序模型">
+                <input
+                  className="input font-mono text-sm"
+                  placeholder="例如：BAAI/bge-reranker-v2-m3"
+                  value={knowledge.rerankModel}
+                  onChange={e => updateKnowledge('rerankModel', e.target.value)}
+                />
+              </FormField>
+            </div>
+
+            <FormField label="重排序指令（可选）">
+              <textarea
+                className="w-full text-sm font-mono border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:bg-white transition-colors"
+                rows={3}
+                placeholder="例如：请根据查询语义重新排序文档，优先保留与历史主题强相关的候选片段。"
+                value={knowledge.rerankInstruction}
+                onChange={e => updateKnowledge('rerankInstruction', e.target.value)}
+              />
+            </FormField>
+
+            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
+              请求会按 SiliconFlow 官方接口结构发送：
+              <span className="font-mono"> /embeddings</span> 使用嵌入模型，
+              <span className="font-mono"> /rerank</span> 使用 <span className="font-mono">query</span>、<span className="font-mono">documents</span>、<span className="font-mono">top_n</span>，若填写上方指令则附带 <span className="font-mono">instruction</span>。
+            </div>
+          </div>
         </div>
 
         {/* System Prompt (advanced) */}
