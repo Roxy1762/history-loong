@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { GAME_MODES } = require('../plugins');
+const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
 
 const router = express.Router();
 
@@ -19,6 +19,16 @@ router.post('/', (req, res) => {
   }
   if (!GAME_MODES[mode]) {
     return res.status(400).json({ error: `未知游戏模式: ${mode}` });
+  }
+  // Validate extra modes in settings.extraModes
+  if (Array.isArray(settings.extraModes)) {
+    for (const em of settings.extraModes) {
+      if (!GAME_MODES[em] && !COMBINABLE_MODES[em]) {
+        return res.status(400).json({ error: `未知附加模式: ${em}` });
+      }
+    }
+    // Remove duplicate of primary mode from extraModes
+    settings.extraModes = settings.extraModes.filter(em => em !== mode);
   }
 
   const id = uuidv4().slice(0, 8).toUpperCase();
@@ -65,12 +75,12 @@ router.get('/:id/messages', (req, res) => {
 
 // GET /api/games/:id/modes — list available game modes
 router.get('/:id/modes', (_req, res) => {
-  res.json({ modes: GAME_MODES });
+  res.json({ modes: GAME_MODES, combinableModes: COMBINABLE_MODES });
 });
 
 // GET /api/modes
 router.get('/', (_req, res) => {
-  res.json({ modes: GAME_MODES });
+  res.json({ modes: GAME_MODES, combinableModes: COMBINABLE_MODES });
 });
 
 // POST /api/games/import — restore a game from a previously exported JSON

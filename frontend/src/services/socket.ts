@@ -229,7 +229,7 @@ export function finishGame(): Promise<{ ok?: boolean; error?: string }> {
   return new Promise(resolve => getSocket().emit('game:finish', {}, resolve));
 }
 
-/** Skip the current challenge card and pick a new one (challenge mode, 30s cooldown) */
+/** Skip the current challenge card and pick a new one */
 export function skipChallenge(): Promise<{ ok?: boolean; error?: string; card?: { id: string; text: string; tag: string } }> {
   slog('info', 'skipChallenge emit');
   return new Promise(resolve => getSocket().emit('challenge:skip', {}, (res: { ok?: boolean; error?: string; card?: { id: string; text: string; tag: string } }) => {
@@ -249,6 +249,36 @@ export function validateSingleConcept(conceptId: string): Promise<{ ok?: boolean
   }));
 }
 
+/** Edit a concept's raw input (own pending concept, or any if admin) */
+export function editConcept(conceptId: string, newInput: string): Promise<{ ok?: boolean; error?: string }> {
+  slog('info', `editConcept conceptId=${conceptId}`);
+  return new Promise(resolve => getSocket().emit('concept:edit', { conceptId, newInput }, (res: { ok?: boolean; error?: string }) => {
+    if (res.error) slog('error', `editConcept error: ${res.error}`);
+    else slog('info', `editConcept OK`);
+    resolve(res);
+  }));
+}
+
+/** Delete a concept (own pending concept, or any if admin) */
+export function deleteConcept(conceptId: string): Promise<{ ok?: boolean; error?: string }> {
+  slog('info', `deleteConcept conceptId=${conceptId}`);
+  return new Promise(resolve => getSocket().emit('concept:delete', { conceptId }, (res: { ok?: boolean; error?: string }) => {
+    if (res.error) slog('error', `deleteConcept error: ${res.error}`);
+    else slog('info', `deleteConcept OK`);
+    resolve(res);
+  }));
+}
+
+/** Elevate current socket session to admin (requires admin key) */
+export function adminJoinGame(gameId: string, adminKey: string): Promise<{ ok?: boolean; error?: string }> {
+  slog('info', `adminJoinGame gameId=${gameId}`);
+  return new Promise(resolve => getSocket().emit('admin:join', { gameId, adminKey }, (res: { ok?: boolean; error?: string }) => {
+    if (res.error) slog('error', `adminJoinGame error: ${res.error}`);
+    else slog('info', `adminJoinGame OK`);
+    resolve(res);
+  }));
+}
+
 // ── Event listeners ───────────────────────────────────────────────────────────
 
 export type SocketEventMap = {
@@ -257,6 +287,8 @@ export type SocketEventMap = {
   'concept:pending':     (e: ConceptPendingEvent) => void;
   'concept:validating':  (e: ConceptValidatingEvent) => void;
   'concept:settled':     (e: ConceptSettledEvent) => void;
+  'concept:edited':      (e: { concept: import('../types').Concept }) => void;
+  'concept:deleted':     (e: { conceptId: string }) => void;
   'game:settle:start':   (e: SettleStartEvent) => void;
   'game:settle:progress':(e: { done: number; total: number }) => void;
   'game:settle:done':    (e: SettleDoneEvent) => void;
@@ -264,7 +296,7 @@ export type SocketEventMap = {
   'game:finished':       () => void;
   'game:deleted':        () => void;
   'game:restored':       () => void;
-  // New mode events
+  // Mode events
   'turn:update':         (e: TurnUpdateEvent) => void;
   'scores:update':       (e: ScoresUpdateEvent) => void;
   'challenge:update':    (e: ChallengeUpdateEvent) => void;

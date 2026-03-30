@@ -7,6 +7,7 @@ import type { GameModeConfig } from '../types';
 const EXAMPLE_TOPICS = [
   '中国古代史', '唐朝政治制度', '欧洲文艺复兴',
   '工业革命', '二战历史', '丝绸之路', '明清经济',
+  '资本主义世界殖民体系', '中国近代史', '古希腊文明',
 ];
 
 export default function Home() {
@@ -17,16 +18,27 @@ export default function Home() {
   // Create form
   const [topic, setTopic] = useState('');
   const [mode, setMode] = useState('free');
+  const [extraModes, setExtraModes] = useState<string[]>([]);
   const [validationMode, setValidationMode] = useState<'realtime' | 'deferred'>('realtime');
   const [modes, setModes] = useState<Record<string, GameModeConfig>>({});
+  const [combinableModes, setCombinableModes] = useState<Record<string, GameModeConfig>>({});
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Advanced settings
+  const [challengeThreshold, setChallengeThreshold] = useState(2);
+  const [skipCooldownMs, setSkipCooldownMs] = useState(0);
+  const [maxPlayers, setMaxPlayers] = useState(0); // 0 = unlimited
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
 
   useEffect(() => {
-    getGameModes().then(setModes).catch(() => {});
+    getGameModes().then(data => {
+      setModes(data.modes);
+      setCombinableModes(data.combinableModes || {});
+    }).catch(() => {});
   }, []);
 
   function switchTab(t: 'create' | 'join') {
@@ -34,12 +46,36 @@ export default function Home() {
     setTab(t);
   }
 
+  function toggleExtraMode(m: string) {
+    setExtraModes(prev =>
+      prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]
+    );
+  }
+
+  // Determine if challenge/score-race features are active (primary or extra)
+  const hasChallengeMode = mode === 'challenge' || extraModes.includes('challenge');
+  const hasScoreMode = mode === 'score-race' || extraModes.includes('score-race');
+  const showChallengeSettings = hasChallengeMode;
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!topic.trim()) return setCreateError('请输入游戏主题');
     setCreating(true); setCreateError('');
     try {
-      const game = await createGame(topic.trim(), mode, { validationMode });
+      const settings: Record<string, unknown> = { validationMode };
+      // Extra modes for mode combination
+      if (extraModes.length > 0) settings.extraModes = extraModes.filter(m => m !== mode);
+      // Challenge settings
+      if (hasChallengeMode) {
+        settings.challengeThreshold = challengeThreshold;
+        settings.skipCooldownMs = skipCooldownMs;
+      }
+      // Score mode (score-race or combined)
+      if (hasScoreMode && mode !== 'score-race') settings.extraModes = [...(settings.extraModes as string[] || []), 'score-race'];
+
+      if (maxPlayers > 0) settings.maxPlayers = maxPlayers;
+
+      const game = await createGame(topic.trim(), mode, settings);
       navigate(`/game/${game.id}`);
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : '创建失败，请重试');
@@ -62,29 +98,18 @@ export default function Home() {
       className="min-h-screen flex flex-col relative overflow-hidden"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      {/* Background decoration — uses theme CSS variables */}
+      {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div
-          className="deco-blob absolute -top-40 -right-40 w-96 h-96"
-          style={{ background: 'var(--deco-blob1)' }}
-        />
-        <div
-          className="deco-blob absolute -bottom-40 -left-40 w-96 h-96"
-          style={{ background: 'var(--deco-blob2)' }}
-        />
-        <div
-          className="deco-blob absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px]"
-          style={{ background: 'var(--deco-blob3)' }}
-        />
+        <div className="deco-blob absolute -top-40 -right-40 w-96 h-96" style={{ background: 'var(--deco-blob1)' }} />
+        <div className="deco-blob absolute -bottom-40 -left-40 w-96 h-96" style={{ background: 'var(--deco-blob2)' }} />
+        <div className="deco-blob absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px]" style={{ background: 'var(--deco-blob3)' }} />
       </div>
 
       {/* Nav */}
       <nav className="relative z-30 flex items-center justify-between px-6 py-4">
         <div className="flex items-center gap-2">
           <span className="text-3xl animate-float">🐉</span>
-          <span className="font-heading font-bold text-xl" style={{ color: 'var(--text-primary)' }}>
-            历史接龙
-          </span>
+          <span className="font-heading font-bold text-xl" style={{ color: 'var(--text-primary)' }}>历史接龙</span>
         </div>
         <div className="flex items-center gap-2">
           <ThemeSwitcher />
@@ -115,10 +140,7 @@ export default function Home() {
               borderColor: 'color-mix(in srgb, var(--brand) 25%, transparent)',
             }}
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse"
-              style={{ background: 'var(--brand)' }}
-            />
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--brand)' }} />
             多人实时 · AI 验证 · 自动时间轴
           </div>
           <h1 className="text-5xl font-heading font-black mb-3 leading-tight" style={{ color: 'var(--text-primary)' }}>
@@ -140,10 +162,7 @@ export default function Home() {
             }}
           >
             {/* Tab switcher */}
-            <div
-              className="flex border-b"
-              style={{ borderColor: 'var(--border)', background: 'var(--bg-muted)' }}
-            >
+            <div className="flex border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-muted)' }}>
               {(['create', 'join'] as const).map(t => (
                 <button
                   key={t}
@@ -156,10 +175,7 @@ export default function Home() {
                 >
                   {t === 'create' ? '🎮 创建房间' : '🚪 加入房间'}
                   {tab === t && (
-                    <span
-                      className="absolute bottom-0 left-4 right-4 h-0.5 rounded-t-full animate-expand-width"
-                      style={{ background: 'var(--brand)' }}
-                    />
+                    <span className="absolute bottom-0 left-4 right-4 h-0.5 rounded-t-full animate-expand-width" style={{ background: 'var(--brand)' }} />
                   )}
                 </button>
               ))}
@@ -169,13 +185,12 @@ export default function Home() {
               <div key={tab} className={slideDir}>
                 {tab === 'create' ? (
                   <form onSubmit={handleCreate} className="space-y-5">
+                    {/* Topic */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                        游戏主题
-                      </label>
+                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>游戏主题</label>
                       <input
                         className="input"
-                        placeholder="例如：中国古代史、法国大革命..."
+                        placeholder="例如：中国古代史、资本主义殖民体系..."
                         value={topic}
                         onChange={e => setTopic(e.target.value)}
                         maxLength={50}
@@ -190,21 +205,16 @@ export default function Home() {
                             style={{
                               background: topic === t ? 'var(--brand-light)' : 'var(--bg-muted)',
                               color: topic === t ? 'var(--brand)' : 'var(--text-secondary)',
-                              borderColor: topic === t
-                                ? 'color-mix(in srgb, var(--brand) 40%, transparent)'
-                                : 'var(--border)',
+                              borderColor: topic === t ? 'color-mix(in srgb, var(--brand) 40%, transparent)' : 'var(--border)',
                             }}
-                          >
-                            {t}
-                          </button>
+                          >{t}</button>
                         ))}
                       </div>
                     </div>
 
+                    {/* Primary mode */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                        游戏模式
-                      </label>
+                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>主要游戏模式</label>
                       <div className="space-y-2">
                         {Object.entries(modes).map(([key, cfg]) => (
                           <label
@@ -216,28 +226,61 @@ export default function Home() {
                               name="mode"
                               value={key}
                               checked={mode === key}
-                              onChange={() => setMode(key)}
+                              onChange={() => {
+                                setMode(key);
+                                // Remove from extra if it was there
+                                setExtraModes(prev => prev.filter(m => m !== key));
+                              }}
                               className="mt-0.5"
                               style={{ accentColor: 'var(--brand)' }}
                             />
                             <div>
-                              <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                                {cfg.label}
-                              </div>
-                              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                                {cfg.description}
-                              </div>
+                              <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
+                              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
                             </div>
                           </label>
                         ))}
                       </div>
                     </div>
 
+                    {/* Extra combinable modes */}
+                    {Object.keys(combinableModes).length > 0 && (
+                      <div>
+                        <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                          叠加玩法
+                          <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>（可与主模式叠加）</span>
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.entries(combinableModes).map(([key, cfg]) => {
+                            const isPrimary = mode === key;
+                            const isChecked = extraModes.includes(key) || isPrimary;
+                            return (
+                              <label
+                                key={key}
+                                className={`option-card flex items-start gap-2 p-3 cursor-pointer ${isChecked ? 'selected' : ''} ${isPrimary ? 'opacity-60 cursor-not-allowed' : ''}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={isPrimary}
+                                  onChange={() => !isPrimary && toggleExtraMode(key)}
+                                  className="mt-0.5"
+                                  style={{ accentColor: 'var(--brand)' }}
+                                />
+                                <div>
+                                  <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
+                                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Validation mode */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                        验证时机
-                      </label>
+                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>验证时机</label>
                       <div className="grid grid-cols-2 gap-2">
                         {([
                           { value: 'realtime', icon: '⚡', label: '实时验证', desc: '每次提交立即 AI 验证' },
@@ -257,16 +300,96 @@ export default function Home() {
                               style={{ accentColor: 'var(--brand)' }}
                             />
                             <div>
-                              <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>
-                                {opt.icon} {opt.label}
-                              </div>
-                              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                                {opt.desc}
-                              </div>
+                              <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{opt.icon} {opt.label}</div>
+                              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{opt.desc}</div>
                             </div>
                           </label>
                         ))}
                       </div>
+                    </div>
+
+                    {/* Advanced settings toggle */}
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAdvanced(v => !v)}
+                        className="flex items-center gap-1.5 text-sm font-medium transition-colors"
+                        style={{ color: showAdvanced ? 'var(--brand)' : 'var(--text-muted)' }}
+                      >
+                        <svg className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        高级设置
+                      </button>
+
+                      {showAdvanced && (
+                        <div className="mt-3 space-y-4 p-4 rounded-xl border animate-slide-down" style={{ background: 'var(--bg-muted)', borderColor: 'var(--border)' }}>
+                          {/* Challenge settings */}
+                          {showChallengeSettings && (
+                            <>
+                              <div>
+                                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                                  🃏 挑战卡换牌阈值
+                                  <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（每完成几个概念换一张卡）</span>
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="range" min={1} max={10} step={1}
+                                    value={challengeThreshold}
+                                    onChange={e => setChallengeThreshold(Number(e.target.value))}
+                                    className="flex-1"
+                                    style={{ accentColor: 'var(--brand)' }}
+                                  />
+                                  <span className="text-sm font-bold w-6 text-center" style={{ color: 'var(--brand)' }}>{challengeThreshold}</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                                  🔀 换题冷却时间
+                                  <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（0 = 无限制）</span>
+                                </label>
+                                <div className="grid grid-cols-4 gap-1.5">
+                                  {[0, 10000, 30000, 60000].map(ms => (
+                                    <button
+                                      key={ms}
+                                      type="button"
+                                      onClick={() => setSkipCooldownMs(ms)}
+                                      className="text-xs py-1.5 rounded-lg border font-medium transition-all"
+                                      style={{
+                                        background: skipCooldownMs === ms ? 'var(--brand-light)' : 'var(--bg-card)',
+                                        color: skipCooldownMs === ms ? 'var(--brand)' : 'var(--text-secondary)',
+                                        borderColor: skipCooldownMs === ms ? 'color-mix(in srgb, var(--brand) 40%, transparent)' : 'var(--border)',
+                                      }}
+                                    >
+                                      {ms === 0 ? '无限制' : ms === 10000 ? '10秒' : ms === 30000 ? '30秒' : '60秒'}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </>
+                          )}
+
+                          {/* Max players */}
+                          <div>
+                            <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
+                              👥 最大玩家数
+                              <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（0 = 不限制）</span>
+                            </label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="range" min={0} max={20} step={1}
+                                value={maxPlayers}
+                                onChange={e => setMaxPlayers(Number(e.target.value))}
+                                className="flex-1"
+                                style={{ accentColor: 'var(--brand)' }}
+                              />
+                              <span className="text-sm font-bold w-8 text-center" style={{ color: 'var(--brand)' }}>
+                                {maxPlayers === 0 ? '∞' : maxPlayers}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {createError && (
@@ -287,9 +410,7 @@ export default function Home() {
                 ) : (
                   <form onSubmit={handleJoin} className="space-y-5">
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                        房间码
-                      </label>
+                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>房间码</label>
                       <input
                         className="input text-center text-2xl font-mono tracking-[0.3em] uppercase py-4"
                         placeholder="XXXXXXXX"
@@ -318,9 +439,9 @@ export default function Home() {
         {/* Features */}
         <div className="mt-8 grid grid-cols-3 gap-3 w-full max-w-md animate-fade-in" style={{ animationDelay: '120ms' }}>
           {[
-            { icon: '🤖', title: 'AI 智能验证', desc: '本地知识库优先，AI 兜底' },
+            { icon: '🤖', title: 'AI 智能验证', desc: '时代感知验证，精准分类' },
             { icon: '📅', title: '自动时间轴', desc: '按朝代自动归类' },
-            { icon: '📤', title: '多格式导出', desc: 'JSON / MD / CSV / 可重新导入' },
+            { icon: '🎮', title: '多模式叠加', desc: '自由组合玩法规则' },
           ].map((f, i) => (
             <div
               key={f.title}
@@ -339,7 +460,7 @@ export default function Home() {
           ))}
         </div>
 
-        <p className="mt-6 text-xs select-none" style={{ color: 'var(--border)' }}>dev 0.2.0</p>
+        <p className="mt-6 text-xs select-none" style={{ color: 'var(--border)' }}>dev 0.3.0</p>
       </div>
     </div>
   );

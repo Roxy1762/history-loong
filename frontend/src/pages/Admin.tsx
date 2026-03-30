@@ -329,11 +329,19 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
         </td>
         <td className="px-4 py-3 text-slate-400 whitespace-nowrap">{game.created_at.slice(0, 16).replace('T', ' ')}</td>
         <td className="px-4 py-3">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap">
             <button onClick={() => setExpanded(e => !e)}
               className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
               详情
             </button>
+            <a
+              href={`/game/${game.id}?adminKey=${encodeURIComponent(localStorage.getItem('admin_key') || 'admin')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs px-2 py-1 bg-yellow-50 text-yellow-700 rounded-lg hover:bg-yellow-100 transition-colors border border-yellow-200"
+              title="以管理员身份进入游戏（拥有编辑权限）">
+              👑 进入
+            </a>
             {game.status !== 'finished'
               ? <button onClick={handleFinish} className="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">结束</button>
               : <button onClick={handleRestore} className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors">恢复</button>
@@ -714,7 +722,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     }
   }
 
+  // All providers support custom base_url (for proxy/self-hosted scenarios)
   const needsBaseUrl = form.provider_type === 'openai-compatible';
+  const supportsCustomUrl = ['anthropic', 'google', 'glm'].includes(form.provider_type);
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
@@ -734,8 +744,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </FormField>
         </div>
 
+        {/* OpenAI-compatible: full base_url field with presets */}
         {needsBaseUrl && (
-          <FormField label="Base URL">
+          <FormField label="Base URL（API 地址）">
             <div className="space-y-2">
               <input className="input font-mono text-sm" placeholder="https://api.openai.com/v1" value={form.base_url} onChange={e => update('base_url', e.target.value)} required />
               <div className="flex flex-wrap gap-1">
@@ -750,17 +761,16 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </FormField>
         )}
 
-        {/* GLM: split host + path fields */}
+        {/* GLM: host + path fields */}
         {form.provider_type === 'glm' && (
           <div className="space-y-2">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <FormField label="API 主机">
+              <FormField label="API 主机（Base URL）">
                 <input
                   className="input font-mono text-sm"
                   placeholder="https://open.bigmodel.cn/api/paas/v4"
                   value={form.base_url}
                   onChange={e => update('base_url', e.target.value)}
-                  required
                 />
               </FormField>
               <FormField label="API 路径">
@@ -769,7 +779,6 @@ function AIConfigForm({ initial, onClose, onSaved }: {
                   placeholder="/chat/completions"
                   value={glmApiPath}
                   onChange={e => setGlmApiPath(e.target.value)}
-                  required
                 />
               </FormField>
             </div>
@@ -786,15 +795,34 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </div>
         )}
 
+        {/* Anthropic / Google: optional custom base_url (for proxy) */}
+        {supportsCustomUrl && form.provider_type !== 'glm' && (
+          <FormField label={`自定义 API 地址（可选，默认官方地址）`}>
+            <input
+              className="input font-mono text-sm"
+              placeholder={form.provider_type === 'anthropic' ? 'https://api.anthropic.com (留空使用官方)' : 'https://generativelanguage.googleapis.com/v1beta (留空使用官方)'}
+              value={form.base_url}
+              onChange={e => update('base_url', e.target.value)}
+            />
+            <p className="text-xs text-slate-400 mt-1">可填入代理地址，用于中转 API 请求</p>
+          </FormField>
+        )}
+
         {form.provider_type === 'google' && (
           <div className="text-xs text-slate-500 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2">
-            💡 Google AI Studio：在 <strong>API Key</strong> 填入 Google AI Studio 的 API Key，<strong>模型</strong> 填写 <code>gemini-2.0-flash</code> 或 <code>gemini-1.5-pro</code>
+            💡 Google AI Studio：填入 Google AI Studio 的 API Key，模型填写 <code>gemini-2.0-flash</code> 或 <code>gemini-1.5-pro</code>。支持自定义代理地址。
+          </div>
+        )}
+
+        {form.provider_type === 'anthropic' && (
+          <div className="text-xs text-slate-500 bg-purple-50 border border-purple-100 rounded-xl px-3 py-2">
+            💡 Anthropic Claude：填入 Anthropic API Key，模型填写 <code>claude-sonnet-4-6</code> 或 <code>claude-opus-4-6</code>。支持自定义代理地址。
           </div>
         )}
 
         {form.provider_type === 'glm' && (
           <div className="text-xs text-slate-500 bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2">
-            💡 智谱AI (GLM)：填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>、<code>glm-4.7-flash</code> 等最新型号。API 主机 + 路径拼成完整地址。
+            💡 智谱AI (GLM)：填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>。API 主机 + 路径共同构成完整请求地址，支持自定义路径。
           </div>
         )}
 

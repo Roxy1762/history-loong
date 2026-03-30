@@ -15,7 +15,7 @@
  */
 
 const path = require('path');
-const { PROVIDERS } = require('../services/aiService');
+const { PROVIDER_HANDLERS: PROVIDERS } = require('../services/aiService');
 const { ExportService } = require('../services/exportService');
 const { TimelineService } = require('../services/timelineService');
 
@@ -55,6 +55,17 @@ const GAME_MODES = {
     label: '挑战接龙',
     description: '每轮有随机挑战卡（如"提交军事事件""提交女性人物"），完成挑战获得额外积分',
   },
+};
+
+/**
+ * Modes that can be combined (stacked) on top of a primary mode via settings.extraModes.
+ * These are supplementary effects, not standalone primary modes.
+ */
+const COMBINABLE_MODES = {
+  'score-race': { label: '积分竞速', description: '叠加积分系统，概念越冷僻得分越高' },
+  challenge:    { label: '挑战接龙', description: '叠加挑战卡系统，完成挑战获额外奖励' },
+  ordered:      { label: '时序约束', description: '叠加时序限制，概念须按时间顺序' },
+  relay:        { label: '接力制',   description: '叠加接力机制，每轮每人提交一次' },
 };
 
 // ── Plugin context ────────────────────────────────────────────────────────────
@@ -101,4 +112,4 @@ function loadPlugins() {
   }
 }
 
-module.exports = { loadPlugins, pluginEvents, pluginContext, GAME_MODES };
+module.exports = { loadPlugins, pluginEvents, pluginContext, GAME_MODES, COMBINABLE_MODES };

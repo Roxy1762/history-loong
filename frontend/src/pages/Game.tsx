@@ -4,6 +4,7 @@ import { useGameStore } from '../store/gameStore';
 import {
   joinGame, onSocket, onConnectionState, disconnectSocket,
   requestHints, finishGame, settleConcepts, validateSingleConcept, skipChallenge,
+  editConcept, deleteConcept, adminJoinGame,
   type ConnectionState,
 } from '../services/socket';
 import Timeline from '../components/Timeline';
@@ -120,45 +121,39 @@ function ScoreBoard({ players, scores, me }: { players: { id: string; name: stri
 
 // ── Challenge card banner ─────────────────────────────────────────────────────
 
-function ChallengeBanner({ card, round, onSkip }: {
-  card: { text: string } | null;
+function ChallengeBanner({ card, round, threshold = 2, onSkip, streak = 0 }: {
+  card: { text: string; tag?: string } | null;
   round?: number;
+  threshold?: number;
   onSkip?: () => void;
+  streak?: number;
 }) {
-  const [skipCooldown, setSkipCooldown] = useState(0); // seconds remaining
   const [skipping, setSkipping] = useState(false);
 
-  useEffect(() => {
-    if (skipCooldown <= 0) return;
-    const t = setTimeout(() => setSkipCooldown(c => Math.max(0, c - 1)), 1000);
-    return () => clearTimeout(t);
-  }, [skipCooldown]);
-
   async function handleSkip() {
-    if (skipping || skipCooldown > 0 || !onSkip) return;
+    if (skipping || !onSkip) return;
     setSkipping(true);
     onSkip();
-    setSkipping(false);
-    setSkipCooldown(30);
+    setTimeout(() => setSkipping(false), 1000);
   }
 
   if (!card) return null;
-  const remaining = Math.max(0, 5 - (round || 0));
+  const remaining = Math.max(0, threshold - (round || 0));
   return (
     <div className="bg-gradient-to-r from-purple-50 to-violet-50 border-b border-purple-100 px-4 py-2 flex items-center gap-2 flex-wrap">
       <span className="text-xs font-bold text-purple-700 shrink-0">🃏 当前挑战：</span>
       <span className="text-xs text-purple-800 font-medium flex-1">{card.text}</span>
+      {streak > 1 && (
+        <span className="text-xs text-orange-500 font-bold shrink-0">🔥×{streak}</span>
+      )}
       <span className="text-xs text-purple-400 shrink-0">还需 {remaining} 个换牌</span>
       {onSkip && (
         <button
           onClick={handleSkip}
-          disabled={skipping || skipCooldown > 0}
-          className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-colors shrink-0
-            ${skipCooldown > 0
-              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-              : 'bg-purple-100 text-purple-600 border-purple-200 hover:bg-purple-200'}`}
-          title={skipCooldown > 0 ? `换题冷却中 (${skipCooldown}s)` : '手动换题 (30s 冷却)'}>
-          {skipCooldown > 0 ? `🔀 ${skipCooldown}s` : '🔀 换题'}
+          disabled={skipping}
+          className="text-xs px-2 py-0.5 rounded-full border font-medium transition-colors shrink-0 bg-purple-100 text-purple-600 border-purple-200 hover:bg-purple-200"
+          title="手动换题">
+          {skipping ? '⏳' : '🔀 换题'}
         </button>
       )}
     </div>
@@ -209,7 +204,7 @@ export default function Game() {
     activeTab, setActiveTab,
     setConnected, setMe, setGame, setPlayers,
     setTimeline, addConcept,
-    setPendingConcepts, addPendingConcept, removePendingConcept,
+    setPendingConcepts, addPendingConcept, removePendingConcept, updatePendingConcept,
     setMessages, addMessage,
     setValidating,
     settle, setSettleRunning, incrementSettleDone, resetSettle,
@@ -217,6 +212,7 @@ export default function Game() {
     scores, setScores,
     challengeCard, setChallengeCard,
     selectedPendingIds, clearSelectedPending,
+    isAdmin, setIsAdmin,
     reset,
   } = useGameStore();
 
@@ -234,6 +230,8 @@ export default function Game() {
   const [challengeRound, setChallengeRound] = useState(0);
   const [bonusToast, setBonusToast] = useState<{ bonus: number; playerName: string | null } | null>(null);
   const [chatFill, setChatFill] = useState('');
+  const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
+  const [editingInput, setEditingInput] = useState('');
 
   const meRef     = useRef(me);
   const gameIdRef = useRef(gameId);
@@ -346,9 +344,32 @@ export default function Game() {
       onSocket('relay:round_reset', () => {
         // Visual feedback handled by system message in chat
       }),
+
+      // Concept edit/delete events
+      onSocket('concept:edited', ({ concept }) => {
+        updatePendingConcept(concept);
+      }),
+      onSocket('concept:deleted', ({ conceptId }) => {
+        removePendingConcept(conceptId);
+        // Also remove from validated timeline if it was there
+        useGameStore.getState().setTimeline(
+          useGameStore.getState().timeline.filter(c => c.id !== conceptId)
+        );
+      }),
     ];
     return () => offs.forEach(off => off());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Admin join via URL param (?adminKey=xxx)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const adminKey = params.get('adminKey');
+    if (adminKey && gameId) {
+      adminJoinGame(gameId, adminKey).then(res => {
+        if (res.ok) setIsAdmin(true);
+      });
+    }
+  }, [gameId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const off = onConnectionState(setConnState);
@@ -411,6 +432,27 @@ export default function Game() {
   async function handleSkipChallenge() {
     const res = await skipChallenge();
     if (res.error) alert(res.error);
+  }
+
+  // ── Concept edit ──────────────────────────────────────────────────────────
+  function startEdit(conceptId: string, currentInput: string) {
+    setEditingConceptId(conceptId);
+    setEditingInput(currentInput);
+  }
+
+  async function confirmEdit() {
+    if (!editingConceptId) return;
+    const res = await editConcept(editingConceptId, editingInput);
+    if (res.error) alert(`修改失败：${res.error}`);
+    setEditingConceptId(null);
+    setEditingInput('');
+  }
+
+  // ── Concept delete ────────────────────────────────────────────────────────
+  async function handleDeleteConcept(conceptId: string, name: string) {
+    if (!confirm(`确认删除「${name}」？此操作不可撤销。`)) return;
+    const res = await deleteConcept(conceptId);
+    if (res.error) alert(`删除失败：${res.error}`);
   }
 
   // ── Finish ────────────────────────────────────────────────────────────────
@@ -498,6 +540,9 @@ export default function Game() {
                 )}
                 {gameFinished && (
                   <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-medium">已结束</span>
+                )}
+                {isAdmin && (
+                  <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full border border-yellow-200 font-medium">👑 管理员</span>
                 )}
               </div>
               <div className="flex items-center gap-3 mt-0.5">
@@ -623,7 +668,12 @@ export default function Game() {
 
         {/* Challenge card banner */}
         {isChallengeMode && challengeCard && !gameFinished && (
-          <ChallengeBanner card={challengeCard} round={challengeRound} onSkip={handleSkipChallenge} />
+          <ChallengeBanner
+            card={challengeCard}
+            round={challengeRound}
+            threshold={(game?.settings as Record<string,unknown>)?.challengeThreshold as number ?? 2}
+            onSkip={handleSkipChallenge}
+          />
         )}
 
         {/* Turn indicator (turn-order mode) */}
@@ -731,6 +781,15 @@ export default function Game() {
                 validatingConceptIds={validatingConceptIds}
                 isDeferred={isDeferred}
                 selectedPendingIds={selectedPendingIds}
+                me={me}
+                isAdmin={isAdmin}
+                editingConceptId={editingConceptId}
+                editingInput={editingInput}
+                onStartEdit={startEdit}
+                onEditInputChange={setEditingInput}
+                onConfirmEdit={confirmEdit}
+                onCancelEdit={() => { setEditingConceptId(null); setEditingInput(''); }}
+                onDeleteConcept={handleDeleteConcept}
               />
             </div>
           </div>
