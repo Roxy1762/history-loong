@@ -385,7 +385,7 @@ async function completeWithAuxiliary(prompt, maxTokens = 200) {
 }
 
 async function planValidationAssist(concept, topic, existing = []) {
-  const heuristicSkipTopic = shouldSkipTopicQuery(topic, concept);
+  const heuristicSkipTopic = shouldSkipTopicQuery(topic, concept) || looksSpecificConceptQuery(concept);
   const fallback = {
     useRag: true, topicQuery: topic, conceptQuery: concept, useTopicSearch: !heuristicSkipTopic, note: 'disabled',
     _trace: { enabled: false, prompt: null, rawOutput: null, parsedOutput: null },
@@ -418,10 +418,10 @@ async function planValidationAssist(concept, topic, existing = []) {
 
   return {
     useRag: aux.sceneRagGate ? parsed.useRag !== false : true,
-    useTopicSearch: parsed.useTopicSearch == null ? !heuristicSkipTopic : parsed.useTopicSearch !== false,
+    useTopicSearch: heuristicSkipTopic ? false : (parsed.useTopicSearch == null ? true : parsed.useTopicSearch !== false),
     topicQuery: aux.sceneQueryRewrite && parsed.topicQuery ? String(parsed.topicQuery).trim() : topic,
     conceptQuery: aux.sceneQueryRewrite && parsed.conceptQuery ? String(parsed.conceptQuery).trim() : concept,
-    note: parsed.note ? String(parsed.note).slice(0, 30) : 'ok',
+    note: heuristicSkipTopic ? 'heuristic_skip_topic' : (parsed.note ? String(parsed.note).slice(0, 30) : 'ok'),
     _trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed },
   };
 }
@@ -434,6 +434,14 @@ function shouldSkipTopicQuery(topic, concept) {
   if (cleanConcept === cleanTopic) return false;
   if (cleanTopic.includes(cleanConcept) || cleanConcept.includes(cleanTopic)) return false;
   return /史|历史|文明|朝代|中国史|世界史|近代史|现代史|古代史/.test(cleanTopic);
+}
+
+function looksSpecificConceptQuery(concept) {
+  const cleanConcept = String(concept || '').trim();
+  if (!cleanConcept) return false;
+  if (/^[A-Za-z][A-Za-z0-9 .:_-]{1,40}$/.test(cleanConcept)) return true;
+  if (/\d/.test(cleanConcept)) return true;
+  return /(之战|战役|事变|起义|条约|会议|政变|运动|革命|铁路|帝国|王朝|皇帝|总统|将军|人物)$/.test(cleanConcept);
 }
 
 async function guardRagContext(topic, concept, context) {

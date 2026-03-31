@@ -16,7 +16,7 @@ import {
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
-  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
+  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives, adminDeleteGameConcept, adminUpdateGameConcept,
   adminGetLogs, getGameModes,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
   adminGetCurationPending, adminGetCurationActive,
@@ -27,7 +27,7 @@ import {
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision,
 } from '../services/api';
-import type { Game, GameModeConfig } from '../types';
+import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
 
 // ── Login screen ──────────────────────────────────────────────────────────────
@@ -47,24 +47,24 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
-      <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-8 w-full max-w-sm border border-white/20 shadow-2xl">
+    <div className="min-h-screen flex items-center justify-center paper-bg" style={{ background: 'var(--bg-page)' }}>
+      <div className="rounded-2xl p-8 w-full max-w-sm shadow-2xl corner-ornament animate-spring-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
         <div className="text-center mb-6">
-          <div className="text-4xl mb-3">⚙️</div>
-          <h1 className="text-2xl font-bold text-white">后台管理</h1>
-          <p className="text-slate-400 text-sm mt-1">History-Loong Admin</p>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-heading font-black mx-auto mb-3 text-white shadow-md" style={{ background: 'var(--brand)' }}>管</div>
+          <h1 className="text-2xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>后台管理</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>History-Loong Admin</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <input
             type="password"
-            className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="input text-center py-3"
             placeholder="管理员密钥"
             value={key}
             onChange={e => setKey(e.target.value)}
             autoFocus
           />
-          {err && <p className="text-red-400 text-sm">{err}</p>}
-          <button className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl transition-colors">
+          {err && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{err}</p>}
+          <button className="btn-primary w-full py-3 font-heading">
             登录
           </button>
         </form>
@@ -77,15 +77,15 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
 
-const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
-  { id: 'overview',      icon: '📊', label: '概览' },
-  { id: 'games',         icon: '🎮', label: '游戏管理' },
-  { id: 'ai-config',     icon: '🤖', label: 'AI 配置' },
-  { id: 'knowledge',     icon: '📚', label: '知识库' },
-  { id: 'ai-confirmed',  icon: '✅', label: 'AI 确认知识库' },
-  { id: 'curation',      icon: '🎯', label: '知识策展' },
-  { id: 'ai-decisions',  icon: '🔬', label: 'AI 完整回复' },
-  { id: 'logs',          icon: '🔍', label: '服务器日志' },
+const NAV_ITEMS: { id: Tab; label: string }[] = [
+  { id: 'overview',      label: '概览' },
+  { id: 'games',         label: '游戏管理' },
+  { id: 'ai-config',     label: 'AI 配置' },
+  { id: 'knowledge',     label: '知识库' },
+  { id: 'ai-confirmed',  label: 'AI 确认知识库' },
+  { id: 'curation',      label: '知识策展' },
+  { id: 'ai-decisions',  label: 'AI 完整回复' },
+  { id: 'logs',          label: '服务器日志' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -94,6 +94,7 @@ export default function Admin() {
   const navigate = useNavigate();
   const [authed, setAuthed] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (getAdminKey()) {
@@ -103,48 +104,73 @@ export default function Admin() {
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
+  function handleTabChange(t: Tab) {
+    setTab(t);
+    setSidebarOpen(false);
+  }
+
   return (
-    <div className="min-h-screen flex bg-slate-100">
+    <div className="min-h-screen flex" style={{ background: 'var(--bg-page)' }}>
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-56 bg-slate-900 flex flex-col shadow-xl flex-shrink-0">
-        <div className="p-5 border-b border-slate-700">
-          <button onClick={() => navigate('/')} className="flex items-center gap-2 text-white hover:text-indigo-300 transition-colors">
-            <span className="text-2xl">🐉</span>
+      <aside className={`fixed md:static inset-y-0 left-0 z-40 w-56 flex flex-col shadow-xl flex-shrink-0 transform transition-transform duration-200 md:translate-x-0
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ background: 'var(--nav-bg)' }}>
+        <div className="p-5" style={{ borderBottom: '1px solid color-mix(in srgb, var(--nav-text) 15%, transparent)' }}>
+          <button onClick={() => navigate('/')} className="flex items-center gap-2 transition-colors"
+            style={{ color: 'var(--nav-text)' }}>
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-heading font-black text-white" style={{ background: 'var(--brand)' }}>龙</span>
             <div>
-              <div className="font-bold text-sm">历史接龙</div>
-              <div className="text-xs text-slate-400">后台管理</div>
+              <div className="font-heading font-bold text-sm">历史接龙</div>
+              <div className="text-xs" style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}>后台管理</div>
             </div>
           </button>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${tab === item.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-            >
-              <span>{item.icon}</span>
+              onClick={() => handleTabChange(item.id)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              style={{
+                background: tab === item.id ? 'var(--brand)' : 'transparent',
+                color: tab === item.id ? '#fff' : 'var(--nav-text)',
+              }}>
               {item.label}
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700 space-y-2">
+        <div className="p-4 space-y-2" style={{ borderTop: '1px solid color-mix(in srgb, var(--nav-text) 15%, transparent)' }}>
           <button
             onClick={() => { setAdminKey(''); setAuthed(false); }}
-            className="w-full text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            className="w-full text-xs transition-colors"
+            style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}
           >
             退出登录
           </button>
-          <p className="text-center text-xs text-slate-600 select-none">dev0.3.0</p>
+          <p className="text-center text-xs select-none" style={{ color: 'color-mix(in srgb, var(--nav-text) 30%, transparent)' }}>dev0.3.0</p>
         </div>
       </aside>
 
       {/* Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto p-6">
+      <main className="flex-1 overflow-auto min-w-0">
+        {/* Mobile header bar */}
+        <div className="sticky top-0 z-20 md:hidden flex items-center gap-3 px-4 py-3 shadow-sm"
+          style={{ background: 'var(--bg-card)', borderBottom: '1px solid var(--border)' }}>
+          <button onClick={() => setSidebarOpen(true)} className="p-1.5 rounded-lg" style={{ color: 'var(--text-secondary)' }}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="font-heading font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
+            {NAV_ITEMS.find(n => n.id === tab)?.label || '后台管理'}
+          </h1>
+        </div>
+        <div className="max-w-5xl mx-auto p-4 md:p-6">
           {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
           {tab === 'games'        && <GamesPanel />}
           {tab === 'ai-config'    && <AIConfigPanel />}
@@ -170,14 +196,14 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
   }, []);
 
   const STAT_CARDS = [
-    { key: 'total_games',       label: '总游戏数',     icon: '🎮', color: 'bg-indigo-50 text-indigo-600',  nav: undefined },
-    { key: 'active_games',      label: '进行中',       icon: '▶️', color: 'bg-green-50 text-green-600',   nav: 'games' as Tab },
-    { key: 'total_concepts',    label: '有效概念',     icon: '📌', color: 'bg-emerald-50 text-emerald-600', nav: undefined },
-    { key: 'total_players',     label: '历史玩家',     icon: '👥', color: 'bg-sky-50 text-sky-600',       nav: undefined },
-    { key: 'total_docs',        label: '知识库文档',   icon: '📄', color: 'bg-amber-50 text-amber-600',   nav: 'knowledge' as Tab },
-    { key: 'total_kb_active',   label: 'KB 已审概念',  icon: '✅', color: 'bg-teal-50 text-teal-600',     nav: 'curation' as Tab },
-    { key: 'pending_curation',  label: '待策展',       icon: '🎯', color: 'bg-orange-50 text-orange-600', nav: 'curation' as Tab },
-    { key: 'total_ai_configs',  label: 'AI 配置',      icon: '🤖', color: 'bg-purple-50 text-purple-600', nav: 'ai-config' as Tab },
+    { key: 'total_games',       label: '总游戏数',     nav: undefined },
+    { key: 'active_games',      label: '进行中',       nav: 'games' as Tab },
+    { key: 'total_concepts',    label: '有效概念',     nav: undefined },
+    { key: 'total_players',     label: '历史玩家',     nav: undefined },
+    { key: 'total_docs',        label: '知识库文档',   nav: 'knowledge' as Tab },
+    { key: 'total_kb_active',   label: 'KB 已审概念',  nav: 'curation' as Tab },
+    { key: 'pending_curation',  label: '待策展',       nav: 'curation' as Tab },
+    { key: 'total_ai_configs',  label: 'AI 配置',      nav: 'ai-config' as Tab },
   ];
 
   return (
@@ -188,49 +214,51 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
           <div
             key={c.key}
             onClick={() => c.nav && onNavigate?.(c.nav)}
-            className={`bg-white rounded-2xl p-5 shadow-sm border border-slate-100 transition-all
-              ${c.nav ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}
-              ${c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 ? 'ring-2 ring-orange-200' : ''}`}
+            className={`rounded-2xl p-5 shadow-sm transition-all
+              ${c.nav ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+            style={{
+              background: 'var(--bg-card)',
+              border: c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0
+                ? '2px solid var(--gold-accent)'
+                : '1px solid var(--border-subtle)',
+            }}
           >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${c.color}`}>
-              {c.icon}
-            </div>
-            <div className="text-3xl font-bold text-slate-800">{stats[c.key] ?? '–'}</div>
-            <div className="text-sm text-slate-500 mt-1">{c.label}</div>
+            <div className="text-3xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>{stats[c.key] ?? '–'}</div>
+            <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
             {c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 && (
-              <div className="text-xs text-orange-500 mt-1 font-medium">点击前往策展 →</div>
+              <div className="text-xs mt-1 font-medium" style={{ color: 'var(--gold-accent)' }}>点击前往策展</div>
             )}
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-800">最近游戏</h3>
+      <div className="rounded-2xl shadow-sm overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+        <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <h3 className="font-heading font-semibold" style={{ color: 'var(--text-primary)' }}>最近游戏</h3>
         </div>
         {games.length === 0 ? (
-          <div className="p-8 text-center text-slate-400">暂无游戏记录</div>
+          <div className="p-8 text-center" style={{ color: 'var(--text-muted)' }}>暂无游戏记录</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="text-xs uppercase" style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}>
               <tr>
                 {['房间码', '主题', '模式', '状态', '创建时间'].map(h => (
                   <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody>
               {games.map(g => (
-                <tr key={g.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
-                  <td className="px-4 py-3 text-slate-700">{g.topic}</td>
+                <tr key={g.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td className="px-4 py-3 font-mono font-medium" style={{ color: 'var(--brand)' }}>{g.id}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{g.topic}</td>
                   <td className="px-4 py-3">
                     <ModeChip mode={g.mode} extraModes={Array.isArray(g.settings?.extraModes) ? g.settings.extraModes as string[] : []} />
                   </td>
                   <td className="px-4 py-3">
                     <StatusChip status={g.status} />
                   </td>
-                  <td className="px-4 py-3 text-slate-400">{g.created_at.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--text-muted)' }}>{g.created_at.slice(0, 16).replace('T', ' ')}</td>
                 </tr>
               ))}
             </tbody>
@@ -296,6 +324,12 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
     initialLives: Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3)),
   });
   const [detailPlayers, setDetailPlayers] = useState<Array<{ id: string; name: string }>>([]);
+  const [detailConcepts, setDetailConcepts] = useState<Concept[]>([]);
+  const [conceptQuery, setConceptQuery] = useState('');
+  const [conceptStatusFilter, setConceptStatusFilter] = useState<'all' | 'pending' | 'validated' | 'rejected'>('all');
+  const [selectedConceptIds, setSelectedConceptIds] = useState<Set<string>>(new Set());
+  const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
+  const [batchDeletingConcepts, setBatchDeletingConcepts] = useState(false);
   const [editingLives, setEditingLives] = useState<Record<string, number>>({});
   const [modeDraft, setModeDraft] = useState(game.mode);
   const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
@@ -320,14 +354,18 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
       .catch(() => {});
 
     adminGetGame(game.id)
-      .then((detail: { players: Array<{ id: string; name: string }> }) => {
+      .then((detail: { players: Array<{ id: string; name: string }>; concepts?: Concept[] }) => {
         const players = (detail.players || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
         setDetailPlayers(players);
+        setDetailConcepts(detail.concepts || []);
+        setSelectedConceptIds(new Set());
         const initLives = Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3));
         setEditingLives(Object.fromEntries(players.map((p: { id: string; name: string }) => [p.id, initLives])));
       })
       .catch(() => {
         setDetailPlayers([]);
+        setDetailConcepts([]);
+        setSelectedConceptIds(new Set());
       });
   }, [expanded, game.id, parsedSettings.initialLives]);
 
@@ -381,6 +419,117 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
     } catch (err: unknown) {
       onAction(err instanceof Error ? err.message : '血量调整失败');
     }
+  }
+
+  async function handleDeleteConcept(conceptId: string, conceptLabel: string) {
+    if (!confirm(`确认删除概念「${conceptLabel}」吗？`)) return;
+    try {
+      await adminDeleteGameConcept(game.id, conceptId);
+      setDetailConcepts(prev => prev.filter(concept => concept.id !== conceptId));
+      setSelectedConceptIds(prev => {
+        const next = new Set(prev);
+        next.delete(conceptId);
+        return next;
+      });
+      onAction(`已删除概念 ${conceptLabel}`);
+    } catch (err: unknown) {
+      onAction(err instanceof Error ? err.message : '删除概念失败');
+    }
+  }
+
+  async function handleBatchDeleteConcepts() {
+    const ids = Array.from(selectedConceptIds);
+    if (ids.length === 0) return;
+    if (!confirm(`确认批量删除这 ${ids.length} 个概念吗？此操作不可撤销。`)) return;
+    setBatchDeletingConcepts(true);
+    try {
+      const results = await Promise.allSettled(ids.map(id => adminDeleteGameConcept(game.id, id)));
+      const deletedIds = ids.filter((_, index) => results[index]?.status === 'fulfilled');
+      const failedCount = ids.length - deletedIds.length;
+      if (deletedIds.length > 0) {
+        setDetailConcepts(prev => prev.filter(concept => !deletedIds.includes(concept.id)));
+        setSelectedConceptIds(new Set());
+      }
+      onAction(
+        failedCount > 0
+          ? `已删除 ${deletedIds.length} 个概念，失败 ${failedCount} 个`
+          : `已批量删除 ${deletedIds.length} 个概念`
+      );
+    } catch (err: unknown) {
+      onAction(err instanceof Error ? err.message : '批量删除概念失败');
+    } finally {
+      setBatchDeletingConcepts(false);
+    }
+  }
+
+  async function handleEditConcept(patches: {
+    raw_input?: string;
+    name?: string;
+    dynasty?: string | null;
+    period?: string | null;
+    year?: number | null;
+    description?: string | null;
+    tags?: string[];
+  }) {
+    if (!editingConcept) return;
+    try {
+      const result = await adminUpdateGameConcept(game.id, editingConcept.id, patches);
+      setDetailConcepts(prev => prev.map(concept => (
+        concept.id === editingConcept.id ? result.concept : concept
+      )));
+      setEditingConcept(null);
+      onAction(`已更新概念 ${result.concept.name || result.concept.raw_input}`);
+    } catch (err: unknown) {
+      throw err instanceof Error ? err : new Error('保存概念失败');
+    }
+  }
+
+  function toggleConceptSelected(conceptId: string) {
+    setSelectedConceptIds(prev => {
+      const next = new Set(prev);
+      if (next.has(conceptId)) next.delete(conceptId);
+      else next.add(conceptId);
+      return next;
+    });
+  }
+
+  const filteredConcepts = detailConcepts.filter(concept => {
+    const matchesStatus = conceptStatusFilter === 'all'
+      ? true
+      : conceptStatusFilter === 'validated'
+        ? concept.validated === 1
+        : conceptStatusFilter === 'rejected'
+          ? concept.rejected === 1
+          : concept.validated !== 1 && concept.rejected !== 1;
+    if (!matchesStatus) return false;
+    const keyword = conceptQuery.trim().toLowerCase();
+    if (!keyword) return true;
+    const haystack = [
+      concept.name,
+      concept.raw_input,
+      concept.player_name,
+      concept.dynasty,
+      concept.period,
+      concept.description,
+      concept.year != null ? String(concept.year) : '',
+      ...concept.tags,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(keyword);
+  });
+
+  const allFilteredSelected = filteredConcepts.length > 0
+    && filteredConcepts.every(concept => selectedConceptIds.has(concept.id));
+
+  function toggleSelectAllFiltered() {
+    setSelectedConceptIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filteredConcepts.forEach(concept => next.delete(concept.id));
+      } else {
+        filteredConcepts.forEach(concept => next.add(concept.id));
+      }
+      return next;
+    });
   }
 
   async function saveModes() {
@@ -487,6 +636,126 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                   className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
                   {savingNotes ? '保存中...' : '保存备注'}
                 </button>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600">概念管理</div>
+                    <div className="text-[11px] text-slate-400">支持搜索、状态筛选、批量删除和编辑</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">共 {detailConcepts.length} 条</span>
+                    <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] text-indigo-600">当前 {filteredConcepts.length} 条</span>
+                  </div>
+                </div>
+
+                <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
+                  <input
+                    type="text"
+                    value={conceptQuery}
+                    onChange={e => setConceptQuery(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    placeholder="搜索概念名、原始输入、玩家、朝代、标签"
+                  />
+                  <select
+                    value={conceptStatusFilter}
+                    onChange={e => setConceptStatusFilter(e.target.value as 'all' | 'pending' | 'validated' | 'rejected')}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  >
+                    <option value="all">全部状态</option>
+                    <option value="pending">待处理</option>
+                    <option value="validated">已通过</option>
+                    <option value="rejected">已驳回</option>
+                  </select>
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-500">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAllFiltered}
+                        disabled={filteredConcepts.length === 0}
+                      />
+                      <span>全选当前结果</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleBatchDeleteConcepts}
+                      disabled={selectedConceptIds.size === 0 || batchDeletingConcepts}
+                      className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {batchDeletingConcepts ? '删除中...' : `批量删除 (${selectedConceptIds.size})`}
+                    </button>
+                  </div>
+                </div>
+
+                {detailConcepts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                    暂无概念数据
+                  </div>
+                ) : filteredConcepts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                    没有符合当前搜索或筛选条件的概念
+                  </div>
+                ) : (
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {filteredConcepts.map(concept => {
+                      const label = concept.name || concept.raw_input || concept.id;
+                      const statusText = concept.validated ? '已通过' : concept.rejected ? '已驳回' : '待处理';
+                      const statusClass = concept.validated
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : concept.rejected
+                          ? 'bg-red-50 text-red-600'
+                          : 'bg-amber-50 text-amber-700';
+                      const metaParts = [
+                        concept.player_name || '未知玩家',
+                        concept.year != null ? String(concept.year) : '',
+                        concept.dynasty || '',
+                        concept.period || '',
+                      ].filter(Boolean);
+
+                      return (
+                        <div key={concept.id} className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                          <label className="flex items-center">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              checked={selectedConceptIds.has(concept.id)}
+                              onChange={() => toggleConceptSelected(concept.id)}
+                            />
+                          </label>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-sm font-medium text-slate-800">{label}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass}`}>{statusText}</span>
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-400">{metaParts.join(' · ')}</div>
+                            {concept.description && (
+                              <div className="mt-1 line-clamp-1 text-xs text-slate-500">{concept.description}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingConcept(concept)}
+                              className="rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-600 transition-colors hover:bg-indigo-100"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteConcept(concept.id, String(label))}
+                              className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 transition-colors hover:bg-red-100"
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Quick settings */}
@@ -693,7 +962,110 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
           </td>
         </tr>
       )}
+      {editingConcept && (
+        <EditGameConceptModal
+          concept={editingConcept}
+          onSave={handleEditConcept}
+          onClose={() => setEditingConcept(null)}
+        />
+      )}
     </>
+  );
+}
+
+function EditGameConceptModal({
+  concept,
+  onSave,
+  onClose,
+}: {
+  concept: Concept;
+  onSave: (patches: {
+    raw_input?: string;
+    name?: string;
+    dynasty?: string | null;
+    period?: string | null;
+    year?: number | null;
+    description?: string | null;
+    tags?: string[];
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [rawInput, setRawInput] = useState(concept.raw_input ?? '');
+  const [name, setName] = useState(concept.name ?? concept.raw_input ?? '');
+  const [dynasty, setDynasty] = useState(concept.dynasty ?? '');
+  const [period, setPeriod] = useState(concept.period ?? '');
+  const [year, setYear] = useState(concept.year != null ? String(concept.year) : '');
+  const [description, setDescription] = useState(concept.description ?? '');
+  const [tagsStr, setTagsStr] = useState(Array.isArray(concept.tags) ? concept.tags.join(', ') : '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      const yearVal = year.trim() ? parseInt(year.trim(), 10) : null;
+      if (year.trim() && Number.isNaN(yearVal)) {
+        setErr('年份必须是整数');
+        setSaving(false);
+        return;
+      }
+      await onSave({
+        raw_input: rawInput.trim(),
+        name: name.trim(),
+        dynasty: dynasty.trim() || null,
+        period: period.trim() || null,
+        year: yearVal,
+        description: description.trim() || null,
+        tags: tagsStr.split(/[，,、]/).map(tag => tag.trim()).filter(Boolean),
+      });
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <h3 className="text-lg font-bold text-slate-800">编辑房间概念</h3>
+          <button onClick={onClose} className="text-xl leading-none text-slate-400 hover:text-slate-600">×</button>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-6">
+          <FormField label="原始输入">
+            <input className="input" value={rawInput} onChange={e => setRawInput(e.target.value)} required />
+          </FormField>
+          <FormField label="概念名称">
+            <input className="input" value={name} onChange={e => setName(e.target.value)} required />
+          </FormField>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <FormField label="朝代">
+              <input className="input" value={dynasty} onChange={e => setDynasty(e.target.value)} />
+            </FormField>
+            <FormField label="时期">
+              <input className="input" value={period} onChange={e => setPeriod(e.target.value)} />
+            </FormField>
+            <FormField label="年份">
+              <input className="input" value={year} onChange={e => setYear(e.target.value)} placeholder="可填负数" />
+            </FormField>
+          </div>
+          <FormField label="简介">
+            <textarea className="input resize-none" rows={3} value={description} onChange={e => setDescription(e.target.value)} />
+          </FormField>
+          <FormField label="标签">
+            <input className="input" value={tagsStr} onChange={e => setTagsStr(e.target.value)} placeholder="用逗号分隔多个标签" />
+          </FormField>
+          {err && <p className="text-sm text-red-500">{err}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -3250,8 +3622,8 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
   return (
     <div className="flex items-start justify-between gap-4 mb-2">
       <div>
-        <h2 className="text-2xl font-bold text-slate-800">{title}</h2>
-        {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+        <h2 className="text-2xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
+        {subtitle && <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -3261,7 +3633,7 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
       {children}
     </div>
   );
@@ -3269,7 +3641,7 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 
 function EmptyState({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
+    <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
       <div className="text-5xl mb-3">{icon}</div>
       <p className="font-medium text-slate-700">{title}</p>
       <p className="text-sm text-slate-400 mt-1">{desc}</p>

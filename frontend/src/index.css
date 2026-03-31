@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;900&family=Noto+Serif+SC:wght@400;500;600;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;900&family=Noto+Serif+SC:wght@400;500;600;700;900&family=Ma+Shan+Zheng&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -13,113 +13,134 @@
 ═══════════════════════════════════════════════════════════════════════════ */
 
 @layer base {
-  /* ── 清雅 Light (default) ── */
+  /* ── 清雅 Light (default) — 水墨青花 ── */
   :root {
-    --brand:        #6366f1;
-    --brand-dark:   #4f46e5;
-    --brand-light:  #eef2ff;
-    --bg-page:      #f8fafc;
-    --bg-card:      #ffffff;
-    --bg-muted:     #f1f5f9;
-    --bg-muted2:    #e2e8f0;
-    --text-primary: #1e293b;
-    --text-secondary:#64748b;
-    --text-muted:   #94a3b8;
-    --border:       #e2e8f0;
-    --border-subtle:#f1f5f9;
-    --shadow:       rgba(0,0,0,0.06);
-    --nav-bg:       #0f172a;
-    --nav-text:     #e2e8f0;
-    --nav-active:   #6366f1;
+    --brand:        #4f6fa0;
+    --brand-dark:   #3a5580;
+    --brand-light:  #e8f0f8;
+    --bg-page:      #f5f3ee;
+    --bg-card:      #fdfcfa;
+    --bg-muted:     #eeeae2;
+    --bg-muted2:    #ddd8cc;
+    --text-primary: #1a1814;
+    --text-secondary:#5a5248;
+    --text-muted:   #9a9088;
+    --border:       #d8d2c4;
+    --border-subtle:#ede8e0;
+    --shadow:       rgba(30,20,10,0.08);
+    --nav-bg:       #1a1814;
+    --nav-text:     #d8d2c4;
+    --nav-active:   #7ca0c8;
     /* decorative */
-    --deco-blob1:   rgba(99,102,241,0.15);
-    --deco-blob2:   rgba(168,85,247,0.12);
-    --deco-blob3:   rgba(236,72,153,0.08);
-    --gradient-start: #6366f1;
-    --gradient-mid:   #a855f7;
-    --gradient-end:   #ec4899;
-    --heading-font: 'Noto Serif SC', 'Noto Sans SC', serif;
+    --deco-blob1:   rgba(79,111,160,0.12);
+    --deco-blob2:   rgba(120,160,200,0.10);
+    --deco-blob3:   rgba(160,130,100,0.07);
+    --gradient-start: #4f6fa0;
+    --gradient-mid:   #7ca0c8;
+    --gradient-end:   #a8c0d8;
+    --heading-font: 'Noto Serif SC', 'Ma Shan Zheng', serif;
+    /* Chinese decorative extras */
+    --ink-wash:     rgba(30,20,10,0.04);
+    --paper-grain:  rgba(180,160,120,0.06);
+    --seal-red:     #c0392b;
+    --gold-accent:  #c8a84b;
+    --jade-line:    rgba(79,111,160,0.3);
   }
 
-  /* ── 墨韵 Dark ── */
+  /* ── 墨韵 Dark — 夜墨 ── */
   [data-theme="dark"] {
-    --brand:        #818cf8;
-    --brand-dark:   #6366f1;
-    --brand-light:  #1e1b4b;
-    --bg-page:      #0d1117;
-    --bg-card:      #161b27;
-    --bg-muted:     #1e2435;
-    --bg-muted2:    #252d3f;
-    --text-primary: #e2e8f0;
-    --text-secondary:#94a3b8;
-    --text-muted:   #64748b;
-    --border:       #2d3748;
-    --border-subtle:#1e2435;
-    --shadow:       rgba(0,0,0,0.3);
-    --nav-bg:       #060c18;
-    --nav-text:     #cbd5e1;
-    --nav-active:   #818cf8;
-    --deco-blob1:   rgba(129,140,248,0.12);
-    --deco-blob2:   rgba(99,102,241,0.08);
-    --deco-blob3:   rgba(59,130,246,0.06);
-    --gradient-start: #818cf8;
-    --gradient-mid:   #a78bfa;
-    --gradient-end:   #c084fc;
-    --heading-font: 'Noto Serif SC', 'Noto Sans SC', serif;
+    --brand:        #7ca0c8;
+    --brand-dark:   #4f6fa0;
+    --brand-light:  #1a2535;
+    --bg-page:      #0e0d0b;
+    --bg-card:      #18160f;
+    --bg-muted:     #221e15;
+    --bg-muted2:    #2a2620;
+    --text-primary: #e8e0d0;
+    --text-secondary:#9a9080;
+    --text-muted:   #5a5248;
+    --border:       #3a3428;
+    --border-subtle:#221e15;
+    --shadow:       rgba(0,0,0,0.4);
+    --nav-bg:       #08070a;
+    --nav-text:     #a8a098;
+    --nav-active:   #7ca0c8;
+    --deco-blob1:   rgba(124,160,200,0.10);
+    --deco-blob2:   rgba(79,111,160,0.07);
+    --deco-blob3:   rgba(50,80,120,0.05);
+    --gradient-start: #7ca0c8;
+    --gradient-mid:   #9ab8d0;
+    --gradient-end:   #b8cfe0;
+    --heading-font: 'Noto Serif SC', 'Ma Shan Zheng', serif;
+    --ink-wash:     rgba(200,180,150,0.03);
+    --paper-grain:  rgba(200,180,150,0.04);
+    --seal-red:     #e05a48;
+    --gold-accent:  #d4a85c;
+    --jade-line:    rgba(124,160,200,0.25);
   }
 
-  /* ── 锦绣 Gold/Red ── */
+  /* ── 锦绣 Gold/Red — 朱砂丹漆 ── */
   [data-theme="gold"] {
-    --brand:        #b45309;
-    --brand-dark:   #92400e;
-    --brand-light:  #fef3c7;
-    --bg-page:      #fdf8ef;
-    --bg-card:      #fffbf5;
-    --bg-muted:     #fef3c7;
-    --bg-muted2:    #fde68a;
-    --text-primary: #1c1917;
-    --text-secondary:#78716c;
-    --text-muted:   #a8a29e;
-    --border:       #fde68a;
-    --border-subtle:#fef9ee;
-    --shadow:       rgba(120,60,0,0.08);
-    --nav-bg:       #1c0a00;
-    --nav-text:     #fde68a;
-    --nav-active:   #f59e0b;
-    --deco-blob1:   rgba(245,158,11,0.2);
-    --deco-blob2:   rgba(220,38,38,0.12);
-    --deco-blob3:   rgba(251,191,36,0.15);
-    --gradient-start: #b45309;
-    --gradient-mid:   #dc2626;
-    --gradient-end:   #f59e0b;
-    --heading-font: 'Noto Serif SC', serif;
+    --brand:        #c0392b;
+    --brand-dark:   #96281b;
+    --brand-light:  #fdf0ec;
+    --bg-page:      #fdf5e8;
+    --bg-card:      #fffbf2;
+    --bg-muted:     #f8edd8;
+    --bg-muted2:    #f0dfc0;
+    --text-primary: #1e1008;
+    --text-secondary:#6e4830;
+    --text-muted:   #a87860;
+    --border:       #e8cfa8;
+    --border-subtle:#f4e8d0;
+    --shadow:       rgba(100,40,10,0.10);
+    --nav-bg:       #1e1008;
+    --nav-text:     #e8cfa8;
+    --nav-active:   #e8713c;
+    --deco-blob1:   rgba(192,57,43,0.18);
+    --deco-blob2:   rgba(200,168,75,0.15);
+    --deco-blob3:   rgba(220,150,60,0.12);
+    --gradient-start: #c0392b;
+    --gradient-mid:   #d4622a;
+    --gradient-end:   #c8a84b;
+    --heading-font: 'Noto Serif SC', 'Ma Shan Zheng', serif;
+    --ink-wash:     rgba(100,40,10,0.04);
+    --paper-grain:  rgba(200,160,100,0.06);
+    --seal-red:     #c0392b;
+    --gold-accent:  #c8a84b;
+    --jade-line:    rgba(192,57,43,0.3);
   }
 
-  /* ── 竹青 Jade/Green ── */
+  /* ── 竹青 Jade/Green — 松竹翠屏 ── */
   [data-theme="jade"] {
-    --brand:        #3a7d5f;
-    --brand-dark:   #2d6248;
-    --brand-light:  #e4f4eb;
-    --bg-page:      #f2f6f0;
-    --bg-card:      #f8fbf6;
-    --bg-muted:     #e4ede0;
-    --bg-muted2:    #ccdec7;
-    --text-primary: #1a2e1f;
-    --text-secondary:#4a6b52;
-    --text-muted:   #7a9b82;
-    --border:       #c0d8b0;
-    --border-subtle:#ddecd6;
-    --shadow:       rgba(20,70,35,0.08);
-    --nav-bg:       #142218;
-    --nav-text:     #b0d0a0;
-    --nav-active:   #5ca878;
-    --deco-blob1:   rgba(58,125,95,0.18);
-    --deco-blob2:   rgba(92,168,120,0.12);
-    --deco-blob3:   rgba(45,98,72,0.10);
-    --gradient-start: #2d6248;
-    --gradient-mid:   #3a7d5f;
-    --gradient-end:   #5ca878;
-    --heading-font: 'Noto Serif SC', serif;
+    --brand:        #2e7d5e;
+    --brand-dark:   #205c44;
+    --brand-light:  #e2f0e8;
+    --bg-page:      #eef4ed;
+    --bg-card:      #f5fbf4;
+    --bg-muted:     #e0edd9;
+    --bg-muted2:    #c8dfc0;
+    --text-primary: #141e16;
+    --text-secondary:#3e5e45;
+    --text-muted:   #6e9070;
+    --border:       #b0ccb0;
+    --border-subtle:#d4e8d0;
+    --shadow:       rgba(10,50,20,0.08);
+    --nav-bg:       #0e1a10;
+    --nav-text:     #a8c8a0;
+    --nav-active:   #4a9870;
+    --deco-blob1:   rgba(46,125,94,0.18);
+    --deco-blob2:   rgba(74,152,112,0.12);
+    --deco-blob3:   rgba(32,92,68,0.10);
+    --gradient-start: #205c44;
+    --gradient-mid:   #2e7d5e;
+    --gradient-end:   #4a9870;
+    --heading-font: 'Noto Serif SC', 'Ma Shan Zheng', serif;
+    --ink-wash:     rgba(10,50,20,0.04);
+    --paper-grain:  rgba(120,180,130,0.05);
+    --seal-red:     #c8402c;
+    --gold-accent:  #a88c3a;
+    --jade-line:    rgba(46,125,94,0.3);
   }
 
   html { scroll-behavior: smooth; }
@@ -137,6 +158,131 @@
     font-family: var(--heading-font);
   }
 }
+
+/* ── Paper texture background ─────────────────────────────────────────────── */
+.paper-bg {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* ── Chinese lattice corner decoration ───────────────────────────────────── */
+.corner-ornament {
+  position: relative;
+}
+.corner-ornament::before,
+.corner-ornament::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: var(--gold-accent);
+  border-style: solid;
+  opacity: 0.5;
+  pointer-events: none;
+}
+.corner-ornament::before {
+  top: 6px; left: 6px;
+  border-width: 2px 0 0 2px;
+}
+.corner-ornament::after {
+  bottom: 6px; right: 6px;
+  border-width: 0 2px 2px 0;
+}
+
+/* ── Ink brush divider ────────────────────────────────────────────────────── */
+.ink-divider {
+  position: relative;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--border) 20%, var(--border) 80%, transparent);
+}
+.ink-divider::after {
+  content: '◆';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 8px;
+  color: var(--gold-accent);
+  background: var(--bg-card);
+  padding: 0 6px;
+  line-height: 1;
+}
+
+/* ── Seal stamp style badge ───────────────────────────────────────────────── */
+.seal-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border: 1.5px solid var(--seal-red);
+  border-radius: 3px;
+  color: var(--seal-red);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-family: var(--heading-font);
+  opacity: 0.85;
+  transform: rotate(-1deg);
+}
+
+/* ── Classical scroll card ────────────────────────────────────────────────── */
+.scroll-card {
+  position: relative;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.scroll-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end));
+  border-radius: 4px 4px 0 0;
+  opacity: 0.7;
+}
+
+/* ── Vertical Chinese title text ─────────────────────────────────────────── */
+.writing-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.1em;
+}
+
+/* ── Era section with brush stroke header ────────────────────────────────── */
+.era-header-brush {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 12px;
+  border-radius: 2px;
+  font-family: var(--heading-font);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.era-header-brush::before,
+.era-header-brush::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  min-width: 24px;
+  background: currentColor;
+  opacity: 0.25;
+  margin: 0 8px;
+}
+
+/* ── Chinese cloud border animation ──────────────────────────────────────── */
+@keyframes cloudDrift {
+  0%, 100% { background-position: 0% 0%; }
+  50%       { background-position: 100% 100%; }
+}
+
+/* ── Ink drop animation ───────────────────────────────────────────────────── */
+@keyframes inkDrop {
+  0%   { transform: scale(0) translateY(-4px); opacity: 0; }
+  60%  { transform: scale(1.1) translateY(1px); opacity: 1; }
+  100% { transform: scale(1)   translateY(0);   opacity: 1; }
+}
+.animate-ink-drop { animation: inkDrop 0.35s cubic-bezier(0.34,1.4,0.64,1) both; }
 
 /* ── Page transition ─────────────────────────────────────────────────────── */
 .page-enter {
@@ -189,19 +335,19 @@
   background-image: linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end)) !important;
 }
 /* Dark: amber warning colors */
-[data-theme="dark"] .bg-amber-50      { background-color: rgba(120,60,0,0.2) !important; }
-[data-theme="dark"] .bg-amber-100     { background-color: rgba(120,60,0,0.3) !important; }
-[data-theme="dark"] .text-amber-700   { color: #fbbf24 !important; }
-[data-theme="dark"] .text-amber-600   { color: #f59e0b !important; }
-[data-theme="dark"] .border-amber-100 { border-color: rgba(180,90,0,0.3) !important; }
-[data-theme="dark"] .border-amber-200 { border-color: rgba(180,90,0,0.4) !important; }
+[data-theme="dark"] .bg-amber-50      { background-color: rgba(80,55,20,0.25) !important; }
+[data-theme="dark"] .bg-amber-100     { background-color: rgba(80,55,20,0.4) !important; }
+[data-theme="dark"] .text-amber-700   { color: #c8a84b !important; }
+[data-theme="dark"] .text-amber-600   { color: #b89838 !important; }
+[data-theme="dark"] .border-amber-100 { border-color: rgba(120,90,20,0.3) !important; }
+[data-theme="dark"] .border-amber-200 { border-color: rgba(120,90,20,0.5) !important; }
 /* Dark: emerald */
 [data-theme="dark"] .bg-emerald-50    { background-color: rgba(5,46,22,0.4) !important; }
-[data-theme="dark"] .text-emerald-600 { color: #34d399 !important; }
+[data-theme="dark"] .text-emerald-600 { color: #4a9870 !important; }
 [data-theme="dark"] .border-emerald-100 { border-color: rgba(6,78,59,0.4) !important; }
 /* Dark: red */
 [data-theme="dark"] .bg-red-50        { background-color: rgba(69,10,10,0.4) !important; }
-[data-theme="dark"] .text-red-500     { color: #f87171 !important; }
+[data-theme="dark"] .text-red-500     { color: #e05a48 !important; }
 [data-theme="dark"] .border-red-100   { border-color: rgba(127,29,29,0.4) !important; }
 
 /* ── Gold-mode global overrides ──────────────────────────────────────────── */
@@ -224,17 +370,17 @@
 [data-theme="gold"] .shadow-sm        { box-shadow: 0 1px 3px var(--shadow) !important; }
 [data-theme="gold"] .shadow-md        { box-shadow: 0 4px 12px var(--shadow) !important; }
 [data-theme="gold"] ::-webkit-scrollbar-thumb { background-color: var(--bg-muted2) !important; }
-/* Gold: indigo → amber/brand */
+/* Gold: indigo → brand */
 [data-theme="gold"] .bg-indigo-50     { background-color: var(--brand-light) !important; }
 [data-theme="gold"] .bg-indigo-100    { background-color: var(--brand-light) !important; }
 [data-theme="gold"] .bg-indigo-500    { background-color: var(--brand) !important; }
 [data-theme="gold"] .text-indigo-600  { color: var(--brand-dark) !important; }
 [data-theme="gold"] .text-indigo-500  { color: var(--brand) !important; }
 [data-theme="gold"] .text-indigo-700  { color: var(--brand-dark) !important; }
-[data-theme="gold"] .border-indigo-200{ border-color: #fcd34d !important; }
-[data-theme="gold"] .ring-indigo-200  { --tw-ring-color: #fcd34d !important; }
-[data-theme="gold"] .border-indigo-300{ border-color: #f59e0b !important; }
-[data-theme="gold"] .focus\:ring-indigo-400:focus { --tw-ring-color: #f59e0b !important; }
+[data-theme="gold"] .border-indigo-200{ border-color: #e8cfa8 !important; }
+[data-theme="gold"] .ring-indigo-200  { --tw-ring-color: #e8cfa8 !important; }
+[data-theme="gold"] .border-indigo-300{ border-color: #c8a84b !important; }
+[data-theme="gold"] .focus\:ring-indigo-400:focus { --tw-ring-color: #c0392b !important; }
 [data-theme="gold"] .gradient-text    {
   background-image: linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end)) !important;
 }
@@ -277,21 +423,21 @@
 @layer components {
   /* Buttons */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium text-sm
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
            transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-1
            disabled:opacity-50 disabled:cursor-not-allowed select-none;
   }
   .btn-primary {
     background-color: var(--brand);
     @apply btn text-white shadow-sm focus:ring-2 focus:ring-offset-1;
-    box-shadow: 0 1px 3px var(--shadow);
+    box-shadow: 0 1px 4px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.12);
   }
   .btn-primary:hover  {
     background-color: var(--brand-dark);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px var(--shadow);
+    box-shadow: 0 4px 14px var(--shadow), inset 0 1px 0 rgba(255,255,255,0.12);
   }
-  .btn-primary:active { filter: brightness(0.9); transform: translateY(0); }
+  .btn-primary:active { filter: brightness(0.92); transform: translateY(0); }
 
   .btn-secondary {
     background-color: var(--bg-card);
@@ -301,6 +447,8 @@
   }
   .btn-secondary:hover  {
     background-color: var(--bg-muted);
+    border-color: var(--brand);
+    color: var(--brand);
     transform: translateY(-1px);
   }
   .btn-secondary:active { background-color: var(--bg-muted2); transform: translateY(0); }
@@ -318,11 +466,12 @@
   .card {
     background-color: var(--bg-card);
     border: 1px solid var(--border-subtle);
-    @apply rounded-2xl shadow-sm transition-all duration-200;
+    @apply rounded-xl shadow-sm transition-all duration-200;
   }
   .card:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 16px var(--shadow);
+    box-shadow: 0 6px 20px var(--shadow);
+    border-color: var(--border);
   }
 
   /* Inputs */
@@ -331,12 +480,12 @@
     background-color: var(--bg-card);
     color: var(--text-primary);
     border: 1px solid var(--border);
-    @apply px-3.5 py-2.5 rounded-xl placeholder-slate-400 focus:outline-none focus:ring-2
+    @apply px-3.5 py-2.5 rounded-lg placeholder-slate-400 focus:outline-none focus:ring-2
            focus:border-transparent transition-all duration-200 text-sm;
     --tw-ring-color: var(--brand);
   }
   .input:focus {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 15%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
   }
 
   /* Glass card */
@@ -347,8 +496,8 @@
   /* Themed option card */
   .option-card {
     background-color: var(--bg-card);
-    border: 2px solid var(--border);
-    @apply rounded-xl cursor-pointer transition-all duration-200;
+    border: 1.5px solid var(--border);
+    @apply rounded-lg cursor-pointer transition-all duration-200;
   }
   .option-card:hover {
     border-color: var(--brand);
@@ -368,6 +517,26 @@
     border: 1px solid color-mix(in srgb, var(--brand) 25%, transparent);
     @apply text-xs font-medium px-2.5 py-0.5 rounded-full;
   }
+
+  /* Chinese-style section header */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-family: var(--heading-font);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--text-primary);
+  }
+  .section-header::before,
+  .section-header::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to var(--dir, right), var(--jade-line), transparent);
+  }
+  .section-header::before { --dir: right; }
+  .section-header::after  { --dir: left; }
 }
 
 /* Custom scrollbar */
@@ -491,24 +660,26 @@
 }
 
 /* Era color bands */
-.era-ancient   { @apply border-l-amber-400  bg-amber-50;  }
-.era-medieval  { @apply border-l-purple-400 bg-purple-50; }
-.era-imperial  { @apply border-l-red-400    bg-red-50;    }
-.era-song-yuan { @apply border-l-blue-400   bg-blue-50;   }
-.era-ming-qing { @apply border-l-emerald-400 bg-emerald-50; }
-.era-modern    { @apply border-l-indigo-400 bg-indigo-50; }
-.era-unknown   { @apply border-l-slate-300  bg-slate-50;  }
+.era-ancient   { @apply border-l-amber-500  bg-amber-50/80;  }
+.era-medieval  { @apply border-l-purple-500 bg-purple-50/80; }
+.era-imperial  { @apply border-l-red-500    bg-red-50/80;    }
+.era-song-yuan { @apply border-l-blue-500   bg-blue-50/80;   }
+.era-ming-qing { @apply border-l-emerald-500 bg-emerald-50/80; }
+.era-modern    { @apply border-l-indigo-500 bg-indigo-50/80; }
+.era-unknown   { @apply border-l-stone-400  bg-stone-50/80;  }
 
 /* Chat bubbles */
 .bubble-me {
   background-color: var(--brand);
   @apply text-white rounded-2xl rounded-tr-sm;
+  box-shadow: 0 1px 4px var(--shadow);
 }
 .bubble-other {
   background-color: var(--bg-card);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  @apply rounded-2xl rounded-tl-sm shadow-sm;
+  @apply rounded-2xl rounded-tl-sm;
+  box-shadow: 0 1px 4px var(--shadow);
 }
 
 /* Interactive card hover lift */
@@ -525,7 +696,7 @@
   content: '';
   position: absolute;
   inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
   pointer-events: none;
   border-radius: inherit;
 }
@@ -540,14 +711,14 @@
 }
 
 /* Theme-specific patterns for Gold */
-[data-theme="gold"] .era-ancient   { border-left-color: #d97706; background-color: #fffbeb; }
-[data-theme="gold"] .era-imperial  { border-left-color: #dc2626; background-color: #fff5f5; }
-[data-theme="gold"] .era-modern    { border-left-color: #b45309; background-color: #fef3c7; }
+[data-theme="gold"] .era-ancient   { border-left-color: #c8a84b; background-color: rgba(255,248,220,0.8); }
+[data-theme="gold"] .era-imperial  { border-left-color: #c0392b; background-color: rgba(255,240,240,0.8); }
+[data-theme="gold"] .era-modern    { border-left-color: #96281b; background-color: rgba(254,240,220,0.8); }
 
 /* Theme-specific patterns for Jade */
-[data-theme="jade"] .era-ancient   { border-left-color: #3a7d5f; background-color: #f0faf5; }
-[data-theme="jade"] .era-song-yuan { border-left-color: #2d6248; background-color: #e6f4ec; }
-[data-theme="jade"] .era-modern    { border-left-color: #5ca878; background-color: #edfbf2; }
+[data-theme="jade"] .era-ancient   { border-left-color: #2e7d5e; background-color: rgba(230,248,235,0.8); }
+[data-theme="jade"] .era-song-yuan { border-left-color: #205c44; background-color: rgba(215,240,225,0.8); }
+[data-theme="jade"] .era-modern    { border-left-color: #4a9870; background-color: rgba(225,248,230,0.8); }
 
 /* Theme transition: smooth change — scoped to the brief switching window only.
    ThemeContext adds .theme-transitioning on <html> for 300ms during a switch,

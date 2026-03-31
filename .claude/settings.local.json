@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Admin/AppData/src/ui-ux-pro-max/**)",
+      "Read(//c/Users/Admin/src/ui-ux-pro-max/**)",
+      "Read(//c/Users/Admin/**)"
+    ]
+  }
+}

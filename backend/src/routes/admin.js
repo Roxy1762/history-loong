@@ -23,6 +23,8 @@ const messageSvc = require('../services/messageService');
 const settlementSvc = require('../services/settlementService');
 const curationSvc = require('../services/curationService');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
+const { parseArray, parseObject } = require('../utils/json');
+const { normalizeGameSettings } = require('../utils/gameSettings');
 
 const router = express.Router();
 const upload = multer({
@@ -80,7 +82,7 @@ router.get('/games', (req, res) => {
     const pendingCount = db.getPendingConceptCount.get(g.id)?.count || 0;
     // Live connected players from in-memory room (more accurate than DB count)
     const onlineCount  = rooms?.get(g.id)?.players?.size ?? 0;
-    return { ...g, settings: JSON.parse(g.settings || '{}'), conceptCount, playerCount, pendingCount, onlineCount };
+    return { ...g, settings: parseObject(g.settings, {}), conceptCount, playerCount, pendingCount, onlineCount };
   });
   console.log(`[Admin] GET /games enriched ${enriched.length} games`);
   res.json({ games: enriched });
@@ -99,11 +101,140 @@ router.get('/games/:id', (req, res) => {
   const messageCount = db.getMessageCount.get(id)?.count || 0;
 
   res.json({
-    game: { ...game, settings: JSON.parse(game.settings || '{}') },
+    game: { ...game, settings: parseObject(game.settings, {}) },
     concepts,
     players,
     messageCount,
   });
+});
+
+router.delete('/games/:id/concepts/:conceptId', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const conceptId = req.params.conceptId;
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  const concept = db.getConceptById.get(conceptId);
+  if (!concept || concept.game_id !== id) {
+    return res.status(404).json({ error: '概念不存在或不属于当前房间' });
+  }
+
+  const deleteTxn = db.db.transaction(() => {
+    db.deleteAIDecisionByConcept.run(conceptId);
+    db.deleteConceptOverride.run(conceptId);
+    db.removeConceptFromAllCategories.run(conceptId);
+    db.deleteConceptById.run(conceptId);
+  });
+  deleteTxn();
+
+  logAdminAction('game_concept_delete', 'concept', conceptId, { gameId: id, name: concept.name || concept.raw_input });
+
+  const messageId = uuidv4();
+  const messageContent = `管理员删除了概念：${concept.name || concept.raw_input || conceptId}`;
+  db.insertMessage.run(messageId, id, null, null, 'system', messageContent, JSON.stringify({ type: 'admin_delete_concept', conceptId }));
+
+  const setupSocket = require('../socket');
+  const io = setupSocket._io;
+  if (io) {
+    io.to(id).emit('concept:deleted', { conceptId });
+    io.to(id).emit('message:new', {
+      id: messageId,
+      game_id: id,
+      player_id: null,
+      player_name: null,
+      type: 'system',
+      content: messageContent,
+      meta: { type: 'admin_delete_concept', conceptId },
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  res.json({ message: '概念已删除', conceptId });
+});
+
+router.put('/games/:id/concepts/:conceptId', (req, res) => {
+  const id = req.params.id.toUpperCase();
+  const conceptId = req.params.conceptId;
+  const game = db.getGame.get(id);
+  if (!game) return res.status(404).json({ error: '游戏不存在' });
+
+  const concept = db.getConceptById.get(conceptId);
+  if (!concept || concept.game_id !== id) {
+    return res.status(404).json({ error: '概念不存在或不属于当前房间' });
+  }
+
+  const body = req.body || {};
+  const nextRawInput = String(body.raw_input ?? concept.raw_input ?? '').trim();
+  const nextName = String(body.name ?? concept.name ?? nextRawInput).trim();
+  if (!nextRawInput || !nextName) {
+    return res.status(400).json({ error: '概念名称不能为空' });
+  }
+
+  let nextYear = concept.year;
+  if (Object.prototype.hasOwnProperty.call(body, 'year')) {
+    if (body.year === null || body.year === '') nextYear = null;
+    else if (Number.isFinite(Number(body.year))) nextYear = Math.trunc(Number(body.year));
+    else return res.status(400).json({ error: '年份必须为有效整数' });
+  }
+
+  const nextDynasty = Object.prototype.hasOwnProperty.call(body, 'dynasty')
+    ? (body.dynasty == null ? null : String(body.dynasty).trim() || null)
+    : concept.dynasty;
+  const nextPeriod = Object.prototype.hasOwnProperty.call(body, 'period')
+    ? (body.period == null ? null : String(body.period).trim() || null)
+    : concept.period;
+  const nextDescription = Object.prototype.hasOwnProperty.call(body, 'description')
+    ? (body.description == null ? null : String(body.description).trim() || null)
+    : concept.description;
+  const nextTags = Array.isArray(body.tags)
+    ? body.tags.map(tag => String(tag).trim()).filter(Boolean)
+    : parseArray(concept.tags, []);
+
+  db.updateConceptAdmin.run(
+    nextRawInput,
+    nextName,
+    nextPeriod,
+    nextYear,
+    nextDynasty,
+    nextDescription,
+    JSON.stringify(nextTags),
+    conceptId,
+  );
+
+  const updated = db.getConceptById.get(conceptId);
+  const payload = {
+    ...updated,
+    tags: parseArray(updated.tags, []),
+    extra: parseObject(updated.extra, {}),
+  };
+
+  logAdminAction('game_concept_edit', 'concept', conceptId, {
+    gameId: id,
+    name: nextName,
+    rawInput: nextRawInput,
+  });
+
+  const messageId = uuidv4();
+  const messageContent = `管理员编辑了概念：${nextName}`;
+  db.insertMessage.run(messageId, id, null, null, 'system', messageContent, JSON.stringify({ type: 'admin_edit_concept', conceptId }));
+
+  const setupSocket = require('../socket');
+  const io = setupSocket._io;
+  if (io) {
+    io.to(id).emit('concept:edited', { concept: payload });
+    io.to(id).emit('message:new', {
+      id: messageId,
+      game_id: id,
+      player_id: null,
+      player_name: null,
+      type: 'system',
+      content: messageContent,
+      meta: { type: 'admin_edit_concept', conceptId },
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  res.json({ message: '概念已更新', concept: payload });
 });
 
 router.post('/games/:id/finish', (req, res) => {
@@ -158,8 +289,8 @@ router.put('/games/:id/settings', (req, res) => {
   }
 
   // Merge with existing settings
-  const existing = JSON.parse(game.settings || '{}');
-  const merged = { ...existing, ...settings };
+  const existing = parseObject(game.settings, {});
+  const merged = normalizeGameSettings({ ...existing, ...settings });
   db.updateGameSettings.run(JSON.stringify(merged), id);
   console.log(`[Admin] Updated settings for ${id}`);
   res.json({ message: '设置已更新', settings: merged });
@@ -236,8 +367,8 @@ router.put('/games/:id/modes', (req, res) => {
     }
   }
 
-  const existingSettings = JSON.parse(game.settings || '{}');
-  const nextSettings = { ...existingSettings, extraModes: normalizedExtraModes };
+  const existingSettings = parseObject(game.settings, {});
+  const nextSettings = normalizeGameSettings({ ...existingSettings, extraModes: normalizedExtraModes });
 
   db.updateGameMode.run(mode, id);
   db.updateGameSettings.run(JSON.stringify(nextSettings), id);
@@ -245,7 +376,7 @@ router.put('/games/:id/modes', (req, res) => {
   const updated = db.getGame.get(id);
   const payload = {
     ...updated,
-    settings: JSON.parse(updated.settings || '{}'),
+    settings: parseObject(updated.settings, {}),
   };
 
   db.insertMessage.run(
