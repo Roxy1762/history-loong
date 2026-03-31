@@ -533,6 +533,27 @@ async function suggestConcepts(topic, existing = [], count = 3) {
   return text.split('\n').map(s => s.trim()).filter(Boolean).slice(0, count);
 }
 
+async function polishRagContext(context, maxChars = 1200) {
+  const raw = String(context || '').trim();
+  if (!raw) return '';
+  const safeMax = Math.max(200, Math.min(4000, parseInt(String(maxChars), 10) || 1200));
+  const prompt = `请将以下教材检索片段做“轻度润色与去冗余”：
+1) 尽量完整保留事实与原文信息，不要新增任何事实；
+2) 只删除重复、噪音、无关句；
+3) 保持中文自然可读；
+4) 输出纯文本，不要Markdown，不要解释；
+5) 最长不超过${safeMax}字。
+
+原文：
+${raw}`;
+  try {
+    const text = await completeWithFailover(prompt, 1024);
+    return String(text || '').trim().slice(0, safeMax) || raw.slice(0, safeMax);
+  } catch {
+    return raw.slice(0, safeMax);
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractJSON(text) {
@@ -551,6 +572,7 @@ module.exports = {
   validateConceptWithTrace,
   batchValidateConcepts,
   suggestConcepts,
+  polishRagContext,
   generateChallengeCards,
   inferThemeEraHint,
   testConfig,

@@ -699,6 +699,24 @@ router.post('/curation/concepts/:id/categorize', (req, res) => {
   res.json({ ok: true });
 });
 
+router.post('/curation/concepts/categorize-batch', (req, res) => {
+  const { conceptIds, categoryId, remove } = req.body || {};
+  if (!Array.isArray(conceptIds) || conceptIds.length === 0) {
+    return res.status(400).json({ error: '请提供 conceptIds' });
+  }
+  if (!categoryId) return res.status(400).json({ error: '请提供 categoryId' });
+
+  let affected = 0;
+  for (const id of conceptIds) {
+    if (!id) continue;
+    if (remove) curationSvc.removeFromCategory(id, categoryId);
+    else curationSvc.assignCategory(id, categoryId);
+    affected++;
+  }
+  logAdminAction(remove ? 'kb_uncategorize_batch' : 'kb_categorize_batch', 'knowledge', null, { categoryId, affected });
+  res.json({ ok: true, affected });
+});
+
 router.get('/curation/categories', (_req, res) => {
   res.json({ categories: curationSvc.listCategories() });
 });

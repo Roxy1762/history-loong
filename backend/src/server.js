@@ -14,6 +14,7 @@ const adminRouter  = require('./routes/admin');
 const profileRouter = require('./routes/profile');
 const setupSocket  = require('./socket');
 const { loadPlugins, GAME_MODES, COMBINABLE_MODES } = require('./plugins');
+const db = require('./db');
 
 // ── App setup ─────────────────────────────────────────────────────────────────
 
@@ -69,7 +70,25 @@ app.use('/api/export', exportRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/profile', profileRouter);
 
-app.get('/api/modes', (_req, res) => res.json({ modes: GAME_MODES, combinableModes: COMBINABLE_MODES }));
+app.get('/api/modes', (_req, res) => {
+  let ragDefaults = {};
+  try {
+    const active = db.getActiveAIConfig.get();
+    const extra = JSON.parse(active?.extra || '{}');
+    ragDefaults = {
+      ragTopicTopN: Number.isFinite(Number(extra.kb_room_default_topic_top_n)) ? Number(extra.kb_room_default_topic_top_n) : 1,
+      ragConceptTopN: Number.isFinite(Number(extra.kb_room_default_concept_top_n)) ? Number(extra.kb_room_default_concept_top_n) : 2,
+      ragContextMaxChars: Number.isFinite(Number(extra.kb_room_default_context_max_chars)) ? Number(extra.kb_room_default_context_max_chars) : 800,
+      ragFtsCandidateMultiplier: Number.isFinite(Number(extra.kb_room_default_fts_multiplier)) ? Number(extra.kb_room_default_fts_multiplier) : 4,
+      ragFtsMinCandidates: Number.isFinite(Number(extra.kb_room_default_fts_min_candidates)) ? Number(extra.kb_room_default_fts_min_candidates) : 12,
+      ragShowPolishedInChat: Boolean(extra.kb_room_default_show_polished_in_chat),
+      ragJoinSeparator: extra.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
+    };
+  } catch {
+    ragDefaults = {};
+  }
+  res.json({ modes: GAME_MODES, combinableModes: COMBINABLE_MODES, ragDefaults });
+});
 
 app.get('/api/health', (_req, res) =>
   res.json({ ok: true, time: new Date().toISOString() })

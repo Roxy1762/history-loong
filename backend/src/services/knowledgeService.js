@@ -138,15 +138,19 @@ async function searchContextAdvanced(query, topN = 4) {
   return context;
 }
 
-async function searchContextAdvancedWithTrace(query, topN = 4) {
+async function searchContextAdvancedWithTrace(query, topN = 4, runtimeOverrides = {}) {
+  const runtime = getRagRuntimeConfig(runtimeOverrides);
   if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
   try {
-    const candidates = searchChunksByFTS(query, Math.max(12, topN * 4));
+    const candidates = searchChunksByFTS(
+      query,
+      Math.max(runtime.ftsMinCandidates, topN * runtime.candidateMultiplier),
+    );
     if (!candidates.length) return { context: '', trace: { query, stage: 'fts', candidates: 0, ranked: [] } };
-    const ranked = await rankChunks(query, candidates, topN);
+    const ranked = await rankChunks(query, candidates, topN, runtime);
     const texts = ranked.map(r => r.content).filter(Boolean);
     return {
-      context: texts.join('\n---\n'),
+      context: texts.join(runtime.joinSeparator),
       trace: {
         query,
         stage: 'advanced',
@@ -178,17 +182,19 @@ async function getContextForConceptAdvanced(concept, topic) {
   return context;
 }
 
-async function getContextForConceptAdvancedWithTrace(concept, topic) {
+async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOverrides = {}) {
+  const runtime = getRagRuntimeConfig(runtimeOverrides);
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvancedWithTrace(topic, 1),
-    searchContextAdvancedWithTrace(concept, 2),
+    searchContextAdvancedWithTrace(topic, runtime.topicTopN, runtime),
+    searchContextAdvancedWithTrace(concept, runtime.conceptTopN, runtime),
   ]);
-  const combined = [byTopic.context, byConcept.context].filter(Boolean).join('\n---\n');
+  const combined = [byTopic.context, byConcept.context].filter(Boolean).join(runtime.joinSeparator);
   return {
-    context: combined ? combined.slice(0, 800) : '',
+    context: combined ? combined.slice(0, runtime.contextMaxChars) : '',
     trace: {
       topic: byTopic.trace,
       concept: byConcept.trace,
+      runtime,
     },
   };
 }
@@ -224,6 +230,18 @@ function getActiveKnowledgeOverrides() {
       embeddingModel: typeof extra.kb_embedding_model === 'string' ? extra.kb_embedding_model.trim() : '',
       rerankModel: typeof extra.kb_rerank_model === 'string' ? extra.kb_rerank_model.trim() : '',
       rerankInstruction: typeof extra.kb_rerank_instruction === 'string' ? extra.kb_rerank_instruction.trim() : '',
+      topicTopN: Number.isFinite(Number(extra.kb_topic_top_n)) ? Number(extra.kb_topic_top_n) : null,
+      conceptTopN: Number.isFinite(Number(extra.kb_concept_top_n)) ? Number(extra.kb_concept_top_n) : null,
+      candidateMultiplier: Number.isFinite(Number(extra.kb_candidate_multiplier)) ? Number(extra.kb_candidate_multiplier) : null,
+      contextMaxChars: Number.isFinite(Number(extra.kb_context_max_chars)) ? Number(extra.kb_context_max_chars) : null,
+      embeddingWeight: Number.isFinite(Number(extra.kb_embedding_weight)) ? Number(extra.kb_embedding_weight) : null,
+      ftsWeight: Number.isFinite(Number(extra.kb_fts_weight)) ? Number(extra.kb_fts_weight) : null,
+      rerankWeight: Number.isFinite(Number(extra.kb_rerank_weight)) ? Number(extra.kb_rerank_weight) : null,
+      polishEnabled: typeof extra.kb_polish_enabled === 'boolean' ? extra.kb_polish_enabled : null,
+      polishMaxChars: Number.isFinite(Number(extra.kb_polish_max_chars)) ? Number(extra.kb_polish_max_chars) : null,
+      ftsMinCandidates: Number.isFinite(Number(extra.kb_fts_min_candidates)) ? Number(extra.kb_fts_min_candidates) : null,
+      showPolishedInChat: typeof extra.kb_show_polished_in_chat === 'boolean' ? extra.kb_show_polished_in_chat : null,
+      joinSeparator: typeof extra.kb_join_separator === 'string' ? extra.kb_join_separator : '',
     };
   } catch {
     return {};
@@ -259,6 +277,56 @@ function getSiliconFlowConfig() {
   return buildSiliconFlowConfig(getActiveKnowledgeOverrides());
 }
 
+function clampInt(v, fallback, min, max) {
+  const n = parseInt(String(v), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function clampNum(v, fallback, min, max) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeRagRuntimeOverrides(input = {}) {
+  const src = input && typeof input === 'object' ? input : {};
+  return {
+    topicTopN: src.ragTopicTopN ?? src.topicTopN,
+    conceptTopN: src.ragConceptTopN ?? src.conceptTopN,
+    candidateMultiplier: src.ragFtsCandidateMultiplier ?? src.candidateMultiplier,
+    contextMaxChars: src.ragContextMaxChars ?? src.contextMaxChars,
+    ftsMinCandidates: src.ragFtsMinCandidates ?? src.ftsMinCandidates,
+    showPolishedInChat: src.ragShowPolishedInChat ?? src.showPolishedInChat,
+    joinSeparator: src.ragJoinSeparator ?? src.joinSeparator,
+    polishEnabled: src.ragPolishEnabled ?? src.polishEnabled,
+    polishMaxChars: src.ragPolishMaxChars ?? src.polishMaxChars,
+  };
+}
+
+function getRagRuntimeConfig(overridesInput = {}) {
+  const o = { ...getActiveKnowledgeOverrides(), ...normalizeRagRuntimeOverrides(overridesInput) };
+  const defaultEmbeddingWeight = 0.85;
+  const defaultFtsWeight = 0.15;
+  const embeddingWeight = clampNum(o.embeddingWeight, defaultEmbeddingWeight, 0, 1);
+  const ftsWeight = clampNum(o.ftsWeight, defaultFtsWeight, 0, 1);
+  const hybridSum = embeddingWeight + ftsWeight;
+  return {
+    topicTopN: clampInt(o.topicTopN, 1, 1, 10),
+    conceptTopN: clampInt(o.conceptTopN, 2, 1, 12),
+    candidateMultiplier: clampInt(o.candidateMultiplier, 4, 1, 10),
+    contextMaxChars: clampInt(o.contextMaxChars, 800, 200, 4000),
+    embeddingWeight: hybridSum > 0 ? embeddingWeight / hybridSum : defaultEmbeddingWeight,
+    ftsWeight: hybridSum > 0 ? ftsWeight / hybridSum : defaultFtsWeight,
+    rerankWeight: clampNum(o.rerankWeight, 0.8, 0, 1),
+    polishEnabled: o.polishEnabled == null ? true : Boolean(o.polishEnabled),
+    polishMaxChars: clampInt(o.polishMaxChars, 1200, 200, 4000),
+    ftsMinCandidates: clampInt(o.ftsMinCandidates, 12, 1, 200),
+    showPolishedInChat: Boolean(o.showPolishedInChat),
+    joinSeparator: o.joinSeparator === 'double_newline' ? '\n\n' : '\n---\n',
+  };
+}
+
 function normalizeKnowledgeOverrides(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   const toNullableBool = (v) => (typeof v === 'boolean' ? v : null);
@@ -273,6 +341,22 @@ function normalizeKnowledgeOverrides(input = {}) {
     embeddingModel: toTrimmed(source.embeddingModel || source.kb_embedding_model),
     rerankModel: toTrimmed(source.rerankModel || source.kb_rerank_model),
     rerankInstruction: toTrimmed(source.rerankInstruction || source.kb_rerank_instruction),
+    topicTopN: source.topicTopN ?? source.kb_topic_top_n,
+    conceptTopN: source.conceptTopN ?? source.kb_concept_top_n,
+    candidateMultiplier: source.candidateMultiplier ?? source.kb_candidate_multiplier,
+    contextMaxChars: source.contextMaxChars ?? source.kb_context_max_chars,
+    embeddingWeight: source.embeddingWeight ?? source.kb_embedding_weight,
+    ftsWeight: source.ftsWeight ?? source.kb_fts_weight,
+    rerankWeight: source.rerankWeight ?? source.kb_rerank_weight,
+    polishEnabled: typeof (source.polishEnabled ?? source.kb_polish_enabled) === 'boolean'
+      ? Boolean(source.polishEnabled ?? source.kb_polish_enabled)
+      : null,
+    polishMaxChars: source.polishMaxChars ?? source.kb_polish_max_chars,
+    ftsMinCandidates: source.ftsMinCandidates ?? source.kb_fts_min_candidates,
+    showPolishedInChat: typeof (source.showPolishedInChat ?? source.kb_show_polished_in_chat) === 'boolean'
+      ? Boolean(source.showPolishedInChat ?? source.kb_show_polished_in_chat)
+      : null,
+    joinSeparator: toTrimmed(source.joinSeparator || source.kb_join_separator),
   };
 }
 
@@ -308,8 +392,9 @@ async function testRerankConnection(overridesInput) {
   };
 }
 
-async function rankChunks(query, candidates, topN) {
+async function rankChunks(query, candidates, topN, runtimeOverrides = {}) {
   const config = getSiliconFlowConfig();
+  const runtime = getRagRuntimeConfig(runtimeOverrides);
   let ranked = deduplicateCandidates(candidates);
 
   if (config.enableEmbedding) {
@@ -320,7 +405,7 @@ async function rankChunks(query, candidates, topN) {
         .map((c, idx) => {
           const embedScore = cosineSimilarity(queryVec, docVecs[idx]);
           const ftsPrior = 1 / (1 + (c.ftsRank ?? idx));
-          const hybridScore = embedScore * 0.85 + ftsPrior * 0.15;
+          const hybridScore = embedScore * runtime.embeddingWeight + ftsPrior * runtime.ftsWeight;
           return { ...c, embedScore, hybridScore };
         })
         .sort((a, b) => b.hybridScore - a.hybridScore);
@@ -332,7 +417,7 @@ async function rankChunks(query, candidates, topN) {
     ranked = ranked.map((c, idx) => ({ ...c, embedScore: null, hybridScore: -(idx + 1) }));
   }
 
-  const rerankPoolSize = Math.max(topN * 4, topN);
+  const rerankPoolSize = Math.max(topN * runtime.candidateMultiplier, topN);
   let pool = ranked.slice(0, rerankPoolSize);
   if (config.enableRerank && pool.length > 1) {
     try {
@@ -346,7 +431,7 @@ async function rankChunks(query, candidates, topN) {
     const rerank = Number(item.rerankScore ?? 0);
     const hybrid = Number(item.hybridScore ?? 0);
     const finalScore = Number.isFinite(item.rerankScore)
-      ? rerank * 0.8 + hybrid * 0.2
+      ? rerank * runtime.rerankWeight + hybrid * (1 - runtime.rerankWeight)
       : hybrid;
     return {
       ...item,
@@ -684,6 +769,7 @@ module.exports = {
   searchContextAdvancedWithTrace,
   getContextForConceptAdvanced,
   getContextForConceptAdvancedWithTrace,
+  getRagRuntimeConfig,
   listDocuments,
   vectorizeDocument,
   testEmbeddingConnection,
