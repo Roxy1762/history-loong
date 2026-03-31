@@ -33,6 +33,16 @@ router.post('/', (req, res) => {
     settings.extraModes = settings.extraModes.filter(em => em !== mode);
   }
 
+  // Normalize optional per-room RAG settings
+  settings.ragTopicTopN = toBoundedInt(settings.ragTopicTopN, { defaultValue: 1, min: 1, max: 10 });
+  settings.ragConceptTopN = toBoundedInt(settings.ragConceptTopN, { defaultValue: 2, min: 1, max: 12 });
+  settings.ragContextMaxChars = toBoundedInt(settings.ragContextMaxChars, { defaultValue: 800, min: 200, max: 4000 });
+  settings.ragFtsCandidateMultiplier = toBoundedInt(settings.ragFtsCandidateMultiplier, { defaultValue: 4, min: 1, max: 20 });
+  settings.ragFtsMinCandidates = toBoundedInt(settings.ragFtsMinCandidates, { defaultValue: 12, min: 1, max: 200 });
+  settings.ragShowPolishedInChat = Boolean(settings.ragShowPolishedInChat);
+  const sep = typeof settings.ragJoinSeparator === 'string' ? settings.ragJoinSeparator : 'rule';
+  settings.ragJoinSeparator = sep === 'double_newline' ? 'double_newline' : 'rule';
+
   const id = uuidv4().slice(0, 8).toUpperCase();
   db.createGame.run(id, topic.trim(), mode, JSON.stringify(settings));
   const game = db.getGame.get(id);
