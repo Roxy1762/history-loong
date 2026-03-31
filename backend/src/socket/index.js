@@ -268,6 +268,12 @@ function normalizeTags(tags) {
   return Array.isArray(tags) ? tags : [];
 }
 
+function getValidatedConceptHistory(gameId) {
+  return db.getConceptsByGame.all(gameId)
+    .filter(c => c.validated)
+    .map(c => ({ name: c.name, period: c.period }));
+}
+
 function buildAcceptedConceptPayload({
   conceptId,
   gameId,
@@ -532,9 +538,7 @@ module.exports = function setupSocket(io) {
       });
 
       try {
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const existing = getValidatedConceptHistory(currentGameId);
 
         const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
         const kbCheck = validateFromKnowledge(input, game.topic);
@@ -841,9 +845,7 @@ module.exports = function setupSocket(io) {
       });
 
       try {
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const existing = getValidatedConceptHistory(currentGameId);
 
         const settings = getGameSettings(game, {});
         const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
