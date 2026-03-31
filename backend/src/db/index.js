@@ -348,6 +348,28 @@ module.exports = {
   insertFTS:      stmt(`INSERT INTO knowledge_fts (content, chunk_id) VALUES (?, ?)`),
   deleteFTSByChunkIds: db.prepare(`DELETE FROM knowledge_fts WHERE chunk_id IN (SELECT id FROM knowledge_chunks WHERE doc_id = ?)`),
   searchFTS:      stmt(`SELECT chunk_id, snippet(knowledge_fts, 0, '<b>', '</b>', '...', 20) as snippet FROM knowledge_fts WHERE content MATCH ? ORDER BY rank LIMIT ?`),
+  searchFTSVisible: stmt(`
+    SELECT f.chunk_id,
+           snippet(knowledge_fts, 0, '<b>', '</b>', '...', 20) as snippet
+      FROM knowledge_fts f
+      JOIN knowledge_chunks kc ON kc.id = f.chunk_id
+      JOIN knowledge_docs kd ON kd.id = kc.doc_id
+     WHERE f.content MATCH ?
+       AND kd.status != 'archived'
+       AND NOT (kd.source = 'ai_confirmed' AND kd.status = 'draft')
+     ORDER BY rank
+     LIMIT ?
+  `),
+  searchChunksByLikeVisible: stmt(`
+    SELECT kc.id as chunk_id
+      FROM knowledge_chunks kc
+      JOIN knowledge_docs kd ON kd.id = kc.doc_id
+     WHERE kc.content LIKE ?
+       AND kd.status != 'archived'
+       AND NOT (kd.source = 'ai_confirmed' AND kd.status = 'draft')
+     ORDER BY kd.created_at DESC, kc.chunk_idx ASC
+     LIMIT ?
+  `),
   getChunkById:   stmt(`SELECT * FROM knowledge_chunks WHERE id = ?`),
 
   // Stats
