@@ -267,6 +267,11 @@ try {
   db.exec(`ALTER TABLE knowledge_docs ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`);
 } catch { /* already exists */ }
 
+// v1.5.0: vectorization status on knowledge_docs
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN vectorized_at TEXT`);
+} catch { /* already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -327,14 +332,15 @@ module.exports = {
   deleteAIConfig:  stmt(`DELETE FROM ai_configs WHERE id = ?`),
 
   // Knowledge docs
-  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at, source FROM knowledge_docs WHERE source = 'manual' ORDER BY created_at DESC`),
-  listAllDocs:    stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id FROM knowledge_docs ORDER BY created_at DESC`),
-  listAIConfirmedDocs: stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id FROM knowledge_docs WHERE source = 'ai_confirmed' ORDER BY created_at DESC`),
+  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at, source, vectorized_at FROM knowledge_docs WHERE source = 'manual' ORDER BY created_at DESC`),
+  listAllDocs:    stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id, vectorized_at FROM knowledge_docs ORDER BY created_at DESC`),
+  listAIConfirmedDocs: stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id, vectorized_at FROM knowledge_docs WHERE source = 'ai_confirmed' ORDER BY created_at DESC`),
   getDoc:         stmt(`SELECT * FROM knowledge_docs WHERE id = ?`),
   insertDoc:      stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks) VALUES (?, ?, ?, ?)`),
   insertDocFull:  stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id) VALUES (?, ?, ?, ?, ?, ?)`),
   insertDocDraft: stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id, status) VALUES (?, ?, ?, ?, ?, ?, 'draft')`),
   deleteDoc:      stmt(`DELETE FROM knowledge_docs WHERE id = ?`),
+  markDocVectorized: stmt(`UPDATE knowledge_docs SET vectorized_at = datetime('now') WHERE id = ?`),
 
   // Knowledge chunks
   insertChunk:    stmt(`INSERT INTO knowledge_chunks (id, doc_id, chunk_idx, content) VALUES (?, ?, ?, ?)`),

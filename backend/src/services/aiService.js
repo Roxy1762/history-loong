@@ -358,10 +358,24 @@ function inferThemeEraHint(topic) {
  * Includes theme-era hint to prevent misclassification (e.g. Egypt → ancient when topic is colonial).
  */
 async function validateConcept(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
+  const traced = await validateConceptWithTrace(concept, topic, existing, gameMode, knowledgeContext);
+  return traced.result;
+}
+
+async function validateConceptWithTrace(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
   const cached = cacheService.get(concept, topic);
   if (cached) {
     console.log(`[AI] Cache HIT for concept="${concept}" topic="${topic}"`);
-    return cached;
+    return {
+      result: cached,
+      trace: {
+        source: 'cache',
+        ragUsed: false,
+        knowledgeContext: '',
+        prompt: null,
+        rawOutput: JSON.stringify(cached),
+      },
+    };
   }
 
   const recentNames = existing.slice(-5).map(c => c.name).join('、') || '无';
@@ -389,12 +403,25 @@ year：BC负数，AD正数，时间段取起始，不确定null。difficulty：�
 
   const text = await completeWithFailover(prompt, 1024);
   const result = extractJSON(text);
+  const active = resolveConfig();
 
   if (result && result.valid) {
     cacheService.set(concept, topic, result, resolveConfig()?.model);
   }
 
-  return result;
+  return {
+    result,
+    trace: {
+      source: 'ai',
+      ragUsed: Boolean(knowledgeContext),
+      knowledgeContext,
+      prompt,
+      rawOutput: text,
+      parsedOutput: result,
+      provider: active?.provider_type || null,
+      model: active?.model || null,
+    },
+  };
 }
 
 /**
@@ -432,10 +459,24 @@ ${list}
       const text = await completeWithFailover(prompt, 1024);
       const arr = extractJSON(text);
       if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
+      const active = resolveConfig();
 
       for (let j = 0; j < toValidate.length; j++) {
         const r = arr.find(x => x.index === j + 1) || arr[j] || { valid: false, reason: 'AI未返回结果' };
-        const fullResult = { id: toValidate[j].id, ...r };
+        const fullResult = {
+          id: toValidate[j].id,
+          ...r,
+          _trace: {
+            source: 'ai-batch',
+            ragUsed: Boolean(knowledgeContext),
+            knowledgeContext,
+            prompt,
+            rawOutput: text,
+            parsedOutput: r,
+            provider: active?.provider_type || null,
+            model: active?.model || null,
+          },
+        };
         results.push(fullResult);
 
         if (r.valid) {
@@ -507,6 +548,7 @@ function extractJSON(text) {
 module.exports = {
   complete,
   validateConcept,
+  validateConceptWithTrace,
   batchValidateConcepts,
   suggestConcepts,
   generateChallengeCards,

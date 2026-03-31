@@ -8,7 +8,14 @@ const multer  = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
-const { ingestDocument, deleteDocument, listAIConfirmedDocs, vectorizeDocument } = require('../services/knowledgeService');
+const {
+  ingestDocument,
+  deleteDocument,
+  listAIConfirmedDocs,
+  vectorizeDocument,
+  testEmbeddingConnection,
+  testRerankConnection,
+} = require('../services/knowledgeService');
 const auditSvc = require('../services/auditService');
 const cacheSvc = require('../services/cacheService');
 const profileSvc = require('../services/profileService');
@@ -460,7 +467,31 @@ router.post('/knowledge/:id/vectorize', async (req, res) => {
     console.log(`[Admin] Knowledge vectorized id=${req.params.id} title="${doc.title}" chunks=${result.chunks}`);
     res.json({ message: '向量化完成', ...result });
   } catch (err) {
-    res.status(400).json({ error: err.message || '向量化失败' });
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Knowledge vectorize FAILED id=${req.params.id} title="${doc.title}": ${detail}`);
+    res.status(400).json({ error: err.message || '向量化失败', detail });
+  }
+});
+
+router.post('/knowledge/check/embedding', async (_req, res) => {
+  try {
+    const result = await testEmbeddingConnection(_req.body?.knowledge || _req.body || {});
+    res.json({ message: 'Embedding 检测通过', ...result });
+  } catch (err) {
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Knowledge embedding check FAILED: ${detail}`);
+    res.status(400).json({ error: err.message || 'Embedding 检测失败', detail });
+  }
+});
+
+router.post('/knowledge/check/rerank', async (_req, res) => {
+  try {
+    const result = await testRerankConnection(_req.body?.knowledge || _req.body || {});
+    res.json({ message: 'Rerank 检测通过', ...result });
+  } catch (err) {
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Knowledge rerank check FAILED: ${detail}`);
+    res.status(400).json({ error: err.message || 'Rerank 检测失败', detail });
   }
 });
 

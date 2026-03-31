@@ -81,6 +81,8 @@ async function vectorizeDocument(docId) {
     await embedTexts(config, texts);
   }
 
+  db.markDocVectorized.run(docId);
+
   return { docId, chunks: chunks.length, vectorized: chunks.length };
 }
 
@@ -132,15 +134,39 @@ function getContextForConcept(concept, topic) {
  * Falls back to plain FTS when config is missing or remote calls fail.
  */
 async function searchContextAdvanced(query, topN = 4) {
-  if (!query) return '';
+  const { context } = await searchContextAdvancedWithTrace(query, topN);
+  return context;
+}
+
+async function searchContextAdvancedWithTrace(query, topN = 4) {
+  if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
   try {
     const candidates = searchChunksByFTS(query, Math.max(12, topN * 4));
-    if (!candidates.length) return '';
+    if (!candidates.length) return { context: '', trace: { query, stage: 'fts', candidates: 0, ranked: [] } };
     const ranked = await rankChunks(query, candidates, topN);
     const texts = ranked.map(r => r.content).filter(Boolean);
-    return texts.join('\n---\n');
+    return {
+      context: texts.join('\n---\n'),
+      trace: {
+        query,
+        stage: 'advanced',
+        candidates: candidates.length,
+        ranked: ranked.map((r, idx) => ({
+          rank: idx + 1,
+          score: Number.isFinite(r.finalScore) ? Number(r.finalScore.toFixed(6)) : null,
+          embedScore: Number.isFinite(r.embedScore) ? Number(r.embedScore.toFixed(6)) : null,
+          rerankScore: Number.isFinite(r.rerankScore) ? Number(r.rerankScore.toFixed(6)) : null,
+          ftsRank: r.ftsRank,
+          preview: String(r.content || '').slice(0, 80),
+        })),
+      },
+    };
   } catch {
-    return searchContext(query, topN);
+    const fallback = searchContext(query, topN);
+    return {
+      context: fallback,
+      trace: { query, stage: 'fallback_fts', candidates: 0, ranked: [] },
+    };
   }
 }
 
@@ -148,12 +174,23 @@ async function searchContextAdvanced(query, topN = 4) {
  * Advanced combined context for a concept submission.
  */
 async function getContextForConceptAdvanced(concept, topic) {
+  const { context } = await getContextForConceptAdvancedWithTrace(concept, topic);
+  return context;
+}
+
+async function getContextForConceptAdvancedWithTrace(concept, topic) {
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvanced(topic, 1),
-    searchContextAdvanced(concept, 2),
+    searchContextAdvancedWithTrace(topic, 1),
+    searchContextAdvancedWithTrace(concept, 2),
   ]);
-  const combined = [byTopic, byConcept].filter(Boolean).join('\n---\n');
-  return combined ? combined.slice(0, 800) : '';
+  const combined = [byTopic.context, byConcept.context].filter(Boolean).join('\n---\n');
+  return {
+    context: combined ? combined.slice(0, 800) : '',
+    trace: {
+      topic: byTopic.trace,
+      concept: byConcept.trace,
+    },
+  };
 }
 
 function searchChunksByFTS(query, limit = 20) {
@@ -180,6 +217,8 @@ function getActiveKnowledgeOverrides() {
     return {
       provider: typeof extra.kb_provider === 'string' ? extra.kb_provider.trim() : '',
       enabled: typeof extra.kb_enabled === 'boolean' ? extra.kb_enabled : null,
+      embeddingEnabled: typeof extra.kb_embedding_enabled === 'boolean' ? extra.kb_embedding_enabled : null,
+      rerankEnabled: typeof extra.kb_rerank_enabled === 'boolean' ? extra.kb_rerank_enabled : null,
       apiKey: typeof extra.kb_api_key === 'string' ? extra.kb_api_key.trim() : '',
       baseUrl: typeof extra.kb_base_url === 'string' ? extra.kb_base_url.trim() : '',
       embeddingModel: typeof extra.kb_embedding_model === 'string' ? extra.kb_embedding_model.trim() : '',
@@ -191,8 +230,7 @@ function getActiveKnowledgeOverrides() {
   }
 }
 
-function getSiliconFlowConfig() {
-  const overrides = getActiveKnowledgeOverrides();
+function buildSiliconFlowConfig(overrides = {}) {
   const apiKey = overrides.apiKey || process.env.SILICONFLOW_API_KEY || '';
   const baseUrl = (overrides.baseUrl || process.env.SILICONFLOW_BASE_URL || DEFAULT_SILICONFLOW_BASE_URL).replace(/\/$/, '');
   const embeddingModel = overrides.embeddingModel || process.env.SILICONFLOW_EMBED_MODEL || '';
@@ -202,6 +240,8 @@ function getSiliconFlowConfig() {
   const allowEnhancement = overrides.enabled == null
     ? enabledByEnv !== '0' && enabledByEnv !== 'false'
     : overrides.enabled;
+  const allowEmbedding = overrides.embeddingEnabled == null ? allowEnhancement : overrides.embeddingEnabled;
+  const allowRerank = overrides.rerankEnabled == null ? allowEnhancement : overrides.rerankEnabled;
   const provider = overrides.provider || 'siliconflow';
 
   return {
@@ -210,28 +250,86 @@ function getSiliconFlowConfig() {
     embeddingModel,
     rerankModel,
     rerankInstruction,
-    enableEmbedding: Boolean(provider === 'siliconflow' && apiKey && embeddingModel && allowEnhancement),
-    enableRerank: Boolean(provider === 'siliconflow' && apiKey && rerankModel && allowEnhancement),
+    enableEmbedding: Boolean(provider === 'siliconflow' && apiKey && embeddingModel && allowEmbedding),
+    enableRerank: Boolean(provider === 'siliconflow' && apiKey && rerankModel && allowRerank),
+  };
+}
+
+function getSiliconFlowConfig() {
+  return buildSiliconFlowConfig(getActiveKnowledgeOverrides());
+}
+
+function normalizeKnowledgeOverrides(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const toNullableBool = (v) => (typeof v === 'boolean' ? v : null);
+  const toTrimmed = (v) => (typeof v === 'string' ? v.trim() : '');
+  return {
+    provider: toTrimmed(source.provider || source.kb_provider || 'siliconflow') || 'siliconflow',
+    enabled: toNullableBool(source.enabled ?? source.kb_enabled),
+    embeddingEnabled: toNullableBool(source.embeddingEnabled ?? source.kb_embedding_enabled),
+    rerankEnabled: toNullableBool(source.rerankEnabled ?? source.kb_rerank_enabled),
+    apiKey: toTrimmed(source.apiKey || source.kb_api_key),
+    baseUrl: toTrimmed(source.baseUrl || source.kb_base_url),
+    embeddingModel: toTrimmed(source.embeddingModel || source.kb_embedding_model),
+    rerankModel: toTrimmed(source.rerankModel || source.kb_rerank_model),
+    rerankInstruction: toTrimmed(source.rerankInstruction || source.kb_rerank_instruction),
+  };
+}
+
+async function testEmbeddingConnection(overridesInput) {
+  const config = buildSiliconFlowConfig(normalizeKnowledgeOverrides(overridesInput || getActiveKnowledgeOverrides()));
+  if (!config.enableEmbedding) {
+    throw new Error('嵌入模型未启用或配置不完整（请检查 API Key、模型名和开关）');
+  }
+  await embedTexts(config, ['测试向量化连通性']);
+  return {
+    ok: true,
+    model: config.embeddingModel,
+    endpoint: `${config.baseUrl}/embeddings`,
+  };
+}
+
+async function testRerankConnection(overridesInput) {
+  const config = buildSiliconFlowConfig(normalizeKnowledgeOverrides(overridesInput || getActiveKnowledgeOverrides()));
+  if (!config.enableRerank) {
+    throw new Error('重排模型未启用或配置不完整（请检查 API Key、模型名和开关）');
+  }
+  const rows = await rerankWithSiliconFlow(
+    config,
+    '测试重排',
+    [{ content: '隋朝建立于581年。' }, { content: '唐朝建立于618年。' }],
+    1
+  );
+  return {
+    ok: true,
+    model: config.rerankModel,
+    endpoint: `${config.baseUrl}/rerank`,
+    topResult: rows[0]?.content || '',
   };
 }
 
 async function rankChunks(query, candidates, topN) {
   const config = getSiliconFlowConfig();
-  let ranked = candidates.slice();
+  let ranked = deduplicateCandidates(candidates);
 
   if (config.enableEmbedding) {
     try {
       const [queryVec] = await embedTexts(config, [query]);
       const docVecs = await embedTexts(config, ranked.map(c => c.content));
       ranked = ranked
-        .map((c, idx) => ({ ...c, score: cosineSimilarity(queryVec, docVecs[idx]) }))
-        .sort((a, b) => b.score - a.score);
+        .map((c, idx) => {
+          const embedScore = cosineSimilarity(queryVec, docVecs[idx]);
+          const ftsPrior = 1 / (1 + (c.ftsRank ?? idx));
+          const hybridScore = embedScore * 0.85 + ftsPrior * 0.15;
+          return { ...c, embedScore, hybridScore };
+        })
+        .sort((a, b) => b.hybridScore - a.hybridScore);
     } catch (err) {
       console.warn(`[KB] Embedding ranking failed, fallback to FTS: ${err.message}`);
-      ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+      ranked = ranked.map((c, idx) => ({ ...c, embedScore: null, hybridScore: -(idx + 1) }));
     }
   } else {
-    ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+    ranked = ranked.map((c, idx) => ({ ...c, embedScore: null, hybridScore: -(idx + 1) }));
   }
 
   const rerankPoolSize = Math.max(topN * 4, topN);
@@ -244,7 +342,18 @@ async function rankChunks(query, candidates, topN) {
       console.warn(`[KB] Rerank failed, keep embedding/FTS order: ${err.message}`);
     }
   }
-  return pool.slice(0, topN);
+  return pool.slice(0, topN).map((item, idx) => {
+    const rerank = Number(item.rerankScore ?? 0);
+    const hybrid = Number(item.hybridScore ?? 0);
+    const finalScore = Number.isFinite(item.rerankScore)
+      ? rerank * 0.8 + hybrid * 0.2
+      : hybrid;
+    return {
+      ...item,
+      finalScore,
+      rank: idx + 1,
+    };
+  });
 }
 
 async function embedTexts(config, texts) {
@@ -351,6 +460,18 @@ function cacheEmbedding(key, vector) {
     const oldestKey = embeddingCache.keys().next().value;
     if (oldestKey) embeddingCache.delete(oldestKey);
   }
+}
+
+function deduplicateCandidates(candidates) {
+  const seen = new Set();
+  const out = [];
+  for (const item of candidates) {
+    const key = hashText(String(item.content || '').slice(0, 300));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 function cosineSimilarity(a, b) {
@@ -560,9 +681,13 @@ module.exports = {
   searchContext,
   getContextForConcept,
   searchContextAdvanced,
+  searchContextAdvancedWithTrace,
   getContextForConceptAdvanced,
+  getContextForConceptAdvancedWithTrace,
   listDocuments,
   vectorizeDocument,
+  testEmbeddingConnection,
+  testRerankConnection,
   ingestAIConfirmedConcept,
   listAIConfirmedDocs,
   validateFromKnowledge,
