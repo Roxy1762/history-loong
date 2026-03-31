@@ -20,6 +20,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const db = require('../db');
 const cacheService = require('./cacheService');
+const { parseObject } = require('../utils/json');
 
 // ── Provider implementations ──────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ function resolveConfigs() {
 
   try {
     const rows = db.listAIConfigsSorted.all();
-    configs.push(...rows.map(r => ({ ...r, extra: JSON.parse(r.extra || '{}') })));
+    configs.push(...rows.map(r => ({ ...r, extra: parseObject(r.extra, {}) })));
   } catch { /* DB may not be ready yet */ }
 
   if (process.env.ANTHROPIC_API_KEY) {

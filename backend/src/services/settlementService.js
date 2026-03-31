@@ -6,6 +6,7 @@
  */
 
 const db = require('../db');
+const { getGameSettings } = require('../utils/game');
 
 /**
  * Mark a game as currently settling (persisted to DB).
@@ -51,7 +52,7 @@ function getIncompleteSettlements() {
   try {
     return db.getIncompleteSettlements.all().map(g => ({
       ...g,
-      settings: JSON.parse(g.settings || '{}'),
+      settings: getGameSettings(g, {}),
       pendingCount: db.getPendingConceptCount.get(g.id)?.count ?? 0,
       // stale if started more than 2 hours ago
       isStale: g.settle_started_at
