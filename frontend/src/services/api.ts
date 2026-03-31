@@ -148,6 +148,11 @@ export async function adminTestAIConfig(id: string, apiKey?: string) {
   return data as { ok: boolean; reply?: string; error?: string };
 }
 
+export async function adminTestAuxAIConfig(id: string) {
+  const { data } = await api.post(`/admin/ai-configs/${id}/test-aux`, {}, { headers: adminHeaders() });
+  return data as { ok: boolean; reply?: string; error?: string };
+}
+
 export async function adminDeleteAIConfig(id: string) {
   const { data } = await api.delete(`/admin/ai-configs/${id}`, { headers: adminHeaders() });
   return data;

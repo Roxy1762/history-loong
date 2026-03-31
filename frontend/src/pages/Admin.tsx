@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
-  adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
+  adminActivateAIConfig, adminTestAIConfig, adminTestAuxAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
@@ -1014,6 +1014,73 @@ function writeKnowledgeExtra(
   return merged;
 }
 
+function readAuxExtra(extra: Record<string, unknown> | null | undefined) {
+  return {
+    enabled: typeof extra?.aux_enabled === 'boolean' ? extra.aux_enabled : false,
+    providerType: typeof extra?.aux_provider_type === 'string' ? extra.aux_provider_type : 'openai-compatible',
+    baseUrl: typeof extra?.aux_base_url === 'string' ? extra.aux_base_url : '',
+    apiKey: typeof extra?.aux_api_key === 'string' ? extra.aux_api_key : '',
+    model: typeof extra?.aux_model === 'string' ? extra.aux_model : '',
+    systemPrompt: typeof extra?.aux_system_prompt === 'string' ? extra.aux_system_prompt : '你是主模型的辅助判定器，只返回简洁结果。',
+    sceneRagGate: typeof extra?.aux_scene_rag_gate === 'boolean' ? extra.aux_scene_rag_gate : true,
+    sceneQueryRewrite: typeof extra?.aux_scene_query_rewrite === 'boolean' ? extra.aux_scene_query_rewrite : true,
+    sceneContextGuard: typeof extra?.aux_scene_context_guard === 'boolean' ? extra.aux_scene_context_guard : true,
+    sceneJsonRepair: typeof extra?.aux_scene_json_repair === 'boolean' ? extra.aux_scene_json_repair : true,
+    sceneReasonRewrite: typeof extra?.aux_scene_reason_rewrite === 'boolean' ? extra.aux_scene_reason_rewrite : true,
+  };
+}
+
+function writeAuxExtra(
+  existingExtra: Record<string, unknown>,
+  next: {
+    enabled: boolean;
+    providerType: string;
+    baseUrl: string;
+    apiKey: string;
+    model: string;
+    systemPrompt: string;
+    sceneRagGate: boolean;
+    sceneQueryRewrite: boolean;
+    sceneContextGuard: boolean;
+    sceneJsonRepair: boolean;
+    sceneReasonRewrite: boolean;
+  },
+  preservedApiKey = '',
+) {
+  const merged = { ...existingExtra };
+  delete merged.aux_enabled;
+  delete merged.aux_provider_type;
+  delete merged.aux_base_url;
+  delete merged.aux_api_key;
+  delete merged.aux_model;
+  delete merged.aux_system_prompt;
+  delete merged.aux_scene_rag_gate;
+  delete merged.aux_scene_query_rewrite;
+  delete merged.aux_scene_context_guard;
+  delete merged.aux_scene_json_repair;
+  delete merged.aux_scene_reason_rewrite;
+
+  const apiKey = next.apiKey === SECRET_MASK ? preservedApiKey : next.apiKey.trim();
+  const baseUrl = next.baseUrl.trim().replace(/\/$/, '');
+  const model = next.model.trim();
+  const systemPrompt = next.systemPrompt.trim();
+  if (!next.enabled && !apiKey && !model && !baseUrl) return merged;
+
+  merged.aux_enabled = Boolean(next.enabled);
+  merged.aux_provider_type = next.providerType || 'openai-compatible';
+  if (baseUrl) merged.aux_base_url = baseUrl;
+  if (apiKey) merged.aux_api_key = apiKey;
+  if (model) merged.aux_model = model;
+  if (systemPrompt) merged.aux_system_prompt = systemPrompt;
+  merged.aux_scene_rag_gate = Boolean(next.sceneRagGate);
+  merged.aux_scene_query_rewrite = Boolean(next.sceneQueryRewrite);
+  merged.aux_scene_context_guard = Boolean(next.sceneContextGuard);
+  merged.aux_scene_json_repair = Boolean(next.sceneJsonRepair);
+  merged.aux_scene_reason_rewrite = Boolean(next.sceneReasonRewrite);
+
+  return merged;
+}
+
 function AIConfigPanel() {
   const [configs, setConfigs] = useState<AIConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -1044,6 +1111,21 @@ function AIConfigPanel() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '未知错误';
       setTestResult(prev => ({ ...prev, [cfg.id]: `❌ ${msg}` }));
+    } finally {
+      setTesting(null);
+    }
+  }
+
+  async function handleTestAux(cfg: AIConfig) {
+    const key = `${cfg.id}__aux`;
+    setTesting(key);
+    setTestResult(prev => ({ ...prev, [key]: '测试中...' }));
+    try {
+      const res = await adminTestAuxAIConfig(cfg.id);
+      setTestResult(prev => ({ ...prev, [key]: res.ok ? `✅ ${res.reply}` : `❌ ${res.error}` }));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '未知错误';
+      setTestResult(prev => ({ ...prev, [key]: `❌ ${msg}` }));
     } finally {
       setTesting(null);
     }
@@ -1108,6 +1190,13 @@ function AIConfigPanel() {
                     >
                       {testing === cfg.id ? '测试中...' : '测试连接'}
                     </button>
+                    <button
+                      onClick={() => handleTestAux(cfg)}
+                      disabled={testing === `${cfg.id}__aux`}
+                      className="btn-secondary text-xs py-1.5"
+                    >
+                      {testing === `${cfg.id}__aux` ? '测试中...' : '测试辅助LLM'}
+                    </button>
                     {cfg.is_active !== 1 && (
                       <button onClick={() => handleActivate(cfg.id)} className="btn-secondary text-xs py-1.5 text-indigo-600">
                         设为当前
@@ -1144,6 +1233,12 @@ function AIConfigPanel() {
                   <div className={`mt-3 text-xs px-3 py-2 rounded-lg
                     ${testResult[cfg.id].startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
                     {testResult[cfg.id]}
+                  </div>
+                )}
+                {testResult[`${cfg.id}__aux`] && (
+                  <div className={`mt-2 text-xs px-3 py-2 rounded-lg
+                    ${testResult[`${cfg.id}__aux`].startsWith('✅') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                    {testResult[`${cfg.id}__aux`]}
                   </div>
                 )}
               </div>
@@ -1193,6 +1288,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     ? splitGlmUrl(initial.base_url)[1]
     : '/chat/completions';
   const initialKnowledge = readKnowledgeExtra(initial?.extra);
+  const initialAux = readAuxExtra(initial?.extra);
 
   const [form, setForm] = useState({
     name:          initial?.name          ?? '',
@@ -1227,6 +1323,19 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     roomDefaultFtsMinCandidates: initialKnowledge.roomDefaultFtsMinCandidates,
     roomDefaultShowPolishedInChat: initialKnowledge.roomDefaultShowPolishedInChat,
     roomDefaultJoinSeparator: initialKnowledge.roomDefaultJoinSeparator,
+  });
+  const [aux, setAux] = useState({
+    enabled: initialAux.enabled,
+    providerType: initialAux.providerType,
+    baseUrl: initialAux.baseUrl,
+    apiKey: initialAux.apiKey ? SECRET_MASK : '',
+    model: initialAux.model,
+    systemPrompt: initialAux.systemPrompt,
+    sceneRagGate: initialAux.sceneRagGate,
+    sceneQueryRewrite: initialAux.sceneQueryRewrite,
+    sceneContextGuard: initialAux.sceneContextGuard,
+    sceneJsonRepair: initialAux.sceneJsonRepair,
+    sceneReasonRewrite: initialAux.sceneReasonRewrite,
   });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
@@ -1274,12 +1383,14 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       }
       const normalizedKnowledge = normalizeKnowledgeNumericInputs(knowledge);
       setKnowledge(normalizedKnowledge);
+      const mergedKnowledgeExtra = writeKnowledgeExtra(initial?.extra || {}, normalizedKnowledge, initialKnowledge.apiKey);
+      const mergedExtra = writeAuxExtra(mergedKnowledgeExtra, aux, initialAux.apiKey);
 
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
         base_url: effectiveBaseUrl,
         system_prompt: form.system_prompt || undefined,
-        extra: writeKnowledgeExtra(initial?.extra || {}, normalizedKnowledge, initialKnowledge.apiKey),
+        extra: mergedExtra,
       };
       if (initial) {
         if (form.api_key === SECRET_MASK) delete payload.api_key;
@@ -1711,6 +1822,54 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               请求会按 SiliconFlow 官方接口结构发送：
               <span className="font-mono"> /embeddings</span> 使用嵌入模型，
               <span className="font-mono"> /rerank</span> 使用 <span className="font-mono">query</span>、<span className="font-mono">documents</span>、<span className="font-mono">top_n</span>，若填写上方指令则附带 <span className="font-mono">instruction</span>。
+            </div>
+          </div>
+        </div>
+
+        <div className="border border-indigo-100 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-indigo-800">辅助 LLM（可选）</div>
+              <p className="text-xs text-indigo-700 mt-0.5">用于主模型前后置判定：RAG开关、检索改写、上下文守门、JSON修复、驳回理由润色。</p>
+            </div>
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-indigo-800">
+              <input type="checkbox" checked={aux.enabled} onChange={e => setAux(v => ({ ...v, enabled: e.target.checked }))} />
+              启用辅助 LLM
+            </label>
+          </div>
+          <div className="p-4 bg-white space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <FormField label="Provider Type">
+                <select className="input text-sm" value={aux.providerType} onChange={e => setAux(v => ({ ...v, providerType: e.target.value }))}>
+                  <option value="openai-compatible">openai-compatible</option>
+                  <option value="anthropic">anthropic</option>
+                  <option value="google">google</option>
+                  <option value="glm">glm</option>
+                </select>
+              </FormField>
+              <FormField label="Base URL">
+                <input className="input font-mono text-sm" placeholder="https://api.deepseek.com/v1" value={aux.baseUrl}
+                  onChange={e => setAux(v => ({ ...v, baseUrl: e.target.value }))} />
+              </FormField>
+              <FormField label="模型">
+                <input className="input font-mono text-sm" placeholder="deepseek-chat" value={aux.model}
+                  onChange={e => setAux(v => ({ ...v, model: e.target.value }))} />
+              </FormField>
+            </div>
+            <FormField label="辅助 API Key">
+              <input className="input font-mono text-sm" type="password" placeholder="sk-..." value={aux.apiKey}
+                onChange={e => setAux(v => ({ ...v, apiKey: e.target.value }))} />
+            </FormField>
+            <FormField label="辅助 System Prompt（可选）">
+              <textarea className="w-full text-xs font-mono border border-slate-200 rounded-xl px-3 py-2 bg-slate-50 resize-none"
+                rows={3} value={aux.systemPrompt} onChange={e => setAux(v => ({ ...v, systemPrompt: e.target.value }))} />
+            </FormField>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-700">
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={aux.sceneRagGate} onChange={e => setAux(v => ({ ...v, sceneRagGate: e.target.checked }))} />场景1：RAG启停判定</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={aux.sceneQueryRewrite} onChange={e => setAux(v => ({ ...v, sceneQueryRewrite: e.target.checked }))} />场景2：检索Query改写</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={aux.sceneContextGuard} onChange={e => setAux(v => ({ ...v, sceneContextGuard: e.target.checked }))} />场景3：RAG上下文守门</label>
+              <label className="inline-flex items-center gap-2"><input type="checkbox" checked={aux.sceneJsonRepair} onChange={e => setAux(v => ({ ...v, sceneJsonRepair: e.target.checked }))} />场景4：JSON结果修复</label>
+              <label className="inline-flex items-center gap-2 md:col-span-2"><input type="checkbox" checked={aux.sceneReasonRewrite} onChange={e => setAux(v => ({ ...v, sceneReasonRewrite: e.target.checked }))} />场景5：驳回原因短句化</label>
             </div>
           </div>
         </div>

@@ -411,6 +411,21 @@ router.post('/ai-configs/:id/test', async (req, res) => {
   }
 });
 
+router.post('/ai-configs/:id/test-aux', async (req, res) => {
+  const row = db.getAIConfig.get(req.params.id);
+  if (!row) return res.status(404).json({ error: '配置不存在' });
+
+  console.log(`[Admin] Testing AUX AI config id=${req.params.id}`);
+  try {
+    const reply = await ai.testAuxiliaryFromConfigRow(row);
+    console.log(`[Admin] AUX AI config test OK id=${req.params.id}`);
+    res.json({ ok: true, reply });
+  } catch (err) {
+    console.error(`[Admin] AUX AI config test FAILED id=${req.params.id}: ${err.message}`);
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Knowledge Base ────────────────────────────────────────────────────────────
 
 router.get('/knowledge', (_req, res) => {
