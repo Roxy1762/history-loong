@@ -60,12 +60,12 @@ const Chat = memo(function Chat({
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50/50 overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg-page)' }}>
       {/* Messages — independently scrollable */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-            <div className="text-5xl opacity-40 mb-3">💬</div>
+          <div className="flex flex-col items-center justify-center py-16" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-5xl opacity-40 mb-3 font-heading">史</div>
             <p className="text-sm font-medium">游戏刚刚开始</p>
             <p className="text-xs mt-1">切换到「提交概念」模式，开始历史接龙！</p>
           </div>
@@ -79,10 +79,10 @@ const Chat = memo(function Chat({
           <div className="flex items-center gap-2 ml-2 animate-fade-in">
             <div className="flex gap-1 items-center">
               {[0, 150, 300].map(d => (
-                <span key={d} className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />
+                <span key={d} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--brand)', animationDelay: `${d}ms` }} />
               ))}
             </div>
-            <span className="text-xs text-slate-400 italic">
+            <span className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
               AI 正在验证「{validating.rawInput}」...
             </span>
           </div>
@@ -92,22 +92,25 @@ const Chat = memo(function Chat({
 
       {/* Input area */}
       {!gameFinished ? (
-        <div className="border-t border-slate-100 bg-white px-4 py-3 space-y-2.5 flex-shrink-0">
+        <div className="px-4 py-3 space-y-2.5 flex-shrink-0" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
           {/* Mode tabs */}
-          <div className="flex gap-1 bg-slate-100 p-0.5 rounded-xl text-xs">
+          <div className="flex gap-1 p-0.5 rounded-xl text-xs" style={{ background: 'var(--bg-muted)' }}>
             {(['concept', 'chat'] as const).map(m => (
               <button key={m} onClick={() => setMode(m)}
-                className={`flex-1 py-1.5 rounded-lg font-semibold transition-all
-                  ${mode === m ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {m === 'concept' ? '📚 提交历史概念' : '💬 聊天'}
+                className="flex-1 py-1.5 rounded-lg font-semibold transition-all"
+                style={{
+                  background: mode === m ? 'var(--bg-card)' : 'transparent',
+                  color: mode === m ? 'var(--brand)' : 'var(--text-muted)',
+                  boxShadow: mode === m ? '0 1px 3px var(--shadow)' : 'none',
+                }}>
+                {m === 'concept' ? '提交历史概念' : '聊天'}
               </button>
             ))}
           </div>
 
           {/* Turn-order lock notice */}
           {inputBlocked && (
-            <div className="flex items-center gap-2 text-xs px-3 py-2 bg-violet-50 border border-violet-100 rounded-xl text-violet-600">
-              <span>⏳</span>
+            <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-xl" style={{ background: 'var(--brand-light)', border: '1px solid var(--border-subtle)', color: 'var(--brand)' }}>
               <span>
                 {readOnlyBlocked
                   ? readOnlyReason
@@ -144,17 +147,17 @@ const Chat = memo(function Chat({
           </form>
 
           {error && (
-            <div className="text-xs text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5">
+            <div className="text-xs rounded-lg px-3 py-1.5" style={{ color: 'var(--seal-red)', background: 'color-mix(in srgb, var(--seal-red) 8%, var(--bg-card))', border: '1px solid color-mix(in srgb, var(--seal-red) 20%, transparent)' }}>
               {error}
             </div>
           )}
           {mode === 'concept' && !error && !inputBlocked && (
-            <p className="text-xs text-slate-400">AI 验证通过后自动归入时间轴</p>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>AI 验证通过后自动归入时间轴</p>
           )}
         </div>
       ) : (
-        <div className="border-t border-slate-100 bg-white px-4 py-4 text-center flex-shrink-0">
-          <span className="text-sm text-slate-400">游戏已结束 — 可在顶部导出成果</span>
+        <div className="px-4 py-4 text-center flex-shrink-0" style={{ borderTop: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>游戏已结束 — 可在顶部导出成果</span>
         </div>
       )}
     </div>
@@ -173,17 +176,31 @@ function MessageRow({ msg, isMe }: { msg: Message; isMe: boolean }) {
     const isRag = Boolean(meta?.rag);
     return (
       <div className="flex justify-center animate-fade-in">
-        <span className={`text-xs px-3 py-1.5 rounded-2xl border whitespace-pre-wrap max-w-[92%]
-          ${isRejected
-            ? 'bg-red-50 text-red-500 border-red-100'
-            : isChallengeComplete
-              ? 'bg-purple-50 text-purple-600 border-purple-100 font-semibold'
-              : isRag
-                ? 'bg-cyan-50 text-cyan-700 border-cyan-100'
+        <span className="text-xs px-3 py-1.5 rounded-2xl whitespace-pre-wrap max-w-[92%]"
+          style={{
+            background: isRejected
+              ? 'color-mix(in srgb, var(--seal-red) 8%, var(--bg-card))'
+              : isChallengeComplete
+                ? 'color-mix(in srgb, var(--brand) 10%, var(--bg-card))'
                 : meta?.concept
-                ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                : 'bg-slate-100 text-slate-500 border-slate-200'
-          }`}>
+                  ? 'color-mix(in srgb, #10b981 8%, var(--bg-card))'
+                  : isRag
+                    ? 'color-mix(in srgb, #06b6d4 8%, var(--bg-card))'
+                    : 'var(--bg-muted)',
+            color: isRejected
+              ? 'var(--seal-red)'
+              : isChallengeComplete
+                ? 'var(--brand)'
+                : meta?.concept
+                  ? '#059669'
+                  : isRag
+                    ? '#0891b2'
+                    : 'var(--text-muted)',
+            border: `1px solid ${isRejected
+              ? 'color-mix(in srgb, var(--seal-red) 20%, transparent)'
+              : 'var(--border-subtle)'}`,
+            fontWeight: isChallengeComplete ? 600 : 400,
+          }}>
           {msg.content}
         </span>
       </div>
@@ -192,20 +209,17 @@ function MessageRow({ msg, isMe }: { msg: Message; isMe: boolean }) {
 
   return (
     <div className={`flex gap-2.5 animate-slide-up ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
-      <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow-sm
-        ${isMe ? 'bg-indigo-500' : 'bg-gradient-to-br from-slate-400 to-slate-600'}`}>
+      <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white shadow-sm"
+        style={{ background: isMe ? 'var(--brand)' : 'var(--text-muted)' }}>
         {(msg.player_name || '?')[0]}
       </div>
       <div className={`max-w-[76%] flex flex-col gap-0.5 ${isMe ? 'items-end' : 'items-start'}`}>
         {!isMe && (
-          <span className="text-xs text-slate-400 ml-1 font-medium">{msg.player_name}</span>
+          <span className="text-xs ml-1 font-medium" style={{ color: 'var(--text-muted)' }}>{msg.player_name}</span>
         )}
         <div className={`px-3.5 py-2 text-sm leading-relaxed break-words
           ${msg.type === 'concept_attempt' ? 'font-medium' : ''}
           ${isMe ? 'bubble-me' : 'bubble-other'}`}>
-          {msg.type === 'concept_attempt' && !isMe && (
-            <span className="mr-1 text-xs">📚</span>
-          )}
           {msg.content}
         </div>
       </div>

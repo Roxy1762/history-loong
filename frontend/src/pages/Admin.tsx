@@ -47,24 +47,24 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
-      <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-8 w-full max-w-sm border border-white/20 shadow-2xl">
+    <div className="min-h-screen flex items-center justify-center paper-bg" style={{ background: 'var(--bg-page)' }}>
+      <div className="rounded-2xl p-8 w-full max-w-sm shadow-2xl corner-ornament animate-spring-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
         <div className="text-center mb-6">
-          <div className="text-4xl mb-3">⚙️</div>
-          <h1 className="text-2xl font-bold text-white">后台管理</h1>
-          <p className="text-slate-400 text-sm mt-1">History-Loong Admin</p>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-heading font-black mx-auto mb-3 text-white shadow-md" style={{ background: 'var(--brand)' }}>管</div>
+          <h1 className="text-2xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>后台管理</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>History-Loong Admin</p>
         </div>
         <form onSubmit={submit} className="space-y-4">
           <input
             type="password"
-            className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            className="input text-center py-3"
             placeholder="管理员密钥"
             value={key}
             onChange={e => setKey(e.target.value)}
             autoFocus
           />
-          {err && <p className="text-red-400 text-sm">{err}</p>}
-          <button className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-xl transition-colors">
+          {err && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{err}</p>}
+          <button className="btn-primary w-full py-3 font-heading">
             登录
           </button>
         </form>
@@ -77,15 +77,15 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
 
-const NAV_ITEMS: { id: Tab; icon: string; label: string }[] = [
-  { id: 'overview',      icon: '📊', label: '概览' },
-  { id: 'games',         icon: '🎮', label: '游戏管理' },
-  { id: 'ai-config',     icon: '🤖', label: 'AI 配置' },
-  { id: 'knowledge',     icon: '📚', label: '知识库' },
-  { id: 'ai-confirmed',  icon: '✅', label: 'AI 确认知识库' },
-  { id: 'curation',      icon: '🎯', label: '知识策展' },
-  { id: 'ai-decisions',  icon: '🔬', label: 'AI 完整回复' },
-  { id: 'logs',          icon: '🔍', label: '服务器日志' },
+const NAV_ITEMS: { id: Tab; label: string }[] = [
+  { id: 'overview',      label: '概览' },
+  { id: 'games',         label: '游戏管理' },
+  { id: 'ai-config',     label: 'AI 配置' },
+  { id: 'knowledge',     label: '知识库' },
+  { id: 'ai-confirmed',  label: 'AI 确认知识库' },
+  { id: 'curation',      label: '知识策展' },
+  { id: 'ai-decisions',  label: 'AI 完整回复' },
+  { id: 'logs',          label: '服务器日志' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -94,6 +94,7 @@ export default function Admin() {
   const navigate = useNavigate();
   const [authed, setAuthed] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     if (getAdminKey()) {
@@ -103,48 +104,73 @@ export default function Admin() {
 
   if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
 
+  function handleTabChange(t: Tab) {
+    setTab(t);
+    setSidebarOpen(false);
+  }
+
   return (
-    <div className="min-h-screen flex bg-slate-100">
+    <div className="min-h-screen flex" style={{ background: 'var(--bg-page)' }}>
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-56 bg-slate-900 flex flex-col shadow-xl flex-shrink-0">
-        <div className="p-5 border-b border-slate-700">
-          <button onClick={() => navigate('/')} className="flex items-center gap-2 text-white hover:text-indigo-300 transition-colors">
-            <span className="text-2xl">🐉</span>
+      <aside className={`fixed md:static inset-y-0 left-0 z-40 w-56 flex flex-col shadow-xl flex-shrink-0 transform transition-transform duration-200 md:translate-x-0
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ background: 'var(--nav-bg)' }}>
+        <div className="p-5" style={{ borderBottom: '1px solid color-mix(in srgb, var(--nav-text) 15%, transparent)' }}>
+          <button onClick={() => navigate('/')} className="flex items-center gap-2 transition-colors"
+            style={{ color: 'var(--nav-text)' }}>
+            <span className="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-heading font-black text-white" style={{ background: 'var(--brand)' }}>龙</span>
             <div>
-              <div className="font-bold text-sm">历史接龙</div>
-              <div className="text-xs text-slate-400">后台管理</div>
+              <div className="font-heading font-bold text-sm">历史接龙</div>
+              <div className="text-xs" style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}>后台管理</div>
             </div>
           </button>
         </div>
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map(item => (
             <button
               key={item.id}
-              onClick={() => setTab(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                ${tab === item.id
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
-            >
-              <span>{item.icon}</span>
+              onClick={() => handleTabChange(item.id)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
+              style={{
+                background: tab === item.id ? 'var(--brand)' : 'transparent',
+                color: tab === item.id ? '#fff' : 'var(--nav-text)',
+              }}>
               {item.label}
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700 space-y-2">
+        <div className="p-4 space-y-2" style={{ borderTop: '1px solid color-mix(in srgb, var(--nav-text) 15%, transparent)' }}>
           <button
             onClick={() => { setAdminKey(''); setAuthed(false); }}
-            className="w-full text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            className="w-full text-xs transition-colors"
+            style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}
           >
             退出登录
           </button>
-          <p className="text-center text-xs text-slate-600 select-none">dev0.3.0</p>
+          <p className="text-center text-xs select-none" style={{ color: 'color-mix(in srgb, var(--nav-text) 30%, transparent)' }}>dev0.3.0</p>
         </div>
       </aside>
 
       {/* Content */}
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto p-6">
+      <main className="flex-1 overflow-auto min-w-0">
+        {/* Mobile header bar */}
+        <div className="sticky top-0 z-20 md:hidden flex items-center gap-3 px-4 py-3 shadow-sm"
+          style={{ background: 'var(--bg-card)', borderBottom: '1px solid var(--border)' }}>
+          <button onClick={() => setSidebarOpen(true)} className="p-1.5 rounded-lg" style={{ color: 'var(--text-secondary)' }}>
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <h1 className="font-heading font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
+            {NAV_ITEMS.find(n => n.id === tab)?.label || '后台管理'}
+          </h1>
+        </div>
+        <div className="max-w-5xl mx-auto p-4 md:p-6">
           {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
           {tab === 'games'        && <GamesPanel />}
           {tab === 'ai-config'    && <AIConfigPanel />}
@@ -170,14 +196,14 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
   }, []);
 
   const STAT_CARDS = [
-    { key: 'total_games',       label: '总游戏数',     icon: '🎮', color: 'bg-indigo-50 text-indigo-600',  nav: undefined },
-    { key: 'active_games',      label: '进行中',       icon: '▶️', color: 'bg-green-50 text-green-600',   nav: 'games' as Tab },
-    { key: 'total_concepts',    label: '有效概念',     icon: '📌', color: 'bg-emerald-50 text-emerald-600', nav: undefined },
-    { key: 'total_players',     label: '历史玩家',     icon: '👥', color: 'bg-sky-50 text-sky-600',       nav: undefined },
-    { key: 'total_docs',        label: '知识库文档',   icon: '📄', color: 'bg-amber-50 text-amber-600',   nav: 'knowledge' as Tab },
-    { key: 'total_kb_active',   label: 'KB 已审概念',  icon: '✅', color: 'bg-teal-50 text-teal-600',     nav: 'curation' as Tab },
-    { key: 'pending_curation',  label: '待策展',       icon: '🎯', color: 'bg-orange-50 text-orange-600', nav: 'curation' as Tab },
-    { key: 'total_ai_configs',  label: 'AI 配置',      icon: '🤖', color: 'bg-purple-50 text-purple-600', nav: 'ai-config' as Tab },
+    { key: 'total_games',       label: '总游戏数',     nav: undefined },
+    { key: 'active_games',      label: '进行中',       nav: 'games' as Tab },
+    { key: 'total_concepts',    label: '有效概念',     nav: undefined },
+    { key: 'total_players',     label: '历史玩家',     nav: undefined },
+    { key: 'total_docs',        label: '知识库文档',   nav: 'knowledge' as Tab },
+    { key: 'total_kb_active',   label: 'KB 已审概念',  nav: 'curation' as Tab },
+    { key: 'pending_curation',  label: '待策展',       nav: 'curation' as Tab },
+    { key: 'total_ai_configs',  label: 'AI 配置',      nav: 'ai-config' as Tab },
   ];
 
   return (
@@ -188,49 +214,51 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
           <div
             key={c.key}
             onClick={() => c.nav && onNavigate?.(c.nav)}
-            className={`bg-white rounded-2xl p-5 shadow-sm border border-slate-100 transition-all
-              ${c.nav ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}
-              ${c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 ? 'ring-2 ring-orange-200' : ''}`}
+            className={`rounded-2xl p-5 shadow-sm transition-all
+              ${c.nav ? 'cursor-pointer hover:shadow-md hover:-translate-y-0.5' : ''}`}
+            style={{
+              background: 'var(--bg-card)',
+              border: c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0
+                ? '2px solid var(--gold-accent)'
+                : '1px solid var(--border-subtle)',
+            }}
           >
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl mb-3 ${c.color}`}>
-              {c.icon}
-            </div>
-            <div className="text-3xl font-bold text-slate-800">{stats[c.key] ?? '–'}</div>
-            <div className="text-sm text-slate-500 mt-1">{c.label}</div>
+            <div className="text-3xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>{stats[c.key] ?? '–'}</div>
+            <div className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
             {c.key === 'pending_curation' && (stats[c.key] ?? 0) > 0 && (
-              <div className="text-xs text-orange-500 mt-1 font-medium">点击前往策展 →</div>
+              <div className="text-xs mt-1 font-medium" style={{ color: 'var(--gold-accent)' }}>点击前往策展</div>
             )}
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100">
-          <h3 className="font-semibold text-slate-800">最近游戏</h3>
+      <div className="rounded-2xl shadow-sm overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+        <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <h3 className="font-heading font-semibold" style={{ color: 'var(--text-primary)' }}>最近游戏</h3>
         </div>
         {games.length === 0 ? (
-          <div className="p-8 text-center text-slate-400">暂无游戏记录</div>
+          <div className="p-8 text-center" style={{ color: 'var(--text-muted)' }}>暂无游戏记录</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="text-xs uppercase" style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}>
               <tr>
                 {['房间码', '主题', '模式', '状态', '创建时间'].map(h => (
                   <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50">
+            <tbody>
               {games.map(g => (
-                <tr key={g.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-mono text-indigo-600 font-medium">{g.id}</td>
-                  <td className="px-4 py-3 text-slate-700">{g.topic}</td>
+                <tr key={g.id} className="transition-colors" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <td className="px-4 py-3 font-mono font-medium" style={{ color: 'var(--brand)' }}>{g.id}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>{g.topic}</td>
                   <td className="px-4 py-3">
                     <ModeChip mode={g.mode} extraModes={Array.isArray(g.settings?.extraModes) ? g.settings.extraModes as string[] : []} />
                   </td>
                   <td className="px-4 py-3">
                     <StatusChip status={g.status} />
                   </td>
-                  <td className="px-4 py-3 text-slate-400">{g.created_at.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="px-4 py-3" style={{ color: 'var(--text-muted)' }}>{g.created_at.slice(0, 16).replace('T', ' ')}</td>
                 </tr>
               ))}
             </tbody>
@@ -3594,8 +3622,8 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
   return (
     <div className="flex items-start justify-between gap-4 mb-2">
       <div>
-        <h2 className="text-2xl font-bold text-slate-800">{title}</h2>
-        {subtitle && <p className="text-slate-500 text-sm mt-1">{subtitle}</p>}
+        <h2 className="text-2xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>{title}</h2>
+        {subtitle && <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -3605,7 +3633,7 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
 function FormField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+      <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>{label}</label>
       {children}
     </div>
   );
@@ -3613,7 +3641,7 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
 
 function EmptyState({ icon, title, desc }: { icon: string; title: string; desc: string }) {
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
+    <div className="rounded-2xl p-12 text-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
       <div className="text-5xl mb-3">{icon}</div>
       <p className="font-medium text-slate-700">{title}</p>
       <p className="text-sm text-slate-400 mt-1">{desc}</p>
