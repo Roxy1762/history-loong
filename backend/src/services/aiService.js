@@ -311,6 +311,119 @@ async function completeWithFailover(prompt, maxTokens = 300) {
   throw lastError || new Error('All AI providers failed');
 }
 
+function getAuxiliaryConfig() {
+  const active = resolveConfig();
+  if (!active) return { enabled: false };
+  const extra = active.extra || {};
+  const enabled = Boolean(extra.aux_enabled);
+  if (!enabled) return { enabled: false };
+
+  const provider_type = extra.aux_provider_type || 'openai-compatible';
+  const base_url = (extra.aux_base_url || '').trim();
+  const api_key = (extra.aux_api_key || '').trim();
+  const model = (extra.aux_model || '').trim();
+  if (!api_key || !model) return { enabled: false };
+  if (provider_type === 'openai-compatible' && !base_url) return { enabled: false };
+
+  return {
+    enabled: true,
+    provider_type,
+    base_url,
+    api_key,
+    model,
+    system_prompt: typeof extra.aux_system_prompt === 'string' ? extra.aux_system_prompt : '',
+    sceneRagGate: extra.aux_scene_rag_gate !== false,
+    sceneQueryRewrite: extra.aux_scene_query_rewrite !== false,
+    sceneContextGuard: extra.aux_scene_context_guard !== false,
+    sceneJsonRepair: extra.aux_scene_json_repair !== false,
+    sceneReasonRewrite: extra.aux_scene_reason_rewrite !== false,
+  };
+}
+
+async function completeWithAuxiliary(prompt, maxTokens = 200) {
+  const aux = getAuxiliaryConfig();
+  if (!aux.enabled) return null;
+  const handler = PROVIDER_HANDLERS[aux.provider_type];
+  if (!handler) return null;
+  try {
+    return await handler(aux, prompt, maxTokens);
+  } catch (err) {
+    console.warn(`[AI][AUX] call failed: ${err.message}`);
+    return null;
+  }
+}
+
+async function planValidationAssist(concept, topic, existing = []) {
+  const fallback = {
+    useRag: true, topicQuery: topic, conceptQuery: concept, note: 'disabled',
+    _trace: { enabled: false, prompt: null, rawOutput: null, parsedOutput: null },
+  };
+  const aux = getAuxiliaryConfig();
+  if (!aux.enabled || (!aux.sceneRagGate && !aux.sceneQueryRewrite)) return fallback;
+
+  const recent = existing.slice(-3).map(c => c.name).join('、') || '无';
+  const prompt = `你是历史概念检索规划助手。仅返回JSON：
+{"useRag":true,"topicQuery":"主题检索词","conceptQuery":"概念检索词","note":"<=20字"}
+主题：${topic}
+概念：${concept}
+已有概念：${recent}
+要求：
+1) useRag=true表示应启用RAG，false表示直接走主模型。
+2) topicQuery/conceptQuery必须简短，去除引号、箭头和噪声符号。
+3) 禁止输出markdown。`;
+  const text = await completeWithAuxiliary(prompt, 180);
+  let parsed = null;
+  if (text) {
+    try { parsed = extractJSON(text); } catch { parsed = null; }
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return {
+      ...fallback,
+      _trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: null },
+    };
+  }
+
+  return {
+    useRag: aux.sceneRagGate ? parsed.useRag !== false : true,
+    topicQuery: aux.sceneQueryRewrite && parsed.topicQuery ? String(parsed.topicQuery).trim() : topic,
+    conceptQuery: aux.sceneQueryRewrite && parsed.conceptQuery ? String(parsed.conceptQuery).trim() : concept,
+    note: parsed.note ? String(parsed.note).slice(0, 30) : 'ok',
+    _trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed },
+  };
+}
+
+async function guardRagContext(topic, concept, context) {
+  if (!context) return { context: '', trace: { enabled: false, skipped: 'empty_context' } };
+  const aux = getAuxiliaryConfig();
+  if (!aux.enabled || !aux.sceneContextGuard) {
+    return { context, trace: { enabled: false, skipped: 'disabled' } };
+  }
+  const prompt = `你是历史RAG上下文守门员。仅返回JSON：{"keep":true,"context":"..."}。
+主题：${topic}
+概念：${concept}
+候选上下文：
+${String(context).slice(0, 1600)}
+规则：若上下文与主题/概念明显不符，keep=false且context置空。禁止markdown。`;
+  const text = await completeWithAuxiliary(prompt, 260);
+  let parsed = null;
+  if (text) {
+    try { parsed = extractJSON(text); } catch { parsed = null; }
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return { context, trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: null } };
+  }
+  if (parsed.keep === false) {
+    return { context: '', trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed } };
+  }
+  if (typeof parsed.context === 'string' && parsed.context.trim()) {
+    return {
+      context: parsed.context.trim().slice(0, 2000),
+      trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed },
+    };
+  }
+  return { context, trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed } };
+}
+
 // ── Theme era inference ───────────────────────────────────────────────────────
 /**
  * Infer the implied time period from a game topic string.
@@ -402,7 +515,44 @@ ${kb}验证「${concept}」是否为与该主题相关的有效历史概念，�
 year：BC负数，AD正数，时间段取起始，不确定null。difficulty：概念冷僻程度1(常见)~5(冷僻)。`;
 
   const text = await completeWithFailover(prompt, 1024);
-  const result = extractJSON(text);
+  let result = null;
+  try { result = extractJSON(text); } catch { result = null; }
+  const aux = getAuxiliaryConfig();
+  const auxiliaryTrace = [];
+  if ((!result || typeof result !== 'object') && aux.enabled && aux.sceneJsonRepair) {
+    const repairPrompt = `请将下面输出修复为有效JSON（仅返回JSON，不要markdown）：
+${String(text).slice(0, 2000)}
+目标字段：
+有效: {"valid":true,"name":"标准名","year":-356,"dynasty":"朝代","period":"时段","description":"简介","tags":["标签"],"difficulty":3}
+无效: {"valid":false,"reason":"原因"}`;
+    const repaired = await completeWithAuxiliary(repairPrompt, 280);
+    let repairedJSON = null;
+    if (repaired) {
+      try { repairedJSON = extractJSON(repaired); } catch { repairedJSON = null; }
+    }
+    auxiliaryTrace.push({
+      scene: 'json_repair',
+      prompt: repairPrompt,
+      rawOutput: repaired || null,
+      parsedOutput: repairedJSON,
+    });
+    if (repairedJSON && typeof repairedJSON === 'object') result = repairedJSON;
+  }
+  if (result && result.valid === false && aux.enabled && aux.sceneReasonRewrite && result.reason) {
+    const reasonPrompt = `将下面驳回原因改写为简洁中文短句（<=24字），仅返回纯文本：
+${String(result.reason).slice(0, 120)}`;
+    const rewritten = await completeWithAuxiliary(reasonPrompt, 60);
+    auxiliaryTrace.push({
+      scene: 'reason_rewrite',
+      prompt: reasonPrompt,
+      rawOutput: rewritten || null,
+      parsedOutput: rewritten ? String(rewritten).trim() : null,
+    });
+    if (rewritten) result.reason = String(rewritten).replace(/\n/g, ' ').trim().slice(0, 30);
+  }
+  if (!result || typeof result !== 'object' || typeof result.valid !== 'boolean') {
+    result = { valid: false, reason: 'AI返回格式异常' };
+  }
   const active = resolveConfig();
 
   if (result && result.valid) {
@@ -420,6 +570,7 @@ year：BC负数，AD正数，时间段取起始，不确定null。difficulty：�
       parsedOutput: result,
       provider: active?.provider_type || null,
       model: active?.model || null,
+      auxiliary: auxiliaryTrace,
     },
   };
 }
@@ -574,6 +725,8 @@ module.exports = {
   suggestConcepts,
   polishRagContext,
   generateChallengeCards,
+  planValidationAssist,
+  guardRagContext,
   inferThemeEraHint,
   testConfig,
   resolveConfig,

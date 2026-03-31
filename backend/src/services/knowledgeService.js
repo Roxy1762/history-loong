@@ -100,10 +100,10 @@ function searchContext(query, topN = 4) {
   if (!query) return '';
   try {
     // FTS5 match syntax — escape special chars
-    const safeQuery = query.replace(/['"*()]/g, ' ').trim();
+    const safeQuery = normalizeSearchInput(query);
     if (!safeQuery) return '';
 
-    const rows = db.searchFTS.all(safeQuery, topN);
+    const rows = db.searchFTSVisible.all(safeQuery, topN);
     if (!rows.length) return '';
 
     const texts = rows.map((r) => {
@@ -184,9 +184,11 @@ async function getContextForConceptAdvanced(concept, topic) {
 
 async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOverrides = {}) {
   const runtime = getRagRuntimeConfig(runtimeOverrides);
+  const conceptQuery = runtimeOverrides?.conceptQuery || concept;
+  const topicQuery = runtimeOverrides?.topicQuery || topic;
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvancedWithTrace(topic, runtime.topicTopN, runtime),
-    searchContextAdvancedWithTrace(concept, runtime.conceptTopN, runtime),
+    searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime),
+    searchContextAdvancedWithTrace(conceptQuery, runtime.conceptTopN, runtime),
   ]);
   const combined = [byTopic.context, byConcept.context].filter(Boolean).join(runtime.joinSeparator);
   return {
@@ -194,16 +196,22 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
     trace: {
       topic: byTopic.trace,
       concept: byConcept.trace,
+      topicQuery,
+      conceptQuery,
       runtime,
     },
   };
 }
 
 function searchChunksByFTS(query, limit = 20) {
-  const safeQuery = String(query || '').replace(/['"*()]/g, ' ').trim();
+  const safeQuery = normalizeSearchInput(query);
   if (!safeQuery) return [];
 
-  const rows = db.searchFTS.all(safeQuery, limit);
+  let rows = db.searchFTSVisible.all(safeQuery, limit);
+  if (!rows.length) {
+    const likeQuery = `%${safeQuery.replace(/\s+/g, '')}%`;
+    rows = db.searchChunksByLikeVisible.all(likeQuery, limit);
+  }
   if (!rows.length) return [];
 
   return rows
@@ -213,6 +221,15 @@ function searchChunksByFTS(query, limit = 20) {
       return { chunk_id: r.chunk_id, content: chunk.content, ftsRank: idx };
     })
     .filter(Boolean);
+}
+
+function normalizeSearchInput(query) {
+  return String(query || '')
+    .replace(/[「」『』【】《》〈〉（）()［］\[\]{}]/g, ' ')
+    .replace(/[→\-–—]/g, ' ')
+    .replace(/['"*]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getActiveKnowledgeOverrides() {
@@ -647,6 +664,7 @@ function validateFromKnowledge(rawInput, topic) {
          FROM knowledge_docs kd
          JOIN knowledge_chunks kc ON kc.doc_id = kd.id
         WHERE kd.source = 'ai_confirmed'
+          AND kd.status = 'active'
           AND LOWER(kd.title) = ?
         LIMIT 1`
     ).get(normalized);
@@ -659,16 +677,16 @@ function validateFromKnowledge(rawInput, topic) {
     }
 
     // 2. FTS search — only accept if score is very high (single result, title starts with query)
-    const safeQuery = normalized.replace(/['"*()]/g, ' ').trim();
+    const safeQuery = normalizeSearchInput(normalized);
     if (!safeQuery) return { confident: false };
 
-    const rows = db.searchFTS.all(safeQuery, 3);
+    const rows = db.searchFTSVisible.all(safeQuery, 3);
     if (rows.length === 1) {
       // Only one hit — check if it belongs to an ai_confirmed doc with matching title
       const chunk = db.getChunkById.get(rows[0].chunk_id);
       if (chunk) {
         const docRow = db.db.prepare(
-          `SELECT * FROM knowledge_docs WHERE id = ? AND source = 'ai_confirmed'`
+          `SELECT * FROM knowledge_docs WHERE id = ? AND source = 'ai_confirmed' AND status = 'active'`
         ).get(chunk.doc_id);
         if (docRow && docRow.title.toLowerCase().startsWith(normalized)) {
           const result = parseKBContent(chunk.content, docRow.title);
