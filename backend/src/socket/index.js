@@ -26,7 +26,9 @@ const db = require('../db');
 const ai = require('../services/aiService');
 const {
   getContextForConceptAdvanced,
+  getContextForConceptAdvancedWithTrace,
   searchContextAdvanced,
+  searchContextAdvancedWithTrace,
   ingestAIConfirmedConcept,
   validateFromKnowledge,
 } = require('../services/knowledgeService');
@@ -272,6 +274,33 @@ function getValidatedConceptHistory(gameId) {
   return db.getConceptsByGame.all(gameId)
     .filter(c => c.validated)
     .map(c => ({ name: c.name, period: c.period }));
+}
+
+async function resolveConceptContext(input, topic) {
+  if (typeof getContextForConceptAdvancedWithTrace === 'function') {
+    const flow = await getContextForConceptAdvancedWithTrace(input, topic);
+    return { context: flow?.context || null, trace: flow || null };
+  }
+  const context = await getContextForConceptAdvanced(input, topic);
+  return { context: context || null, trace: null };
+}
+
+async function resolveSettleContext(topic, limit = 2) {
+  if (typeof searchContextAdvancedWithTrace === 'function') {
+    const flow = await searchContextAdvancedWithTrace(topic, limit);
+    return { context: flow?.context || null, trace: flow || null };
+  }
+  const context = await searchContextAdvanced(topic, limit);
+  return { context: context || null, trace: null };
+}
+
+async function validateConceptWithFallback(input, topic, existing, options, context) {
+  if (typeof ai.validateConceptWithTrace === 'function') {
+    const traced = await ai.validateConceptWithTrace(input, topic, existing, options, context);
+    return { result: traced?.result || null, trace: traced?.trace || null };
+  }
+  const result = await ai.validateConcept(input, topic, existing, options, context);
+  return { result, trace: null };
 }
 
 function buildAcceptedConceptPayload({
@@ -540,9 +569,11 @@ module.exports = function setupSocket(io) {
       try {
         const existing = getValidatedConceptHistory(currentGameId);
 
-        const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
+        const ragFlow = await resolveConceptContext(input, game.topic);
+        const knowledgeContext = ragFlow.context;
         const kbCheck = validateFromKnowledge(input, game.topic);
         let result;
+        let aiTrace = null;
         let validationMethod = 'ai';
         const tsAI = Date.now();
 
@@ -551,7 +582,9 @@ module.exports = function setupSocket(io) {
           validationMethod = 'kb';
         } else {
           validationMethod = knowledgeContext ? 'rag+ai' : 'ai';
-          result = await ai.validateConcept(input, game.topic, existing, buildValidationOptions(game, settings), knowledgeContext);
+          const traced = await validateConceptWithFallback(input, game.topic, existing, buildValidationOptions(game, settings), knowledgeContext);
+          result = traced.result;
+          aiTrace = traced.trace;
         }
 
         const msElapsed = Date.now() - tsAI;
@@ -562,7 +595,9 @@ module.exports = function setupSocket(io) {
             input, input, null, null, null, null, '[]', 0, 1, result.reason || '无效', '{}');
 
           auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+            prompt: aiTrace?.prompt || null,
             response: JSON.stringify({ valid: false, reason: result.reason }),
+            rawOutput: aiTrace?.rawOutput || null,
             ms: msElapsed,
           });
           profileSvc.recordConceptResult(currentPlayer.id, false, false);
@@ -590,7 +625,9 @@ module.exports = function setupSocket(io) {
           result.dynasty, result.description, tags, 1, 0, null, extra);
 
         auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+          prompt: aiTrace?.prompt || null,
           response: JSON.stringify(result),
+          rawOutput: aiTrace?.rawOutput || null,
           ms: msElapsed,
         });
         profileSvc.recordConceptResult(currentPlayer.id, true, false);
@@ -749,7 +786,8 @@ module.exports = function setupSocket(io) {
 
       try {
         const settleSettings = getGameSettings(game, {});
-        const knowledgeContext = await searchContextAdvanced(game.topic, 2);
+        const settleRagFlow = await resolveSettleContext(game.topic, 2);
+        const knowledgeContext = settleRagFlow.context;
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
         const ts = new TimelineService();
@@ -850,16 +888,33 @@ module.exports = function setupSocket(io) {
         const settings = getGameSettings(game, {});
         const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
         let result;
+        let aiTrace = null;
+        let validationMethod = 'ai';
         if (kbCheck.confident) {
           result = kbCheck.result;
+          validationMethod = 'kb';
         } else {
-          const knowledgeContext = await getContextForConceptAdvanced(row.raw_input, game.topic);
-          result = await ai.validateConcept(row.raw_input, game.topic, existing, buildValidationOptions(game, settings), knowledgeContext);
+          const ragFlow = await resolveConceptContext(row.raw_input, game.topic);
+          const traced = await validateConceptWithFallback(
+            row.raw_input,
+            game.topic,
+            existing,
+            buildValidationOptions(game, settings),
+            ragFlow.context
+          );
+          result = traced.result;
+          aiTrace = traced.trace;
+          validationMethod = ragFlow.context ? 'rag+ai' : 'ai';
         }
 
         if (!result.valid) {
           db.rejectConcept.run(result.reason || '不符合主题', conceptId);
           emitConceptRejected(io, currentGameId, { conceptId, row, reason: result.reason });
+          auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+            prompt: aiTrace?.prompt || null,
+            response: JSON.stringify({ valid: false, reason: result.reason || '不符合主题' }),
+            rawOutput: aiTrace?.rawOutput || null,
+          });
           if (hasMode(game, settings, 'survival')) {
             applyLifePenalty(io, currentGameId, room, row.player_id, row.player_name);
           }
@@ -874,6 +929,11 @@ module.exports = function setupSocket(io) {
           result.name || row.raw_input, result.period || null, result.year ?? null,
           result.dynasty || null, result.description || null, tags, extra, conceptId
         );
+        auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+          prompt: aiTrace?.prompt || null,
+          response: JSON.stringify(result),
+          rawOutput: aiTrace?.rawOutput || null,
+        });
 
         const concept = buildAcceptedConceptPayload({
           conceptId,
