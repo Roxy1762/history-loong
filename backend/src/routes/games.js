@@ -39,6 +39,7 @@ router.post('/', (req, res) => {
   settings.ragContextMaxChars = toBoundedInt(settings.ragContextMaxChars, { defaultValue: 800, min: 200, max: 4000 });
   settings.ragFtsCandidateMultiplier = toBoundedInt(settings.ragFtsCandidateMultiplier, { defaultValue: 4, min: 1, max: 20 });
   settings.ragFtsMinCandidates = toBoundedInt(settings.ragFtsMinCandidates, { defaultValue: 12, min: 1, max: 200 });
+  settings.ragUseTopicSearch = Boolean(settings.ragUseTopicSearch);
   settings.ragShowPolishedInChat = Boolean(settings.ragShowPolishedInChat);
   const sep = typeof settings.ragJoinSeparator === 'string' ? settings.ragJoinSeparator : 'rule';
   settings.ragJoinSeparator = sep === 'double_newline' ? 'double_newline' : 'rule';

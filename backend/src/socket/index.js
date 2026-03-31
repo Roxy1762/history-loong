@@ -473,6 +473,7 @@ module.exports = function setupSocket(io) {
             ...settings,
             topicQuery: auxPlan.topicQuery || game.topic,
             conceptQuery: auxPlan.conceptQuery || input,
+            useTopicSearch: Boolean(settings?.ragUseTopicSearch) && auxPlan.useTopicSearch !== false,
           })
           : { context: '', trace: { stage: 'aux_skip', note: auxPlan.note || 'skip rag' } };
         const knowledgeContextRaw = ragFlow.context;
@@ -505,6 +506,11 @@ module.exports = function setupSocket(io) {
 
         const msElapsed = Date.now() - tsAI;
         const conceptId = uuidv4();
+        const auxiliary = {
+          plan: auxPlan?._trace || null,
+          guard: guardResult.trace || null,
+          aiValidation: aiTrace?.auxiliary || [],
+        };
 
         if (!result.valid) {
           db.insertConcept.run(conceptId, currentGameId, currentPlayer.id, currentPlayer.name,
@@ -520,12 +526,9 @@ module.exports = function setupSocket(io) {
                 context: knowledgeContext || '',
                 flow: ragFlow.trace,
                 auxPlan,
-                auxTrace: {
-                  plan: auxPlan?._trace || null,
-                  guard: guardResult.trace || null,
-                  aiValidation: aiTrace?.auxiliary || [],
-                },
+                auxTrace: auxiliary,
               },
+              auxiliary,
             }),
             provider: aiTrace?.provider || null,
             model: aiTrace?.model || null,
@@ -565,12 +568,9 @@ module.exports = function setupSocket(io) {
               context: aiTrace?.knowledgeContext || '',
               flow: ragFlow.trace,
               auxPlan,
-              auxTrace: {
-                plan: auxPlan?._trace || null,
-                guard: guardResult.trace || null,
-                aiValidation: aiTrace?.auxiliary || [],
-              },
+              auxTrace: auxiliary,
             },
+            auxiliary,
           }),
           provider: aiTrace?.provider || null,
           model: aiTrace?.model || null,

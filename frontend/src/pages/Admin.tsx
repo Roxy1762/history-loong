@@ -14,7 +14,7 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
   adminGetLogs, getGameModes,
@@ -853,6 +853,7 @@ function normalizeKnowledgeNumericInputs<T extends {
   roomDefaultContextMaxChars: number;
   roomDefaultFtsMultiplier: number;
   roomDefaultFtsMinCandidates: number;
+  roomDefaultUseTopicSearch: boolean;
 }>(knowledge: T): T {
   return {
     ...knowledge,
@@ -869,6 +870,7 @@ function normalizeKnowledgeNumericInputs<T extends {
     roomDefaultContextMaxChars: clampInt(knowledge.roomDefaultContextMaxChars, 200, 4000, 800),
     roomDefaultFtsMultiplier: clampInt(knowledge.roomDefaultFtsMultiplier, 1, 20, 4),
     roomDefaultFtsMinCandidates: clampInt(knowledge.roomDefaultFtsMinCandidates, 1, 200, 12),
+    roomDefaultUseTopicSearch: Boolean(knowledge.roomDefaultUseTopicSearch),
   };
 }
 
@@ -907,6 +909,7 @@ function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
     roomDefaultContextMaxChars: typeof extra?.kb_room_default_context_max_chars === 'number' ? extra.kb_room_default_context_max_chars : 800,
     roomDefaultFtsMultiplier: typeof extra?.kb_room_default_fts_multiplier === 'number' ? extra.kb_room_default_fts_multiplier : 4,
     roomDefaultFtsMinCandidates: typeof extra?.kb_room_default_fts_min_candidates === 'number' ? extra.kb_room_default_fts_min_candidates : 12,
+    roomDefaultUseTopicSearch: typeof extra?.kb_room_default_use_topic_search === 'boolean' ? extra.kb_room_default_use_topic_search : false,
     roomDefaultShowPolishedInChat: typeof extra?.kb_room_default_show_polished_in_chat === 'boolean' ? extra.kb_room_default_show_polished_in_chat : false,
     roomDefaultJoinSeparator: extra?.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
   };
@@ -937,6 +940,7 @@ function writeKnowledgeExtra(
     roomDefaultContextMaxChars: number;
     roomDefaultFtsMultiplier: number;
     roomDefaultFtsMinCandidates: number;
+    roomDefaultUseTopicSearch: boolean;
     roomDefaultShowPolishedInChat: boolean;
     roomDefaultJoinSeparator: string;
   },
@@ -967,6 +971,7 @@ function writeKnowledgeExtra(
   delete merged.kb_room_default_context_max_chars;
   delete merged.kb_room_default_fts_multiplier;
   delete merged.kb_room_default_fts_min_candidates;
+  delete merged.kb_room_default_use_topic_search;
   delete merged.kb_room_default_show_polished_in_chat;
   delete merged.kb_room_default_join_separator;
 
@@ -981,6 +986,7 @@ function writeKnowledgeExtra(
     next.enabled || next.embeddingEnabled || next.rerankEnabled ||
     next.roomDefaultTopicTopN || next.roomDefaultConceptTopN || next.roomDefaultContextMaxChars ||
     next.roomDefaultFtsMultiplier || next.roomDefaultFtsMinCandidates ||
+    next.roomDefaultUseTopicSearch ||
     next.roomDefaultShowPolishedInChat
   );
   if (!hasAnyValue) return merged;
@@ -1008,6 +1014,7 @@ function writeKnowledgeExtra(
   merged.kb_room_default_context_max_chars = Number(next.roomDefaultContextMaxChars) || 800;
   merged.kb_room_default_fts_multiplier = Number(next.roomDefaultFtsMultiplier) || 4;
   merged.kb_room_default_fts_min_candidates = Number(next.roomDefaultFtsMinCandidates) || 12;
+  merged.kb_room_default_use_topic_search = Boolean(next.roomDefaultUseTopicSearch);
   merged.kb_room_default_show_polished_in_chat = Boolean(next.roomDefaultShowPolishedInChat);
   merged.kb_room_default_join_separator = next.roomDefaultJoinSeparator === 'double_newline' ? 'double_newline' : 'rule';
 
@@ -1293,6 +1300,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     roomDefaultContextMaxChars: initialKnowledge.roomDefaultContextMaxChars,
     roomDefaultFtsMultiplier: initialKnowledge.roomDefaultFtsMultiplier,
     roomDefaultFtsMinCandidates: initialKnowledge.roomDefaultFtsMinCandidates,
+    roomDefaultUseTopicSearch: initialKnowledge.roomDefaultUseTopicSearch,
     roomDefaultShowPolishedInChat: initialKnowledge.roomDefaultShowPolishedInChat,
     roomDefaultJoinSeparator: initialKnowledge.roomDefaultJoinSeparator,
   });
@@ -1313,6 +1321,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [checkingEmbedding, setCheckingEmbedding] = useState(false);
   const [checkingRerank, setCheckingRerank] = useState(false);
+  const [checkingAuxiliary, setCheckingAuxiliary] = useState(false);
   const [err, setErr] = useState('');
   const [knowledgeCheckMsg, setKnowledgeCheckMsg] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
@@ -1443,6 +1452,26 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       setKnowledgeCheckMsg(`❌ ${formatApiError(e, 'Rerank 检测失败')}`);
     } finally {
       setCheckingRerank(false);
+    }
+  }
+
+  async function handleCheckAuxiliary() {
+    setCheckingAuxiliary(true);
+    setKnowledgeCheckMsg('');
+    try {
+      const payload = {
+        providerType: aux.providerType,
+        baseUrl: aux.baseUrl.trim(),
+        apiKey: aux.apiKey === SECRET_MASK ? initialAux.apiKey : aux.apiKey.trim(),
+        model: aux.model.trim(),
+        systemPrompt: aux.systemPrompt.trim(),
+      };
+      const res = await adminCheckAuxiliary(payload);
+      setKnowledgeCheckMsg(`✅ ${res.message}（${res.provider} / ${res.model}）`);
+    } catch (e: unknown) {
+      setKnowledgeCheckMsg(`❌ ${formatApiError(e, '辅助 LLM 检测失败')}`);
+    } finally {
+      setCheckingAuxiliary(false);
     }
   }
 
@@ -1738,6 +1767,14 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               <label className="inline-flex items-center gap-2 text-xs text-slate-700">
                 <input
                   type="checkbox"
+                  checked={knowledge.roomDefaultUseTopicSearch}
+                  onChange={e => updateKnowledge('roomDefaultUseTopicSearch', e.target.checked)}
+                />
+                默认启用主题词检索（建议关闭）
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
                   checked={knowledge.roomDefaultShowPolishedInChat}
                   onChange={e => updateKnowledge('roomDefaultShowPolishedInChat', e.target.checked)}
                 />
@@ -1782,6 +1819,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               </button>
               <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckRerank} disabled={checkingRerank}>
                 {checkingRerank ? 'Rerank 检测中...' : '检测 Rerank'}
+              </button>
+              <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckAuxiliary} disabled={checkingAuxiliary}>
+                {checkingAuxiliary ? '辅助 LLM 检测中...' : '检测辅助 LLM'}
               </button>
             </div>
             {knowledgeCheckMsg && (
@@ -2976,6 +3016,7 @@ function AIDecisionsPanel() {
                     try {
                       const parsed = JSON.parse(selected.ai_response);
                       const rag = parsed?.rag;
+                      const auxiliary = parsed?.auxiliary || rag?.auxTrace;
                       const rawOutput = parsed?.rawOutput;
                       const ragFlow = rag?.flow;
                       return (
@@ -2999,6 +3040,14 @@ function AIDecisionsPanel() {
                               <div className="text-xs font-semibold text-slate-600 mb-1">🧠 模型原始输出</div>
                               <pre className="text-xs font-mono bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-amber-900 max-h-52 overflow-y-auto">
                                 {String(rawOutput)}
+                              </pre>
+                            </div>
+                          )}
+                          {auxiliary && (
+                            <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-700">
+                              <div className="font-semibold mb-1">🧩 辅助 LLM 日志</div>
+                              <pre className="mt-1 text-[11px] font-mono bg-white/70 border border-emerald-100 rounded p-2 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                                {JSON.stringify(auxiliary, null, 2)}
                               </pre>
                             </div>
                           )}

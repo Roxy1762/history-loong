@@ -18,6 +18,7 @@ const RAG_PARAM_DOCS = [
   { name: '上下文最大字数', desc: '送入模型前，RAG 文本允许的最大长度。过小会丢信息，过大可能增加延迟与成本。' },
   { name: 'FTS 候选倍率', desc: '全文检索阶段的候选放大倍数。值越大，重排器选择空间越大，但检索耗时也会上升。' },
   { name: 'FTS 最少候选数', desc: '全文检索至少保留的候选条目数。用于避免低召回场景下候选过少。' },
+  { name: '启用主题词检索', desc: '默认关闭。仅检索概念词可减少“近代史”等大主题带来的噪声；开启后会同时检索主题与概念。' },
   { name: '拼接分隔', desc: '控制多段 RAG 文本如何拼接：分隔线更清晰，空行更紧凑。' },
   { name: '在聊天区显示 AI 教材摘录', desc: '开启后，聊天区会展示模型使用的参考摘录，便于教学和溯源。' },
 ];
@@ -67,6 +68,7 @@ export default function Home() {
   const [ragContextMaxCharsInput, setRagContextMaxCharsInput] = useState(String(RAG_LIMITS.contextMaxChars.fallback));
   const [ragFtsCandidateMultiplierInput, setRagFtsCandidateMultiplierInput] = useState(String(RAG_LIMITS.ftsCandidateMultiplier.fallback));
   const [ragFtsMinCandidatesInput, setRagFtsMinCandidatesInput] = useState(String(RAG_LIMITS.ftsMinCandidates.fallback));
+  const [ragUseTopicSearch, setRagUseTopicSearch] = useState(false);
   const [ragShowPolishedInChat, setRagShowPolishedInChat] = useState(false);
   const [ragJoinSeparator, setRagJoinSeparator] = useState<'rule' | 'double_newline'>('rule');
   const [showRagHelp, setShowRagHelp] = useState(false);
@@ -84,6 +86,7 @@ export default function Home() {
       if (Number.isFinite(Number(d.ragContextMaxChars))) setRagContextMaxCharsInput(String(Number(d.ragContextMaxChars)));
       if (Number.isFinite(Number(d.ragFtsCandidateMultiplier))) setRagFtsCandidateMultiplierInput(String(Number(d.ragFtsCandidateMultiplier)));
       if (Number.isFinite(Number(d.ragFtsMinCandidates))) setRagFtsMinCandidatesInput(String(Number(d.ragFtsMinCandidates)));
+      if (typeof d.ragUseTopicSearch === 'boolean') setRagUseTopicSearch(d.ragUseTopicSearch);
       if (typeof d.ragShowPolishedInChat === 'boolean') setRagShowPolishedInChat(d.ragShowPolishedInChat);
       if (d.ragJoinSeparator === 'double_newline' || d.ragJoinSeparator === 'rule') {
         setRagJoinSeparator(d.ragJoinSeparator);
@@ -140,6 +143,7 @@ export default function Home() {
       settings.ragContextMaxChars = ragContextMaxChars;
       settings.ragFtsCandidateMultiplier = ragFtsCandidateMultiplier;
       settings.ragFtsMinCandidates = ragFtsMinCandidates;
+      settings.ragUseTopicSearch = ragUseTopicSearch;
       settings.ragShowPolishedInChat = ragShowPolishedInChat;
       settings.ragJoinSeparator = ragJoinSeparator;
 
@@ -538,6 +542,15 @@ export default function Home() {
                                 </select>
                               </div>
                             </div>
+                            <label className="mt-2 inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                              <input
+                                type="checkbox"
+                                checked={ragUseTopicSearch}
+                                onChange={e => setRagUseTopicSearch(e.target.checked)}
+                                style={{ accentColor: 'var(--brand)' }}
+                              />
+                              启用主题词检索（默认关闭）
+                            </label>
                             <label className="mt-2 inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
                               <input
                                 type="checkbox"

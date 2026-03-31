@@ -215,6 +215,19 @@ export async function adminCheckRerank(knowledge?: KnowledgeCheckPayload) {
   return data as { message: string; ok: boolean; model: string; endpoint: string; topResult?: string };
 }
 
+export interface AuxiliaryCheckPayload {
+  providerType?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  systemPrompt?: string;
+}
+
+export async function adminCheckAuxiliary(auxiliary?: AuxiliaryCheckPayload) {
+  const { data } = await api.post('/admin/knowledge/check/auxiliary', { auxiliary }, { headers: adminHeaders() });
+  return data as { message: string; ok: boolean; provider: string; model: string; baseUrl: string; reply?: string };
+}
+
 // ── Admin: Game Management ───────────────────────────────────────────────────
 
 export interface AdminGame extends Game {

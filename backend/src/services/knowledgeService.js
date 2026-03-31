@@ -186,8 +186,22 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
   const runtime = getRagRuntimeConfig(runtimeOverrides);
   const conceptQuery = runtimeOverrides?.conceptQuery || concept;
   const topicQuery = runtimeOverrides?.topicQuery || topic;
+  const useTopicSearch = runtimeOverrides?.useTopicSearch != null
+    ? runtimeOverrides.useTopicSearch !== false
+    : runtime.useTopicSearch !== false;
+  const byTopicPromise = useTopicSearch
+    ? searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime)
+    : Promise.resolve({
+      context: '',
+      trace: {
+        query: topicQuery,
+        stage: 'skipped_topic',
+        candidates: 0,
+        ranked: [],
+      },
+    });
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime),
+    byTopicPromise,
     searchContextAdvancedWithTrace(conceptQuery, runtime.conceptTopN, runtime),
   ]);
   const combined = [byTopic.context, byConcept.context].filter(Boolean).join(runtime.joinSeparator);
@@ -198,6 +212,7 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
       concept: byConcept.trace,
       topicQuery,
       conceptQuery,
+      useTopicSearch,
       runtime,
     },
   };
@@ -314,6 +329,7 @@ function normalizeRagRuntimeOverrides(input = {}) {
     candidateMultiplier: src.ragFtsCandidateMultiplier ?? src.candidateMultiplier,
     contextMaxChars: src.ragContextMaxChars ?? src.contextMaxChars,
     ftsMinCandidates: src.ragFtsMinCandidates ?? src.ftsMinCandidates,
+    useTopicSearch: src.ragUseTopicSearch ?? src.useTopicSearch,
     showPolishedInChat: src.ragShowPolishedInChat ?? src.showPolishedInChat,
     joinSeparator: src.ragJoinSeparator ?? src.joinSeparator,
     polishEnabled: src.ragPolishEnabled ?? src.polishEnabled,
@@ -339,6 +355,7 @@ function getRagRuntimeConfig(overridesInput = {}) {
     polishEnabled: o.polishEnabled == null ? true : Boolean(o.polishEnabled),
     polishMaxChars: clampInt(o.polishMaxChars, 1200, 200, 4000),
     ftsMinCandidates: clampInt(o.ftsMinCandidates, 12, 1, 200),
+    useTopicSearch: Boolean(o.useTopicSearch),
     showPolishedInChat: Boolean(o.showPolishedInChat),
     joinSeparator: o.joinSeparator === 'double_newline' ? '\n\n' : '\n---\n',
   };

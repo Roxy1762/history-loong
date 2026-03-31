@@ -81,6 +81,7 @@ app.get('/api/modes', (_req, res) => {
       ragContextMaxChars: Number.isFinite(Number(extra.kb_room_default_context_max_chars)) ? Number(extra.kb_room_default_context_max_chars) : 800,
       ragFtsCandidateMultiplier: Number.isFinite(Number(extra.kb_room_default_fts_multiplier)) ? Number(extra.kb_room_default_fts_multiplier) : 4,
       ragFtsMinCandidates: Number.isFinite(Number(extra.kb_room_default_fts_min_candidates)) ? Number(extra.kb_room_default_fts_min_candidates) : 12,
+      ragUseTopicSearch: Boolean(extra.kb_room_default_use_topic_search),
       ragShowPolishedInChat: Boolean(extra.kb_room_default_show_polished_in_chat),
       ragJoinSeparator: extra.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
     };
