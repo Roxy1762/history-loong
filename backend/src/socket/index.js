@@ -467,8 +467,17 @@ module.exports = function setupSocket(io) {
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
 
-        const ragFlow = await getContextForConceptAdvancedWithTrace(input, game.topic, settings);
-        const knowledgeContext = ragFlow.context;
+        const auxPlan = await ai.planValidationAssist(input, game.topic, existing);
+        const ragFlow = auxPlan.useRag
+          ? await getContextForConceptAdvancedWithTrace(input, game.topic, {
+            ...settings,
+            topicQuery: auxPlan.topicQuery || game.topic,
+            conceptQuery: auxPlan.conceptQuery || input,
+          })
+          : { context: '', trace: { stage: 'aux_skip', note: auxPlan.note || 'skip rag' } };
+        const knowledgeContextRaw = ragFlow.context;
+        const guardResult = await ai.guardRagContext(game.topic, input, knowledgeContextRaw);
+        const knowledgeContext = guardResult.context;
         const polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
           ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)
           : '';
@@ -506,10 +515,21 @@ module.exports = function setupSocket(io) {
             response: JSON.stringify({
               result: { valid: false, reason: result.reason },
               rawOutput: aiTrace?.rawOutput || null,
+              auxiliary: {
+                plan: auxPlan?._trace || null,
+                guard: guardResult.trace || null,
+                aiValidation: aiTrace?.auxiliary || [],
+              },
               rag: {
                 used: Boolean(knowledgeContext),
                 context: knowledgeContext || '',
                 flow: ragFlow.trace,
+                auxPlan,
+                auxTrace: {
+                  plan: auxPlan?._trace || null,
+                  guard: guardResult.trace || null,
+                  aiValidation: aiTrace?.auxiliary || [],
+                },
               },
             }),
             provider: aiTrace?.provider || null,
@@ -542,13 +562,24 @@ module.exports = function setupSocket(io) {
 
         auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
           prompt: aiTrace?.prompt || null,
-          response: JSON.stringify({
-            result,
-            rawOutput: aiTrace?.rawOutput || null,
-            rag: {
-              used: Boolean(aiTrace?.ragUsed),
-              context: aiTrace?.knowledgeContext || '',
-              flow: ragFlow.trace,
+            response: JSON.stringify({
+              result,
+              rawOutput: aiTrace?.rawOutput || null,
+              auxiliary: {
+                plan: auxPlan?._trace || null,
+                guard: guardResult.trace || null,
+                aiValidation: aiTrace?.auxiliary || [],
+              },
+              rag: {
+                used: Boolean(aiTrace?.ragUsed),
+                context: aiTrace?.knowledgeContext || '',
+                flow: ragFlow.trace,
+              auxPlan,
+              auxTrace: {
+                plan: auxPlan?._trace || null,
+                guard: guardResult.trace || null,
+                aiValidation: aiTrace?.auxiliary || [],
+              },
             },
           }),
           provider: aiTrace?.provider || null,

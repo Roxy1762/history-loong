@@ -411,6 +411,18 @@ router.post('/ai-configs/:id/test', async (req, res) => {
   }
 });
 
+router.post('/ai-configs/:id/test-aux', async (req, res) => {
+  const row = db.getAIConfig.get(req.params.id);
+  if (!row) return res.status(404).json({ error: '配置不存在' });
+  row.extra = JSON.parse(row.extra || '{}');
+  try {
+    const reply = await ai.testAuxiliaryFromConfig(row);
+    res.json({ ok: true, reply });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
 // ── Knowledge Base ────────────────────────────────────────────────────────────
 
 router.get('/knowledge', (_req, res) => {
