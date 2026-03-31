@@ -81,6 +81,8 @@ async function vectorizeDocument(docId) {
     await embedTexts(config, texts);
   }
 
+  db.markDocVectorized.run(docId);
+
   return { docId, chunks: chunks.length, vectorized: chunks.length };
 }
 
@@ -132,15 +134,39 @@ function getContextForConcept(concept, topic) {
  * Falls back to plain FTS when config is missing or remote calls fail.
  */
 async function searchContextAdvanced(query, topN = 4) {
-  if (!query) return '';
+  const { context } = await searchContextAdvancedWithTrace(query, topN);
+  return context;
+}
+
+async function searchContextAdvancedWithTrace(query, topN = 4) {
+  if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
   try {
     const candidates = searchChunksByFTS(query, Math.max(12, topN * 4));
-    if (!candidates.length) return '';
+    if (!candidates.length) return { context: '', trace: { query, stage: 'fts', candidates: 0, ranked: [] } };
     const ranked = await rankChunks(query, candidates, topN);
     const texts = ranked.map(r => r.content).filter(Boolean);
-    return texts.join('\n---\n');
+    return {
+      context: texts.join('\n---\n'),
+      trace: {
+        query,
+        stage: 'advanced',
+        candidates: candidates.length,
+        ranked: ranked.map((r, idx) => ({
+          rank: idx + 1,
+          score: Number.isFinite(r.finalScore) ? Number(r.finalScore.toFixed(6)) : null,
+          embedScore: Number.isFinite(r.embedScore) ? Number(r.embedScore.toFixed(6)) : null,
+          rerankScore: Number.isFinite(r.rerankScore) ? Number(r.rerankScore.toFixed(6)) : null,
+          ftsRank: r.ftsRank,
+          preview: String(r.content || '').slice(0, 80),
+        })),
+      },
+    };
   } catch {
-    return searchContext(query, topN);
+    const fallback = searchContext(query, topN);
+    return {
+      context: fallback,
+      trace: { query, stage: 'fallback_fts', candidates: 0, ranked: [] },
+    };
   }
 }
 
@@ -148,12 +174,23 @@ async function searchContextAdvanced(query, topN = 4) {
  * Advanced combined context for a concept submission.
  */
 async function getContextForConceptAdvanced(concept, topic) {
+  const { context } = await getContextForConceptAdvancedWithTrace(concept, topic);
+  return context;
+}
+
+async function getContextForConceptAdvancedWithTrace(concept, topic) {
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvanced(topic, 1),
-    searchContextAdvanced(concept, 2),
+    searchContextAdvancedWithTrace(topic, 1),
+    searchContextAdvancedWithTrace(concept, 2),
   ]);
-  const combined = [byTopic, byConcept].filter(Boolean).join('\n---\n');
-  return combined ? combined.slice(0, 800) : '';
+  const combined = [byTopic.context, byConcept.context].filter(Boolean).join('\n---\n');
+  return {
+    context: combined ? combined.slice(0, 800) : '',
+    trace: {
+      topic: byTopic.trace,
+      concept: byConcept.trace,
+    },
+  };
 }
 
 function searchChunksByFTS(query, limit = 20) {
@@ -273,21 +310,26 @@ async function testRerankConnection(overridesInput) {
 
 async function rankChunks(query, candidates, topN) {
   const config = getSiliconFlowConfig();
-  let ranked = candidates.slice();
+  let ranked = deduplicateCandidates(candidates);
 
   if (config.enableEmbedding) {
     try {
       const [queryVec] = await embedTexts(config, [query]);
       const docVecs = await embedTexts(config, ranked.map(c => c.content));
       ranked = ranked
-        .map((c, idx) => ({ ...c, score: cosineSimilarity(queryVec, docVecs[idx]) }))
-        .sort((a, b) => b.score - a.score);
+        .map((c, idx) => {
+          const embedScore = cosineSimilarity(queryVec, docVecs[idx]);
+          const ftsPrior = 1 / (1 + (c.ftsRank ?? idx));
+          const hybridScore = embedScore * 0.85 + ftsPrior * 0.15;
+          return { ...c, embedScore, hybridScore };
+        })
+        .sort((a, b) => b.hybridScore - a.hybridScore);
     } catch (err) {
       console.warn(`[KB] Embedding ranking failed, fallback to FTS: ${err.message}`);
-      ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+      ranked = ranked.map((c, idx) => ({ ...c, embedScore: null, hybridScore: -(idx + 1) }));
     }
   } else {
-    ranked = ranked.map((c, idx) => ({ ...c, score: -idx }));
+    ranked = ranked.map((c, idx) => ({ ...c, embedScore: null, hybridScore: -(idx + 1) }));
   }
 
   const rerankPoolSize = Math.max(topN * 4, topN);
@@ -300,7 +342,18 @@ async function rankChunks(query, candidates, topN) {
       console.warn(`[KB] Rerank failed, keep embedding/FTS order: ${err.message}`);
     }
   }
-  return pool.slice(0, topN);
+  return pool.slice(0, topN).map((item, idx) => {
+    const rerank = Number(item.rerankScore ?? 0);
+    const hybrid = Number(item.hybridScore ?? 0);
+    const finalScore = Number.isFinite(item.rerankScore)
+      ? rerank * 0.8 + hybrid * 0.2
+      : hybrid;
+    return {
+      ...item,
+      finalScore,
+      rank: idx + 1,
+    };
+  });
 }
 
 async function embedTexts(config, texts) {
@@ -407,6 +460,18 @@ function cacheEmbedding(key, vector) {
     const oldestKey = embeddingCache.keys().next().value;
     if (oldestKey) embeddingCache.delete(oldestKey);
   }
+}
+
+function deduplicateCandidates(candidates) {
+  const seen = new Set();
+  const out = [];
+  for (const item of candidates) {
+    const key = hashText(String(item.content || '').slice(0, 300));
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 function cosineSimilarity(a, b) {
@@ -616,7 +681,9 @@ module.exports = {
   searchContext,
   getContextForConcept,
   searchContextAdvanced,
+  searchContextAdvancedWithTrace,
   getContextForConceptAdvanced,
+  getContextForConceptAdvancedWithTrace,
   listDocuments,
   vectorizeDocument,
   testEmbeddingConnection,

@@ -157,6 +157,7 @@ export interface KnowledgeDoc {
   filename: string;
   total_chunks: number;
   created_at: string;
+  vectorized_at?: string | null;
 }
 
 export async function adminListDocs() {

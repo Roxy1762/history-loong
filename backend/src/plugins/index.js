@@ -53,7 +53,7 @@ const GAME_MODES = {
   },
   challenge: {
     label: '挑战接龙',
-    description: '每轮有随机挑战卡（如"提交军事事件""提交女性人物"），完成挑战获得额外积分',
+    description: '每轮有随机挑战卡（如"提交制度改革""提交文化艺术成就"），完成挑战获得额外积分',
   },
   survival: {
     label: '生存接龙',
