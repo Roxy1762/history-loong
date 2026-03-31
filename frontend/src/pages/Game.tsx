@@ -59,17 +59,18 @@ function getAdminKeyFromUrl(): string | null {
 function NameDialog({ initialName, onConfirm }: { initialName?: string; onConfirm: (name: string) => void }) {
   const [name, setName] = useState(initialName || '');
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xs p-7 animate-slide-up">
+    <div className="fixed inset-0 backdrop-blur-sm flex items-center justify-center z-50 p-4" style={{ background: 'rgba(10,8,5,0.55)' }}>
+      <div className="rounded-2xl shadow-2xl w-full max-w-xs p-7 animate-spring-in corner-ornament" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
         <div className="text-center mb-6">
-          <div className="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-3">🐉</div>
-          <h2 className="text-xl font-bold text-slate-800">加入游戏</h2>
-          <p className="text-sm text-slate-500 mt-1">请输入你的昵称</p>
+          <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl font-heading font-black mx-auto mb-3 text-white shadow-md"
+            style={{ background: 'var(--brand)' }}>龙</div>
+          <h2 className="text-xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>加入游戏</h2>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>请输入你的昵称</p>
         </div>
         <form onSubmit={e => { e.preventDefault(); onConfirm(name.trim() || '匿名玩家'); }} className="space-y-3">
           <input className="input text-center text-lg py-3 font-medium" placeholder="你的昵称..."
             value={name} onChange={e => setName(e.target.value)} autoFocus maxLength={20} />
-          <button type="submit" className="btn-primary w-full py-3">加入游戏</button>
+          <button type="submit" className="btn-primary w-full py-3 font-heading">加入游戏</button>
         </form>
       </div>
     </div>
@@ -83,15 +84,15 @@ function SettleOverlay() {
   if (!settle.running) return null;
   const pct = settle.total > 0 ? Math.round((settle.done / settle.total) * 100) : 0;
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-3xl shadow-2xl p-8 w-80 text-center animate-slide-up">
-        <div className="text-5xl mb-4">⚖️</div>
-        <h3 className="text-xl font-bold text-slate-800 mb-1">AI 批量结算中</h3>
-        <p className="text-sm text-slate-500 mb-6">正在验证 {settle.total} 个历史概念...</p>
-        <div className="w-full bg-slate-100 rounded-full h-3 mb-3">
-          <div className="bg-indigo-500 h-3 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+    <div className="fixed inset-0 backdrop-blur-sm flex items-center justify-center z-50" style={{ background: 'rgba(10,8,5,0.55)' }}>
+      <div className="rounded-2xl shadow-2xl p-8 w-80 text-center animate-spring-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="text-4xl mb-4">⚖️</div>
+        <h3 className="text-lg font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>AI 批量结算中</h3>
+        <p className="text-sm mb-5" style={{ color: 'var(--text-muted)' }}>正在验证 {settle.total} 个历史概念...</p>
+        <div className="w-full rounded-full h-2 mb-3 overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
+          <div className="h-2 rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'var(--brand)' }} />
         </div>
-        <div className="text-xs text-slate-400">
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
           {settle.done} / {settle.total} — 通过 {settle.accepted}，淘汰 {settle.rejected}
         </div>
       </div>
@@ -110,26 +111,26 @@ function SettleResult({
 }) {
   if (!result) return null;
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="rounded-3xl shadow-2xl w-full max-w-xs p-7 text-center animate-slide-up" style={{ background: 'var(--bg-card)' }}>
-        <div className="text-5xl mb-4">🎉</div>
-        <h3 className="text-xl font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>结算完成！</h3>
+    <div className="fixed inset-0 backdrop-blur-sm flex items-center justify-center z-50 p-4" style={{ background: 'rgba(10,8,5,0.5)' }}>
+      <div className="rounded-2xl shadow-2xl w-full max-w-xs p-6 text-center animate-spring-in corner-ornament" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="text-4xl mb-3">🎉</div>
+        <h3 className="text-lg font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>结算完成！</h3>
         {!result.endGame && (
-          <p className="text-sm mb-4" style={{ color: 'var(--text-muted)' }}>游戏仍在进行，可继续提交</p>
+          <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>游戏仍在进行，可继续提交</p>
         )}
-        <div className="grid grid-cols-2 gap-3 mb-6 mt-4">
-          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4">
-            <div className="text-3xl font-black text-emerald-600">{result.accepted}</div>
-            <div className="text-xs text-emerald-600 mt-1">✅ 通过</div>
+        <div className="grid grid-cols-2 gap-3 mb-5 mt-3">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+            <div className="text-2xl font-black text-emerald-600">{result.accepted}</div>
+            <div className="text-xs text-emerald-600 mt-0.5">通过</div>
           </div>
-          <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-            <div className="text-3xl font-black text-red-500">{result.rejected}</div>
-            <div className="text-xs text-red-500 mt-1">❌ 淘汰</div>
+          <div className="bg-red-50 border border-red-100 rounded-xl p-3">
+            <div className="text-2xl font-black text-red-500">{result.rejected}</div>
+            <div className="text-xs text-red-500 mt-0.5">淘汰</div>
           </div>
         </div>
-        <button className="btn-primary w-full py-3 mb-2" onClick={onClose}>查看时间轴</button>
+        <button className="btn-primary w-full py-2.5 mb-2 font-heading" onClick={onClose}>查看时间轴</button>
         {!result.endGame && (
-          <button className="btn-danger w-full py-2 text-sm" onClick={onEndGame}>⏹ 结束游戏</button>
+          <button className="btn-danger w-full py-2 text-sm" onClick={onEndGame}>结束游戏</button>
         )}
       </div>
     </div>

@@ -308,11 +308,17 @@ module.exports = {
   getConceptCount:   stmt(`SELECT COUNT(*) as count FROM concepts WHERE game_id = ? AND validated = 1`),
   getPendingConceptCount: stmt(`SELECT COUNT(*) as count FROM concepts WHERE game_id = ? AND validated = 0 AND rejected = 0`),
   deleteConceptsByGame: stmt(`DELETE FROM concepts WHERE game_id = ?`),
+  deleteConceptById: stmt(`DELETE FROM concepts WHERE id = ?`),
   acceptConcept: stmt(`
     UPDATE concepts SET validated=1, rejected=0, name=?, period=?, year=?, dynasty=?,
       description=?, tags=?, extra=? WHERE id=?
   `),
   rejectConcept: stmt(`UPDATE concepts SET validated=0, rejected=1, reject_reason=? WHERE id=?`),
+  updateConceptAdmin: stmt(`
+    UPDATE concepts
+       SET raw_input=?, name=?, period=?, year=?, dynasty=?, description=?, tags=?
+     WHERE id=?
+  `),
   getConceptById: stmt(`SELECT * FROM concepts WHERE id = ?`),
 
   // Messages
@@ -392,12 +398,14 @@ module.exports = {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
   getAIDecision:          stmt(`SELECT * FROM ai_decisions WHERE concept_id = ?`),
+  deleteAIDecisionByConcept: stmt(`DELETE FROM ai_decisions WHERE concept_id = ?`),
   listAIDecisions:        stmt(`SELECT d.*, c.name, c.validated, c.rejected, c.player_name, c.raw_input FROM ai_decisions d LEFT JOIN concepts c ON c.id = d.concept_id ORDER BY d.decision_made_at DESC LIMIT 200`),
   listAIDecisionsByGame:  stmt(`SELECT d.*, c.name, c.validated, c.rejected, c.player_name, c.raw_input FROM ai_decisions d LEFT JOIN concepts c ON c.id = d.concept_id WHERE d.game_id = ? ORDER BY d.decision_made_at DESC`),
 
   // Concept overrides
   insertConceptOverride: stmt(`INSERT OR REPLACE INTO concept_overrides (concept_id, original_decision, override_decision, override_reason) VALUES (?, ?, ?, ?)`),
   getConceptOverride:    stmt(`SELECT * FROM concept_overrides WHERE concept_id = ?`),
+  deleteConceptOverride: stmt(`DELETE FROM concept_overrides WHERE concept_id = ?`),
 
   // Validation cache
   getCachedValidation:   stmt(`SELECT * FROM validation_cache WHERE input_hash = ? AND topic = ? AND expires_at > datetime('now')`),
@@ -430,6 +438,7 @@ module.exports = {
   deleteCategory:          stmt(`DELETE FROM concept_categories WHERE id=?`),
   assignConceptToCategory: stmt(`INSERT OR IGNORE INTO concept_in_category (concept_id, category_id) VALUES (?, ?)`),
   removeConceptFromCategory:stmt(`DELETE FROM concept_in_category WHERE concept_id=? AND category_id=?`),
+  removeConceptFromAllCategories: stmt(`DELETE FROM concept_in_category WHERE concept_id=?`),
   getConceptCategories:    stmt(`SELECT c.* FROM concept_categories c JOIN concept_in_category cc ON cc.category_id=c.id WHERE cc.concept_id=?`),
   listKBDocsByStatus:      stmt(`SELECT * FROM knowledge_docs WHERE source='ai_confirmed' AND (status=? OR ?='') ORDER BY created_at DESC LIMIT 100`),
   updateKBDocStatus:       stmt(`UPDATE knowledge_docs SET status=? WHERE id=?`),

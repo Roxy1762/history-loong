@@ -16,7 +16,7 @@ import {
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
-  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
+  adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives, adminDeleteGameConcept, adminUpdateGameConcept,
   adminGetLogs, getGameModes,
   adminListAIConfirmed, adminDeleteAIConfirmed, adminClearAIConfirmed,
   adminGetCurationPending, adminGetCurationActive,
@@ -27,7 +27,7 @@ import {
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision,
 } from '../services/api';
-import type { Game, GameModeConfig } from '../types';
+import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
 
 // ── Login screen ──────────────────────────────────────────────────────────────
@@ -296,6 +296,12 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
     initialLives: Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3)),
   });
   const [detailPlayers, setDetailPlayers] = useState<Array<{ id: string; name: string }>>([]);
+  const [detailConcepts, setDetailConcepts] = useState<Concept[]>([]);
+  const [conceptQuery, setConceptQuery] = useState('');
+  const [conceptStatusFilter, setConceptStatusFilter] = useState<'all' | 'pending' | 'validated' | 'rejected'>('all');
+  const [selectedConceptIds, setSelectedConceptIds] = useState<Set<string>>(new Set());
+  const [editingConcept, setEditingConcept] = useState<Concept | null>(null);
+  const [batchDeletingConcepts, setBatchDeletingConcepts] = useState(false);
   const [editingLives, setEditingLives] = useState<Record<string, number>>({});
   const [modeDraft, setModeDraft] = useState(game.mode);
   const [extraModeDraft, setExtraModeDraft] = useState<string[]>(
@@ -320,14 +326,18 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
       .catch(() => {});
 
     adminGetGame(game.id)
-      .then((detail: { players: Array<{ id: string; name: string }> }) => {
+      .then((detail: { players: Array<{ id: string; name: string }>; concepts?: Concept[] }) => {
         const players = (detail.players || []).map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
         setDetailPlayers(players);
+        setDetailConcepts(detail.concepts || []);
+        setSelectedConceptIds(new Set());
         const initLives = Math.max(1, Math.min(10, Number(parsedSettings.initialLives) || 3));
         setEditingLives(Object.fromEntries(players.map((p: { id: string; name: string }) => [p.id, initLives])));
       })
       .catch(() => {
         setDetailPlayers([]);
+        setDetailConcepts([]);
+        setSelectedConceptIds(new Set());
       });
   }, [expanded, game.id, parsedSettings.initialLives]);
 
@@ -381,6 +391,117 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
     } catch (err: unknown) {
       onAction(err instanceof Error ? err.message : '血量调整失败');
     }
+  }
+
+  async function handleDeleteConcept(conceptId: string, conceptLabel: string) {
+    if (!confirm(`确认删除概念「${conceptLabel}」吗？`)) return;
+    try {
+      await adminDeleteGameConcept(game.id, conceptId);
+      setDetailConcepts(prev => prev.filter(concept => concept.id !== conceptId));
+      setSelectedConceptIds(prev => {
+        const next = new Set(prev);
+        next.delete(conceptId);
+        return next;
+      });
+      onAction(`已删除概念 ${conceptLabel}`);
+    } catch (err: unknown) {
+      onAction(err instanceof Error ? err.message : '删除概念失败');
+    }
+  }
+
+  async function handleBatchDeleteConcepts() {
+    const ids = Array.from(selectedConceptIds);
+    if (ids.length === 0) return;
+    if (!confirm(`确认批量删除这 ${ids.length} 个概念吗？此操作不可撤销。`)) return;
+    setBatchDeletingConcepts(true);
+    try {
+      const results = await Promise.allSettled(ids.map(id => adminDeleteGameConcept(game.id, id)));
+      const deletedIds = ids.filter((_, index) => results[index]?.status === 'fulfilled');
+      const failedCount = ids.length - deletedIds.length;
+      if (deletedIds.length > 0) {
+        setDetailConcepts(prev => prev.filter(concept => !deletedIds.includes(concept.id)));
+        setSelectedConceptIds(new Set());
+      }
+      onAction(
+        failedCount > 0
+          ? `已删除 ${deletedIds.length} 个概念，失败 ${failedCount} 个`
+          : `已批量删除 ${deletedIds.length} 个概念`
+      );
+    } catch (err: unknown) {
+      onAction(err instanceof Error ? err.message : '批量删除概念失败');
+    } finally {
+      setBatchDeletingConcepts(false);
+    }
+  }
+
+  async function handleEditConcept(patches: {
+    raw_input?: string;
+    name?: string;
+    dynasty?: string | null;
+    period?: string | null;
+    year?: number | null;
+    description?: string | null;
+    tags?: string[];
+  }) {
+    if (!editingConcept) return;
+    try {
+      const result = await adminUpdateGameConcept(game.id, editingConcept.id, patches);
+      setDetailConcepts(prev => prev.map(concept => (
+        concept.id === editingConcept.id ? result.concept : concept
+      )));
+      setEditingConcept(null);
+      onAction(`已更新概念 ${result.concept.name || result.concept.raw_input}`);
+    } catch (err: unknown) {
+      throw err instanceof Error ? err : new Error('保存概念失败');
+    }
+  }
+
+  function toggleConceptSelected(conceptId: string) {
+    setSelectedConceptIds(prev => {
+      const next = new Set(prev);
+      if (next.has(conceptId)) next.delete(conceptId);
+      else next.add(conceptId);
+      return next;
+    });
+  }
+
+  const filteredConcepts = detailConcepts.filter(concept => {
+    const matchesStatus = conceptStatusFilter === 'all'
+      ? true
+      : conceptStatusFilter === 'validated'
+        ? concept.validated === 1
+        : conceptStatusFilter === 'rejected'
+          ? concept.rejected === 1
+          : concept.validated !== 1 && concept.rejected !== 1;
+    if (!matchesStatus) return false;
+    const keyword = conceptQuery.trim().toLowerCase();
+    if (!keyword) return true;
+    const haystack = [
+      concept.name,
+      concept.raw_input,
+      concept.player_name,
+      concept.dynasty,
+      concept.period,
+      concept.description,
+      concept.year != null ? String(concept.year) : '',
+      ...concept.tags,
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(keyword);
+  });
+
+  const allFilteredSelected = filteredConcepts.length > 0
+    && filteredConcepts.every(concept => selectedConceptIds.has(concept.id));
+
+  function toggleSelectAllFiltered() {
+    setSelectedConceptIds(prev => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filteredConcepts.forEach(concept => next.delete(concept.id));
+      } else {
+        filteredConcepts.forEach(concept => next.add(concept.id));
+      }
+      return next;
+    });
   }
 
   async function saveModes() {
@@ -487,6 +608,126 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
                   className="mt-1.5 text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors font-medium">
                   {savingNotes ? '保存中...' : '保存备注'}
                 </button>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-600">概念管理</div>
+                    <div className="text-[11px] text-slate-400">支持搜索、状态筛选、批量删除和编辑</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500">共 {detailConcepts.length} 条</span>
+                    <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] text-indigo-600">当前 {filteredConcepts.length} 条</span>
+                  </div>
+                </div>
+
+                <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
+                  <input
+                    type="text"
+                    value={conceptQuery}
+                    onChange={e => setConceptQuery(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    placeholder="搜索概念名、原始输入、玩家、朝代、标签"
+                  />
+                  <select
+                    value={conceptStatusFilter}
+                    onChange={e => setConceptStatusFilter(e.target.value as 'all' | 'pending' | 'validated' | 'rejected')}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  >
+                    <option value="all">全部状态</option>
+                    <option value="pending">待处理</option>
+                    <option value="validated">已通过</option>
+                    <option value="rejected">已驳回</option>
+                  </select>
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-500">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={allFilteredSelected}
+                        onChange={toggleSelectAllFiltered}
+                        disabled={filteredConcepts.length === 0}
+                      />
+                      <span>全选当前结果</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleBatchDeleteConcepts}
+                      disabled={selectedConceptIds.size === 0 || batchDeletingConcepts}
+                      className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {batchDeletingConcepts ? '删除中...' : `批量删除 (${selectedConceptIds.size})`}
+                    </button>
+                  </div>
+                </div>
+
+                {detailConcepts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                    暂无概念数据
+                  </div>
+                ) : filteredConcepts.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">
+                    没有符合当前搜索或筛选条件的概念
+                  </div>
+                ) : (
+                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    {filteredConcepts.map(concept => {
+                      const label = concept.name || concept.raw_input || concept.id;
+                      const statusText = concept.validated ? '已通过' : concept.rejected ? '已驳回' : '待处理';
+                      const statusClass = concept.validated
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : concept.rejected
+                          ? 'bg-red-50 text-red-600'
+                          : 'bg-amber-50 text-amber-700';
+                      const metaParts = [
+                        concept.player_name || '未知玩家',
+                        concept.year != null ? String(concept.year) : '',
+                        concept.dynasty || '',
+                        concept.period || '',
+                      ].filter(Boolean);
+
+                      return (
+                        <div key={concept.id} className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                          <label className="flex items-center">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                              checked={selectedConceptIds.has(concept.id)}
+                              onChange={() => toggleConceptSelected(concept.id)}
+                            />
+                          </label>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="truncate text-sm font-medium text-slate-800">{label}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] ${statusClass}`}>{statusText}</span>
+                            </div>
+                            <div className="mt-1 truncate text-xs text-slate-400">{metaParts.join(' · ')}</div>
+                            {concept.description && (
+                              <div className="mt-1 line-clamp-1 text-xs text-slate-500">{concept.description}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingConcept(concept)}
+                              className="rounded-lg bg-indigo-50 px-2.5 py-1.5 text-xs text-indigo-600 transition-colors hover:bg-indigo-100"
+                            >
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteConcept(concept.id, String(label))}
+                              className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 transition-colors hover:bg-red-100"
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Quick settings */}
@@ -693,7 +934,110 @@ function GameRow({ game, onAction }: { game: AdminGame; onAction: (msg: string) 
           </td>
         </tr>
       )}
+      {editingConcept && (
+        <EditGameConceptModal
+          concept={editingConcept}
+          onSave={handleEditConcept}
+          onClose={() => setEditingConcept(null)}
+        />
+      )}
     </>
+  );
+}
+
+function EditGameConceptModal({
+  concept,
+  onSave,
+  onClose,
+}: {
+  concept: Concept;
+  onSave: (patches: {
+    raw_input?: string;
+    name?: string;
+    dynasty?: string | null;
+    period?: string | null;
+    year?: number | null;
+    description?: string | null;
+    tags?: string[];
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [rawInput, setRawInput] = useState(concept.raw_input ?? '');
+  const [name, setName] = useState(concept.name ?? concept.raw_input ?? '');
+  const [dynasty, setDynasty] = useState(concept.dynasty ?? '');
+  const [period, setPeriod] = useState(concept.period ?? '');
+  const [year, setYear] = useState(concept.year != null ? String(concept.year) : '');
+  const [description, setDescription] = useState(concept.description ?? '');
+  const [tagsStr, setTagsStr] = useState(Array.isArray(concept.tags) ? concept.tags.join(', ') : '');
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setErr('');
+    try {
+      const yearVal = year.trim() ? parseInt(year.trim(), 10) : null;
+      if (year.trim() && Number.isNaN(yearVal)) {
+        setErr('年份必须是整数');
+        setSaving(false);
+        return;
+      }
+      await onSave({
+        raw_input: rawInput.trim(),
+        name: name.trim(),
+        dynasty: dynasty.trim() || null,
+        period: period.trim() || null,
+        year: yearVal,
+        description: description.trim() || null,
+        tags: tagsStr.split(/[，,、]/).map(tag => tag.trim()).filter(Boolean),
+      });
+    } catch (error: unknown) {
+      setErr(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+      <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
+          <h3 className="text-lg font-bold text-slate-800">编辑房间概念</h3>
+          <button onClick={onClose} className="text-xl leading-none text-slate-400 hover:text-slate-600">×</button>
+        </div>
+        <form onSubmit={submit} className="space-y-4 p-6">
+          <FormField label="原始输入">
+            <input className="input" value={rawInput} onChange={e => setRawInput(e.target.value)} required />
+          </FormField>
+          <FormField label="概念名称">
+            <input className="input" value={name} onChange={e => setName(e.target.value)} required />
+          </FormField>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <FormField label="朝代">
+              <input className="input" value={dynasty} onChange={e => setDynasty(e.target.value)} />
+            </FormField>
+            <FormField label="时期">
+              <input className="input" value={period} onChange={e => setPeriod(e.target.value)} />
+            </FormField>
+            <FormField label="年份">
+              <input className="input" value={year} onChange={e => setYear(e.target.value)} placeholder="可填负数" />
+            </FormField>
+          </div>
+          <FormField label="简介">
+            <textarea className="input resize-none" rows={3} value={description} onChange={e => setDescription(e.target.value)} />
+          </FormField>
+          <FormField label="标签">
+            <input className="input" value={tagsStr} onChange={e => setTagsStr(e.target.value)} placeholder="用逗号分隔多个标签" />
+          </FormField>
+          {err && <p className="text-sm text-red-500">{err}</p>}
+          <div className="flex justify-end gap-3 pt-2">
+            <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
+            <button type="submit" className="btn-primary" disabled={saving}>{saving ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

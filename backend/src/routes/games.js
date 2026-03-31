@@ -4,6 +4,7 @@ const db = require('../db');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
 const messageSvc = require('../services/messageService');
 const { parseArray, parseObject, toBoundedInt } = require('../utils/json');
+const { normalizeGameSettings } = require('../utils/gameSettings');
 
 const router = express.Router();
 
@@ -33,18 +34,10 @@ router.post('/', (req, res) => {
     settings.extraModes = settings.extraModes.filter(em => em !== mode);
   }
 
-  // Normalize optional per-room RAG settings
-  settings.ragTopicTopN = toBoundedInt(settings.ragTopicTopN, { defaultValue: 1, min: 1, max: 10 });
-  settings.ragConceptTopN = toBoundedInt(settings.ragConceptTopN, { defaultValue: 2, min: 1, max: 12 });
-  settings.ragContextMaxChars = toBoundedInt(settings.ragContextMaxChars, { defaultValue: 800, min: 200, max: 4000 });
-  settings.ragFtsCandidateMultiplier = toBoundedInt(settings.ragFtsCandidateMultiplier, { defaultValue: 4, min: 1, max: 20 });
-  settings.ragFtsMinCandidates = toBoundedInt(settings.ragFtsMinCandidates, { defaultValue: 12, min: 1, max: 200 });
-  settings.ragShowPolishedInChat = Boolean(settings.ragShowPolishedInChat);
-  const sep = typeof settings.ragJoinSeparator === 'string' ? settings.ragJoinSeparator : 'rule';
-  settings.ragJoinSeparator = sep === 'double_newline' ? 'double_newline' : 'rule';
+  const normalizedSettings = normalizeGameSettings(settings);
 
   const id = uuidv4().slice(0, 8).toUpperCase();
-  db.createGame.run(id, topic.trim(), mode, JSON.stringify(settings));
+  db.createGame.run(id, topic.trim(), mode, JSON.stringify(normalizedSettings));
   const game = db.getGame.get(id);
   res.json({ game });
 });
@@ -130,7 +123,7 @@ router.post('/import', (req, res) => {
 
   // Create a new game with a fresh ID
   const newId = uuidv4().slice(0, 8).toUpperCase();
-  const settings = JSON.stringify(orig.settings || {});
+  const settings = JSON.stringify(normalizeGameSettings(orig.settings || {}));
   const topic = `[导入] ${orig.topic || '未命名游戏'}`.slice(0, 80);
 
   db.createGame.run(newId, topic, mode, settings);

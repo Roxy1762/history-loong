@@ -276,6 +276,24 @@ export async function adminUpdateGameSettings(id: string, settings: Record<strin
   return data as { message: string; settings: Record<string, unknown> };
 }
 
+export async function adminDeleteGameConcept(gameId: string, conceptId: string) {
+  const { data } = await api.delete(`/admin/games/${gameId}/concepts/${conceptId}`, { headers: adminHeaders() });
+  return data as { message: string; conceptId: string };
+}
+
+export async function adminUpdateGameConcept(gameId: string, conceptId: string, patches: {
+  raw_input?: string;
+  name?: string;
+  dynasty?: string | null;
+  period?: string | null;
+  year?: number | null;
+  description?: string | null;
+  tags?: string[];
+}) {
+  const { data } = await api.put(`/admin/games/${gameId}/concepts/${conceptId}`, patches, { headers: adminHeaders() });
+  return data as { message: string; concept: import('../types').Concept };
+}
+
 export async function adminSetPlayerLives(gameId: string, playerId: string, lives: number) {
   const { data } = await api.post(`/admin/games/${gameId}/players/${playerId}/lives`, { lives }, { headers: adminHeaders() });
   return data as { message: string; playerId: string; lives: number };

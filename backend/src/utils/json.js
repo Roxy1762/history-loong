@@ -24,9 +24,20 @@ function toBoundedInt(value, { defaultValue = 0, min = 0, max = Number.MAX_SAFE_
   return Math.min(max, Math.max(min, n));
 }
 
+function toBoolean(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (value === null || value === undefined) return defaultValue;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
 module.exports = {
   safeJsonParse,
   parseObject,
   parseArray,
   toBoundedInt,
+  toBoolean,
 };

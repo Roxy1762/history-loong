@@ -25,7 +25,7 @@ const RAG_PARAM_DOCS = [
 const EXAMPLE_TOPICS = [
   '中国古代史', '唐朝政治制度', '欧洲文艺复兴',
   '工业革命', '二战历史', '丝绸之路', '明清经济',
-  '资本主义世界殖民体系', '中国近代史', '古希腊文明',
+  '中国近代史', '古希腊文明',
 ];
 
 function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
@@ -61,7 +61,7 @@ export default function Home() {
   // Advanced settings
   const [challengeThreshold, setChallengeThreshold] = useState(2);
   const [skipCooldownMs, setSkipCooldownMs] = useState(0);
-  const [maxPlayers, setMaxPlayers] = useState(0); // 0 = unlimited
+  const [maxPlayers, setMaxPlayers] = useState(0);
   const [ragTopicTopNInput, setRagTopicTopNInput] = useState(String(RAG_LIMITS.topicTopN.fallback));
   const [ragConceptTopNInput, setRagConceptTopNInput] = useState(String(RAG_LIMITS.conceptTopN.fallback));
   const [ragContextMaxCharsInput, setRagContextMaxCharsInput] = useState(String(RAG_LIMITS.contextMaxChars.fallback));
@@ -116,12 +116,10 @@ export default function Home() {
     try {
       const settings: Record<string, unknown> = { validationMode };
       if (normalizedExtraModes.length > 0) settings.extraModes = normalizedExtraModes;
-      // Challenge settings
       if (hasChallengeMode) {
         settings.challengeThreshold = challengeThreshold;
         settings.skipCooldownMs = skipCooldownMs;
       }
-
       if (maxPlayers > 0) settings.maxPlayers = maxPlayers;
       const ragTopicTopN = parseAndClampInt(ragTopicTopNInput, RAG_LIMITS.topicTopN);
       const ragConceptTopN = parseAndClampInt(ragConceptTopNInput, RAG_LIMITS.conceptTopN);
@@ -163,45 +161,69 @@ export default function Home() {
 
   return (
     <div
-      className="min-h-screen flex flex-col relative overflow-hidden"
+      className="min-h-dvh flex flex-col relative overflow-hidden paper-bg"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="deco-blob absolute -top-40 -right-40 w-96 h-96" style={{ background: 'var(--deco-blob1)' }} />
-        <div className="deco-blob absolute -bottom-40 -left-40 w-96 h-96" style={{ background: 'var(--deco-blob2)' }} />
-        <div className="deco-blob absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px]" style={{ background: 'var(--deco-blob3)' }} />
+      {/* Background decoration — ink wash blobs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        <div className="deco-blob absolute -top-32 -right-32 w-80 h-80 opacity-70" style={{ background: 'var(--deco-blob1)' }} />
+        <div className="deco-blob absolute -bottom-32 -left-32 w-80 h-80 opacity-70" style={{ background: 'var(--deco-blob2)' }} />
+        <div className="deco-blob absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] opacity-50" style={{ background: 'var(--deco-blob3)' }} />
+        {/* Decorative Chinese characters background */}
+        <div className="absolute top-8 left-8 writing-vertical text-[80px] font-heading font-black select-none pointer-events-none opacity-[0.04]"
+          style={{ color: 'var(--text-primary)', lineHeight: 1 }}>
+          史
+        </div>
+        <div className="absolute bottom-8 right-8 writing-vertical text-[80px] font-heading font-black select-none pointer-events-none opacity-[0.04]"
+          style={{ color: 'var(--text-primary)', lineHeight: 1 }}>
+          龙
+        </div>
       </div>
 
       {/* Nav */}
-      <nav className="relative z-30 flex items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-2">
-          <span className="text-3xl animate-float">🐉</span>
-          <span className="font-heading font-bold text-xl" style={{ color: 'var(--text-primary)' }}>历史接龙</span>
+      <nav className="relative z-30 flex items-center justify-between px-5 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xl shadow-sm"
+            style={{ background: 'var(--brand)', color: '#fff' }}>
+            龙
+          </div>
+          <span className="font-heading font-bold text-lg tracking-wide" style={{ color: 'var(--text-primary)' }}>历史接龙</span>
         </div>
         <div className="flex items-center gap-2">
           <ThemeSwitcher />
           <Link
             to="/admin"
-            className="text-sm transition-colors flex items-center gap-1 px-3 py-1.5 rounded-lg"
-            style={{ color: 'var(--text-muted)' }}
-            onMouseOver={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
-            onMouseOut={e => (e.currentTarget.style.color = 'var(--text-muted)')}
+            className="text-xs transition-all flex items-center gap-1.5 px-3 py-1.5 rounded-lg border"
+            style={{
+              color: 'var(--text-muted)',
+              borderColor: 'var(--border)',
+              background: 'var(--bg-card)',
+            }}
+            onMouseOver={e => {
+              e.currentTarget.style.color = 'var(--brand)';
+              e.currentTarget.style.borderColor = 'var(--brand)';
+            }}
+            onMouseOut={e => {
+              e.currentTarget.style.color = 'var(--text-muted)';
+              e.currentTarget.style.borderColor = 'var(--border)';
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            后台管理
+            后台
           </Link>
         </div>
       </nav>
 
-      {/* Hero */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
-        <div className="text-center mb-10 animate-fade-in">
+      {/* Main content */}
+      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-6">
+
+        {/* Hero title */}
+        <div className="text-center mb-7 animate-fade-in">
           <div
-            className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full mb-5 border"
+            className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full mb-4 border"
             style={{
               background: 'var(--brand-light)',
               color: 'var(--brand)',
@@ -211,59 +233,62 @@ export default function Home() {
             <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--brand)' }} />
             多人实时 · AI 验证 · 自动时间轴
           </div>
-          <h1 className="text-5xl font-heading font-black mb-3 leading-tight" style={{ color: 'var(--text-primary)' }}>
+          <h1 className="text-4xl sm:text-5xl font-heading font-black mb-2.5 leading-tight" style={{ color: 'var(--text-primary)' }}>
             <span className="gradient-text">历史接龙</span>
           </h1>
-          <p className="text-lg max-w-md mx-auto" style={{ color: 'var(--text-secondary)' }}>
-            多人实时历史知识接龙，AI 自动验证并生成时间轴，支持导出学习成果
+          <p className="text-sm sm:text-base max-w-sm mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            多人实时历史知识接龙，AI 自动验证并生成时间轴
           </p>
         </div>
 
-        {/* Card */}
+        {/* Main card */}
         <div className="w-full max-w-md animate-slide-up" style={{ animationDelay: '60ms' }}>
           <div
-            className="overflow-hidden rounded-2xl shadow-xl"
+            className="overflow-hidden rounded-xl corner-ornament"
             style={{
               background: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              boxShadow: '0 20px 60px var(--shadow)',
+              border: '1px solid var(--border)',
+              boxShadow: '0 8px 40px var(--shadow), 0 1px 0 color-mix(in srgb, var(--gold-accent) 20%, transparent) inset',
             }}
           >
+            {/* Gold top bar */}
+            <div className="h-0.5 w-full" style={{ background: 'linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end))' }} />
+
             {/* Tab switcher */}
-            <div className="flex border-b" style={{ borderColor: 'var(--border)', background: 'var(--bg-muted)' }}>
+            <div className="flex" style={{ background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)' }}>
               {(['create', 'join'] as const).map(t => (
                 <button
                   key={t}
                   onClick={() => switchTab(t)}
-                  className="flex-1 py-3.5 text-sm font-semibold transition-all duration-200 relative"
+                  className="flex-1 py-3 text-sm font-semibold transition-all duration-200 relative"
                   style={{
                     color: tab === t ? 'var(--brand)' : 'var(--text-muted)',
                     background: tab === t ? 'var(--bg-card)' : 'transparent',
                   }}
                 >
-                  {t === 'create' ? '🎮 创建房间' : '🚪 加入房间'}
+                  {t === 'create' ? '创建房间' : '加入房间'}
                   {tab === t && (
-                    <span className="absolute bottom-0 left-4 right-4 h-0.5 rounded-t-full animate-expand-width" style={{ background: 'var(--brand)' }} />
+                    <span className="absolute bottom-0 left-6 right-6 h-0.5 rounded-t-full animate-expand-width" style={{ background: 'var(--brand)' }} />
                   )}
                 </button>
               ))}
             </div>
 
-            <div className="p-6">
+            <div className="p-5">
               <div key={tab} className={slideDir}>
                 {tab === 'create' ? (
-                  <form onSubmit={handleCreate} className="space-y-5">
+                  <form onSubmit={handleCreate} className="space-y-4">
                     {/* Topic */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>游戏主题</label>
+                      <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>游戏主题</label>
                       <input
                         className="input"
-                        placeholder="例如：中国古代史、资本主义殖民体系..."
+                        placeholder="例如：中国古代史、丝绸之路..."
                         value={topic}
                         onChange={e => setTopic(e.target.value)}
                         maxLength={50}
                       />
-                      <div className="flex flex-wrap gap-1.5 mt-2.5">
+                      <div className="flex flex-wrap gap-1.5 mt-2">
                         {EXAMPLE_TOPICS.map(t => (
                           <button
                             key={t}
@@ -282,12 +307,12 @@ export default function Home() {
 
                     {/* Primary mode */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>主要游戏模式</label>
-                      <div className="space-y-2">
+                      <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>游戏模式</label>
+                      <div className="space-y-1.5">
                         {Object.entries(modes).map(([key, cfg]) => (
                           <label
                             key={key}
-                            className={`option-card flex items-start gap-3 p-3.5 ${mode === key ? 'selected' : ''}`}
+                            className={`option-card flex items-start gap-3 p-3 ${mode === key ? 'selected' : ''}`}
                           >
                             <input
                               type="radio"
@@ -296,7 +321,6 @@ export default function Home() {
                               checked={mode === key}
                               onChange={() => {
                                 setMode(key);
-                                // Remove from extra if it was there
                                 setExtraModes(prev => prev.filter(m => m !== key));
                               }}
                               className="mt-0.5"
@@ -304,7 +328,7 @@ export default function Home() {
                             />
                             <div>
                               <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
-                              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
+                              <div className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
                             </div>
                           </label>
                         ))}
@@ -314,30 +338,30 @@ export default function Home() {
                     {/* Extra combinable modes */}
                     {Object.keys(combinableModes).length > 0 && (
                       <div>
-                        <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                        <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
                           叠加玩法
-                          <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>（可与主模式叠加）</span>
+                          <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>（可与主模式组合）</span>
                         </label>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-2 gap-1.5">
                           {Object.entries(combinableModes).map(([key, cfg]) => {
                             const isPrimary = mode === key;
                             const isChecked = extraModes.includes(key) || isPrimary;
                             return (
                               <label
                                 key={key}
-                                className={`option-card flex items-start gap-2 p-3 cursor-pointer ${isChecked ? 'selected' : ''} ${isPrimary ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                className={`option-card flex items-start gap-2 p-2.5 cursor-pointer ${isChecked ? 'selected' : ''} ${isPrimary ? 'opacity-50 cursor-not-allowed' : ''}`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
                                   disabled={isPrimary}
                                   onChange={() => !isPrimary && toggleExtraMode(key)}
-                                  className="mt-0.5"
+                                  className="mt-0.5 flex-shrink-0"
                                   style={{ accentColor: 'var(--brand)' }}
                                 />
                                 <div>
                                   <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
-                                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
+                                  <div className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
                                 </div>
                               </label>
                             );
@@ -346,46 +370,28 @@ export default function Home() {
                       </div>
                     )}
 
-                    <div className="rounded-xl border p-3" style={{ background: 'var(--bg-muted)', borderColor: 'var(--border)' }}>
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>当前生效模式</span>
-                        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                          {hasScoreMode ? '含积分结算' : '普通结算'}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {modeSummary.map(label => (
-                          <span
-                            key={label}
-                            className="text-xs px-2.5 py-1 rounded-full border font-medium"
-                            style={{
-                              background: 'var(--bg-card)',
-                              color: 'var(--text-secondary)',
-                              borderColor: 'var(--border)',
-                            }}
-                          >
-                            {label}
-                          </span>
-                        ))}
-                      </div>
+                    {/* Active modes summary */}
+                    <div className="rounded-lg px-3 py-2 flex items-center gap-2 flex-wrap" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+                      <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>当前模式：</span>
+                      {modeSummary.map(label => (
+                        <span key={label} className="badge-brand">{label}</span>
+                      ))}
                       {hasChallengeMode && (
-                        <p className="text-[11px] mt-2" style={{ color: 'var(--text-muted)' }}>
-                          挑战玩法自带奖励结算，无需再重复勾选“积分竞速”。
-                        </p>
+                        <span className="text-xs" style={{ color: 'var(--text-muted)' }}>含奖励结算</span>
                       )}
                     </div>
 
                     {/* Validation mode */}
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>验证时机</label>
-                      <div className="grid grid-cols-2 gap-2">
+                      <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>验证时机</label>
+                      <div className="grid grid-cols-2 gap-1.5">
                         {([
-                          { value: 'realtime', icon: '⚡', label: '实时验证', desc: '每次提交立即 AI 验证' },
-                          { value: 'deferred', icon: '🎯', label: '结算验证', desc: '按需批量验证，不结束游戏' },
+                          { value: 'realtime', label: '⚡ 实时验证', desc: '每次提交立即验证' },
+                          { value: 'deferred', label: '🎯 批量验证', desc: '按需批量验证' },
                         ] as const).map(opt => (
                           <label
                             key={opt.value}
-                            className={`option-card flex items-start gap-2 p-3 ${validationMode === opt.value ? 'selected' : ''}`}
+                            className={`option-card flex items-start gap-2 p-2.5 ${validationMode === opt.value ? 'selected' : ''}`}
                           >
                             <input
                               type="radio"
@@ -397,7 +403,7 @@ export default function Home() {
                               style={{ accentColor: 'var(--brand)' }}
                             />
                             <div>
-                              <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{opt.icon} {opt.label}</div>
+                              <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
                               <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{opt.desc}</div>
                             </div>
                           </label>
@@ -410,24 +416,24 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => setShowAdvanced(v => !v)}
-                        className="flex items-center gap-1.5 text-sm font-medium transition-colors"
+                        className="flex items-center gap-1.5 text-xs font-medium transition-colors"
                         style={{ color: showAdvanced ? 'var(--brand)' : 'var(--text-muted)' }}
                       >
-                        <svg className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <svg className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                         </svg>
                         高级设置
                       </button>
 
                       {showAdvanced && (
-                        <div className="mt-3 space-y-4 p-4 rounded-xl border animate-slide-down" style={{ background: 'var(--bg-muted)', borderColor: 'var(--border)' }}>
+                        <div className="mt-2.5 space-y-3.5 p-3.5 rounded-lg border animate-slide-down" style={{ background: 'var(--bg-muted)', borderColor: 'var(--border)' }}>
                           {/* Challenge settings */}
                           {showChallengeSettings && (
                             <>
                               <div>
                                 <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
-                                  🃏 挑战卡换牌阈值
-                                  <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（每完成几个概念换一张卡）</span>
+                                  挑战卡换牌阈值
+                                  <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（每完成几个概念换一张）</span>
                                 </label>
                                 <div className="flex items-center gap-2">
                                   <input
@@ -442,23 +448,23 @@ export default function Home() {
                               </div>
                               <div>
                                 <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
-                                  🔀 换题冷却时间
+                                  换题冷却时间
                                   <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（0 = 无限制）</span>
                                 </label>
-                                <div className="grid grid-cols-4 gap-1.5">
+                                <div className="grid grid-cols-4 gap-1">
                                   {[0, 10000, 30000, 60000].map(ms => (
                                     <button
                                       key={ms}
                                       type="button"
                                       onClick={() => setSkipCooldownMs(ms)}
-                                      className="text-xs py-1.5 rounded-lg border font-medium transition-all"
+                                      className="text-xs py-1.5 rounded-md border font-medium transition-all"
                                       style={{
                                         background: skipCooldownMs === ms ? 'var(--brand-light)' : 'var(--bg-card)',
                                         color: skipCooldownMs === ms ? 'var(--brand)' : 'var(--text-secondary)',
                                         borderColor: skipCooldownMs === ms ? 'color-mix(in srgb, var(--brand) 40%, transparent)' : 'var(--border)',
                                       }}
                                     >
-                                      {ms === 0 ? '无限制' : ms === 10000 ? '10秒' : ms === 30000 ? '30秒' : '60秒'}
+                                      {ms === 0 ? '无限' : ms === 10000 ? '10秒' : ms === 30000 ? '30秒' : '1分'}
                                     </button>
                                   ))}
                                 </div>
@@ -469,8 +475,8 @@ export default function Home() {
                           {/* Max players */}
                           <div>
                             <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>
-                              👥 最大玩家数
-                              <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（0 = 不限制）</span>
+                              最大玩家数
+                              <span className="ml-1 font-normal" style={{ color: 'var(--text-muted)' }}>（0 = 不限）</span>
                             </label>
                             <div className="flex items-center gap-2">
                               <input
@@ -486,22 +492,16 @@ export default function Home() {
                             </div>
                           </div>
 
-                          <div className="pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                          <div className="pt-2.5 border-t" style={{ borderColor: 'var(--border)' }}>
                             <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
-                                📚 RAG 检索参数
-                              </div>
+                              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>RAG 检索参数</div>
                               <button
                                 type="button"
                                 onClick={() => setShowRagHelp(true)}
-                                className="text-[11px] px-2 py-1 rounded-md border transition-colors"
-                                style={{
-                                  color: 'var(--text-secondary)',
-                                  borderColor: 'var(--border)',
-                                  background: 'var(--bg-card)',
-                                }}
+                                className="text-xs px-2 py-0.5 rounded border transition-colors"
+                                style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'var(--bg-card)' }}
                               >
-                                ❓ 参数说明
+                                参数说明
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
@@ -538,7 +538,7 @@ export default function Home() {
                                 </select>
                               </div>
                             </div>
-                            <label className="mt-2 inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                            <label className="mt-2 inline-flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
                               <input
                                 type="checkbox"
                                 checked={ragShowPolishedInChat}
@@ -552,33 +552,32 @@ export default function Home() {
                       )}
                     </div>
 
+                    {/* RAG Help Modal */}
                     {showRagHelp && (
                       <div
                         className="fixed inset-0 z-50 flex items-center justify-center p-4"
-                        style={{ background: 'rgba(15, 23, 42, 0.55)' }}
+                        style={{ background: 'rgba(15, 10, 5, 0.6)', backdropFilter: 'blur(4px)' }}
                         onClick={() => setShowRagHelp(false)}
                       >
                         <div
-                          className="w-full max-w-lg rounded-2xl border p-4"
+                          className="w-full max-w-lg rounded-xl border p-5 animate-spring-in"
                           style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
                           onClick={e => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>RAG 参数说明</h3>
+                            <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>RAG 参数说明</h3>
                             <button
                               type="button"
-                              className="text-sm px-2 py-1 rounded-md border"
+                              className="text-xs px-2.5 py-1 rounded border transition-colors"
                               style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
                               onClick={() => setShowRagHelp(false)}
-                            >
-                              关闭
-                            </button>
+                            >关闭</button>
                           </div>
                           <div className="space-y-2.5 text-sm max-h-[55vh] overflow-y-auto pr-1" style={{ color: 'var(--text-secondary)' }}>
                             {RAG_PARAM_DOCS.map(item => (
                               <div key={item.name}>
-                                <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{item.name}</div>
-                                <div>{item.desc}</div>
+                                <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{item.name}</div>
+                                <div className="text-xs mt-0.5 leading-relaxed">{item.desc}</div>
                               </div>
                             ))}
                           </div>
@@ -587,7 +586,7 @@ export default function Home() {
                     )}
 
                     {createError && (
-                      <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-3 py-2 animate-slide-down">
+                      <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2 animate-slide-down">
                         {createError}
                       </div>
                     )}
@@ -598,13 +597,13 @@ export default function Home() {
                           <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                           创建中...
                         </span>
-                      ) : '创建房间 →'}
+                      ) : '开始游戏 →'}
                     </button>
                   </form>
                 ) : (
                   <form onSubmit={handleJoin} className="space-y-5">
                     <div>
-                      <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>房间码</label>
+                      <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>房间码</label>
                       <input
                         className="input text-center text-2xl font-mono tracking-[0.3em] uppercase py-4"
                         placeholder="XXXXXXXX"
@@ -628,33 +627,32 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Features */}
-        <div className="mt-8 grid grid-cols-3 gap-3 w-full max-w-md animate-fade-in" style={{ animationDelay: '120ms' }}>
-          {[
-            { icon: '🤖', title: 'AI 智能验证', desc: '时代感知验证，精准分类' },
-            { icon: '📅', title: '自动时间轴', desc: '按朝代自动归类' },
-            { icon: '🎮', title: '多模式叠加', desc: '自由组合玩法规则' },
-          ].map((f, i) => (
-            <div
-              key={f.title}
-              className="backdrop-blur rounded-2xl p-4 text-center hover-lift animate-fade-in"
-              style={{
-                background: 'color-mix(in srgb, var(--bg-card) 85%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                boxShadow: '0 2px 8px var(--shadow)',
-                animationDelay: `${150 + i * 60}ms`,
-              }}
-            >
-              <div className="text-2xl mb-1.5">{f.icon}</div>
-              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{f.title}</div>
-              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{f.desc}</div>
-            </div>
-          ))}
-        </div>
+          {/* Feature cards */}
+          <div className="mt-5 grid grid-cols-3 gap-3 animate-fade-in" style={{ animationDelay: '120ms' }}>
+            {[
+              { icon: '🤖', title: 'AI 智能验证', desc: '精准分类历史概念' },
+              { icon: '📅', title: '自动时间轴', desc: '按朝代自动归类' },
+              { icon: '🎮', title: '多模式叠加', desc: '自由组合玩法规则' },
+            ].map((f, i) => (
+              <div
+                key={f.title}
+                className="rounded-xl p-3 text-center hover-lift animate-fade-in"
+                style={{
+                  background: 'color-mix(in srgb, var(--bg-card) 90%, transparent)',
+                  border: '1px solid var(--border-subtle)',
+                  animationDelay: `${150 + i * 60}ms`,
+                }}
+              >
+                <div className="text-xl mb-1">{f.icon}</div>
+                <div className="text-xs font-semibold leading-tight" style={{ color: 'var(--text-primary)' }}>{f.title}</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
 
-        <p className="mt-6 text-xs select-none" style={{ color: 'var(--border)' }}>dev 0.3.0</p>
+          <p className="mt-4 text-center text-xs select-none" style={{ color: 'var(--border)' }}>dev 0.3.0</p>
+        </div>
       </div>
     </div>
   );
