@@ -4,6 +4,24 @@ import { createGame, getGameModes } from '../services/api';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import type { GameModeConfig } from '../types';
 
+const RAG_LIMITS = {
+  topicTopN: { min: 1, max: 10, fallback: 1 },
+  conceptTopN: { min: 1, max: 12, fallback: 2 },
+  contextMaxChars: { min: 200, max: 4000, fallback: 800 },
+  ftsCandidateMultiplier: { min: 1, max: 20, fallback: 4 },
+  ftsMinCandidates: { min: 1, max: 200, fallback: 12 },
+} as const;
+
+const RAG_PARAM_DOCS = [
+  { name: '主题 TopN', desc: '先召回最相关的主题数量。数值越高，覆盖面越广，但可能引入更多噪声。' },
+  { name: '概念 TopN', desc: '每个主题下进一步选取的概念条数。适当提高可增加命中率，但会增加上下文长度。' },
+  { name: '上下文最大字数', desc: '送入模型前，RAG 文本允许的最大长度。过小会丢信息，过大可能增加延迟与成本。' },
+  { name: 'FTS 候选倍率', desc: '全文检索阶段的候选放大倍数。值越大，重排器选择空间越大，但检索耗时也会上升。' },
+  { name: 'FTS 最少候选数', desc: '全文检索至少保留的候选条目数。用于避免低召回场景下候选过少。' },
+  { name: '拼接分隔', desc: '控制多段 RAG 文本如何拼接：分隔线更清晰，空行更紧凑。' },
+  { name: '在聊天区显示 AI 教材摘录', desc: '开启后，聊天区会展示模型使用的参考摘录，便于教学和溯源。' },
+];
+
 const EXAMPLE_TOPICS = [
   '中国古代史', '唐朝政治制度', '欧洲文艺复兴',
   '工业革命', '二战历史', '丝绸之路', '明清经济',
@@ -16,6 +34,12 @@ function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
 
 function getCombinedModes(primaryMode: string, extraModes: string[]) {
   return [primaryMode, ...normalizeExtraModes(primaryMode, extraModes)];
+}
+
+function parseAndClampInt(value: string, rule: { min: number; max: number; fallback: number }) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return rule.fallback;
+  return Math.min(rule.max, Math.max(rule.min, parsed));
 }
 
 export default function Home() {
@@ -38,13 +62,14 @@ export default function Home() {
   const [challengeThreshold, setChallengeThreshold] = useState(2);
   const [skipCooldownMs, setSkipCooldownMs] = useState(0);
   const [maxPlayers, setMaxPlayers] = useState(0); // 0 = unlimited
-  const [ragTopicTopN, setRagTopicTopN] = useState(1);
-  const [ragConceptTopN, setRagConceptTopN] = useState(2);
-  const [ragContextMaxChars, setRagContextMaxChars] = useState(800);
-  const [ragFtsCandidateMultiplier, setRagFtsCandidateMultiplier] = useState(4);
-  const [ragFtsMinCandidates, setRagFtsMinCandidates] = useState(12);
+  const [ragTopicTopNInput, setRagTopicTopNInput] = useState(String(RAG_LIMITS.topicTopN.fallback));
+  const [ragConceptTopNInput, setRagConceptTopNInput] = useState(String(RAG_LIMITS.conceptTopN.fallback));
+  const [ragContextMaxCharsInput, setRagContextMaxCharsInput] = useState(String(RAG_LIMITS.contextMaxChars.fallback));
+  const [ragFtsCandidateMultiplierInput, setRagFtsCandidateMultiplierInput] = useState(String(RAG_LIMITS.ftsCandidateMultiplier.fallback));
+  const [ragFtsMinCandidatesInput, setRagFtsMinCandidatesInput] = useState(String(RAG_LIMITS.ftsMinCandidates.fallback));
   const [ragShowPolishedInChat, setRagShowPolishedInChat] = useState(false);
   const [ragJoinSeparator, setRagJoinSeparator] = useState<'rule' | 'double_newline'>('rule');
+  const [showRagHelp, setShowRagHelp] = useState(false);
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
@@ -54,11 +79,11 @@ export default function Home() {
       setModes(data.modes);
       setCombinableModes(data.combinableModes || {});
       const d = (data.ragDefaults || {}) as Record<string, unknown>;
-      if (Number.isFinite(Number(d.ragTopicTopN))) setRagTopicTopN(Math.max(1, Number(d.ragTopicTopN)));
-      if (Number.isFinite(Number(d.ragConceptTopN))) setRagConceptTopN(Math.max(1, Number(d.ragConceptTopN)));
-      if (Number.isFinite(Number(d.ragContextMaxChars))) setRagContextMaxChars(Math.max(200, Number(d.ragContextMaxChars)));
-      if (Number.isFinite(Number(d.ragFtsCandidateMultiplier))) setRagFtsCandidateMultiplier(Math.max(1, Number(d.ragFtsCandidateMultiplier)));
-      if (Number.isFinite(Number(d.ragFtsMinCandidates))) setRagFtsMinCandidates(Math.max(1, Number(d.ragFtsMinCandidates)));
+      if (Number.isFinite(Number(d.ragTopicTopN))) setRagTopicTopNInput(String(Number(d.ragTopicTopN)));
+      if (Number.isFinite(Number(d.ragConceptTopN))) setRagConceptTopNInput(String(Number(d.ragConceptTopN)));
+      if (Number.isFinite(Number(d.ragContextMaxChars))) setRagContextMaxCharsInput(String(Number(d.ragContextMaxChars)));
+      if (Number.isFinite(Number(d.ragFtsCandidateMultiplier))) setRagFtsCandidateMultiplierInput(String(Number(d.ragFtsCandidateMultiplier)));
+      if (Number.isFinite(Number(d.ragFtsMinCandidates))) setRagFtsMinCandidatesInput(String(Number(d.ragFtsMinCandidates)));
       if (typeof d.ragShowPolishedInChat === 'boolean') setRagShowPolishedInChat(d.ragShowPolishedInChat);
       if (d.ragJoinSeparator === 'double_newline' || d.ragJoinSeparator === 'rule') {
         setRagJoinSeparator(d.ragJoinSeparator);
@@ -98,6 +123,18 @@ export default function Home() {
       }
 
       if (maxPlayers > 0) settings.maxPlayers = maxPlayers;
+      const ragTopicTopN = parseAndClampInt(ragTopicTopNInput, RAG_LIMITS.topicTopN);
+      const ragConceptTopN = parseAndClampInt(ragConceptTopNInput, RAG_LIMITS.conceptTopN);
+      const ragContextMaxChars = parseAndClampInt(ragContextMaxCharsInput, RAG_LIMITS.contextMaxChars);
+      const ragFtsCandidateMultiplier = parseAndClampInt(ragFtsCandidateMultiplierInput, RAG_LIMITS.ftsCandidateMultiplier);
+      const ragFtsMinCandidates = parseAndClampInt(ragFtsMinCandidatesInput, RAG_LIMITS.ftsMinCandidates);
+
+      setRagTopicTopNInput(String(ragTopicTopN));
+      setRagConceptTopNInput(String(ragConceptTopN));
+      setRagContextMaxCharsInput(String(ragContextMaxChars));
+      setRagFtsCandidateMultiplierInput(String(ragFtsCandidateMultiplier));
+      setRagFtsMinCandidatesInput(String(ragFtsMinCandidates));
+
       settings.ragTopicTopN = ragTopicTopN;
       settings.ragConceptTopN = ragConceptTopN;
       settings.ragContextMaxChars = ragContextMaxChars;
@@ -450,34 +487,48 @@ export default function Home() {
                           </div>
 
                           <div className="pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
-                            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-                              📚 RAG 检索参数
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
+                                📚 RAG 检索参数
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setShowRagHelp(true)}
+                                className="text-[11px] px-2 py-1 rounded-md border transition-colors"
+                                style={{
+                                  color: 'var(--text-secondary)',
+                                  borderColor: 'var(--border)',
+                                  background: 'var(--bg-card)',
+                                }}
+                              >
+                                ❓ 参数说明
+                              </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>主题 TopN</label>
-                                <input className="input text-sm" type="number" min={1} max={10} value={ragTopicTopN}
-                                  onChange={e => setRagTopicTopN(Math.max(1, Number(e.target.value) || 1))} />
+                                <input className="input text-sm" type="number" min={1} max={10} value={ragTopicTopNInput}
+                                  onChange={e => setRagTopicTopNInput(e.target.value)} />
                               </div>
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>概念 TopN</label>
-                                <input className="input text-sm" type="number" min={1} max={12} value={ragConceptTopN}
-                                  onChange={e => setRagConceptTopN(Math.max(1, Number(e.target.value) || 2))} />
+                                <input className="input text-sm" type="number" min={1} max={12} value={ragConceptTopNInput}
+                                  onChange={e => setRagConceptTopNInput(e.target.value)} />
                               </div>
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>上下文最大字数</label>
-                                <input className="input text-sm" type="number" min={200} max={4000} value={ragContextMaxChars}
-                                  onChange={e => setRagContextMaxChars(Math.max(200, Number(e.target.value) || 800))} />
+                                <input className="input text-sm" type="number" min={200} max={4000} value={ragContextMaxCharsInput}
+                                  onChange={e => setRagContextMaxCharsInput(e.target.value)} />
                               </div>
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 候选倍率</label>
-                                <input className="input text-sm" type="number" min={1} max={20} value={ragFtsCandidateMultiplier}
-                                  onChange={e => setRagFtsCandidateMultiplier(Math.max(1, Number(e.target.value) || 4))} />
+                                <input className="input text-sm" type="number" min={1} max={20} value={ragFtsCandidateMultiplierInput}
+                                  onChange={e => setRagFtsCandidateMultiplierInput(e.target.value)} />
                               </div>
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 最少候选数</label>
-                                <input className="input text-sm" type="number" min={1} max={200} value={ragFtsMinCandidates}
-                                  onChange={e => setRagFtsMinCandidates(Math.max(1, Number(e.target.value) || 12))} />
+                                <input className="input text-sm" type="number" min={1} max={200} value={ragFtsMinCandidatesInput}
+                                  onChange={e => setRagFtsMinCandidatesInput(e.target.value)} />
                               </div>
                               <div>
                                 <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>拼接分隔</label>
@@ -500,6 +551,40 @@ export default function Home() {
                         </div>
                       )}
                     </div>
+
+                    {showRagHelp && (
+                      <div
+                        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                        style={{ background: 'rgba(15, 23, 42, 0.55)' }}
+                        onClick={() => setShowRagHelp(false)}
+                      >
+                        <div
+                          className="w-full max-w-lg rounded-2xl border p-4"
+                          style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>RAG 参数说明</h3>
+                            <button
+                              type="button"
+                              className="text-sm px-2 py-1 rounded-md border"
+                              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                              onClick={() => setShowRagHelp(false)}
+                            >
+                              关闭
+                            </button>
+                          </div>
+                          <div className="space-y-2.5 text-sm max-h-[55vh] overflow-y-auto pr-1" style={{ color: 'var(--text-secondary)' }}>
+                            {RAG_PARAM_DOCS.map(item => (
+                              <div key={item.name}>
+                                <div className="font-semibold" style={{ color: 'var(--text-primary)' }}>{item.name}</div>
+                                <div>{item.desc}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {createError && (
                       <div className="text-sm text-red-500 bg-red-50 border border-red-100 rounded-xl px-3 py-2 animate-slide-down">
