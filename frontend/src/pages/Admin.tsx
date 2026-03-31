@@ -818,6 +818,59 @@ function GamesPanel() {
 // ── Panel: AI Config ──────────────────────────────────────────────────────────
 
 const SECRET_MASK = '••••••••';
+const ADMIN_RAG_PARAM_DOCS = [
+  { name: '主题 TopN', desc: '先召回最相关主题数量。更大覆盖更广，但噪声也可能增加。' },
+  { name: '概念 TopN', desc: '每个主题下保留的概念条数。提高后通常能增强命中率，但会加长上下文。' },
+  { name: '上下文最大字数', desc: '送入模型的 RAG 文本长度上限。过小丢信息，过大增加延迟和成本。' },
+  { name: 'FTS 候选倍率', desc: '全文检索候选放大倍数。值越大，重排可选空间越大。' },
+  { name: 'FTS 最少候选数', desc: '全文检索阶段至少保留的候选条数，避免低召回时候选过少。' },
+  { name: '拼接分隔', desc: '多段检索文本拼接方式：分隔线更清晰，空行更紧凑。' },
+  { name: '默认在聊天区显示 AI 教材摘录', desc: '开启后，建房默认会在聊天区展示模型使用的教材摘录。' },
+];
+
+function clampInt(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  const n = Math.trunc(value);
+  return Math.min(max, Math.max(min, n));
+}
+
+function clampNumber(value: number, min: number, max: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeKnowledgeNumericInputs<T extends {
+  topicTopN: number;
+  conceptTopN: number;
+  candidateMultiplier: number;
+  contextMaxChars: number;
+  embeddingWeight: number;
+  ftsWeight: number;
+  rerankWeight: number;
+  polishMaxChars: number;
+  roomDefaultTopicTopN: number;
+  roomDefaultConceptTopN: number;
+  roomDefaultContextMaxChars: number;
+  roomDefaultFtsMultiplier: number;
+  roomDefaultFtsMinCandidates: number;
+}>(knowledge: T): T {
+  return {
+    ...knowledge,
+    topicTopN: clampInt(knowledge.topicTopN, 1, 10, 1),
+    conceptTopN: clampInt(knowledge.conceptTopN, 1, 12, 2),
+    candidateMultiplier: clampInt(knowledge.candidateMultiplier, 1, 20, 4),
+    contextMaxChars: clampInt(knowledge.contextMaxChars, 200, 4000, 800),
+    embeddingWeight: clampNumber(knowledge.embeddingWeight, 0, 1, 0.85),
+    ftsWeight: clampNumber(knowledge.ftsWeight, 0, 1, 0.15),
+    rerankWeight: clampNumber(knowledge.rerankWeight, 0, 1, 0.8),
+    polishMaxChars: clampInt(knowledge.polishMaxChars, 200, 4000, 1200),
+    roomDefaultTopicTopN: clampInt(knowledge.roomDefaultTopicTopN, 1, 10, 1),
+    roomDefaultConceptTopN: clampInt(knowledge.roomDefaultConceptTopN, 1, 12, 2),
+    roomDefaultContextMaxChars: clampInt(knowledge.roomDefaultContextMaxChars, 200, 4000, 800),
+    roomDefaultFtsMultiplier: clampInt(knowledge.roomDefaultFtsMultiplier, 1, 20, 4),
+    roomDefaultFtsMinCandidates: clampInt(knowledge.roomDefaultFtsMinCandidates, 1, 200, 12),
+  };
+}
 
 function formatApiError(err: unknown, fallback = '请求失败') {
   if (axios.isAxiosError(err)) {
@@ -1182,6 +1235,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const [err, setErr] = useState('');
   const [knowledgeCheckMsg, setKnowledgeCheckMsg] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showRagHelp, setShowRagHelp] = useState(false);
 
   function update(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
   function updateKnowledge<K extends keyof typeof knowledge>(key: K, value: typeof knowledge[K]) {
@@ -1218,12 +1272,14 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       if (knowledge.rerankEnabled && !knowledge.rerankModel.trim()) {
         throw new Error('已启用 Rerank，请填写重排序模型');
       }
+      const normalizedKnowledge = normalizeKnowledgeNumericInputs(knowledge);
+      setKnowledge(normalizedKnowledge);
 
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
         base_url: effectiveBaseUrl,
         system_prompt: form.system_prompt || undefined,
-        extra: writeKnowledgeExtra(initial?.extra || {}, knowledge, initialKnowledge.apiKey),
+        extra: writeKnowledgeExtra(initial?.extra || {}, normalizedKnowledge, initialKnowledge.apiKey),
       };
       if (initial) {
         if (form.api_key === SECRET_MASK) delete payload.api_key;
@@ -1243,24 +1299,26 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     setCheckingEmbedding(true);
     setKnowledgeCheckMsg('');
     try {
+      const normalizedKnowledge = normalizeKnowledgeNumericInputs(knowledge);
+      setKnowledge(normalizedKnowledge);
       const payload = {
-        enabled: knowledge.enabled,
-        embeddingEnabled: knowledge.embeddingEnabled,
-        rerankEnabled: knowledge.rerankEnabled,
-        apiKey: knowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : knowledge.apiKey.trim(),
-        baseUrl: knowledge.baseUrl.trim(),
-        embeddingModel: knowledge.embeddingModel.trim(),
-        rerankModel: knowledge.rerankModel.trim(),
-        rerankInstruction: knowledge.rerankInstruction.trim(),
-        topicTopN: knowledge.topicTopN,
-        conceptTopN: knowledge.conceptTopN,
-        candidateMultiplier: knowledge.candidateMultiplier,
-        contextMaxChars: knowledge.contextMaxChars,
-        embeddingWeight: knowledge.embeddingWeight,
-        ftsWeight: knowledge.ftsWeight,
-        rerankWeight: knowledge.rerankWeight,
-        polishEnabled: knowledge.polishEnabled,
-        polishMaxChars: knowledge.polishMaxChars,
+        enabled: normalizedKnowledge.enabled,
+        embeddingEnabled: normalizedKnowledge.embeddingEnabled,
+        rerankEnabled: normalizedKnowledge.rerankEnabled,
+        apiKey: normalizedKnowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : normalizedKnowledge.apiKey.trim(),
+        baseUrl: normalizedKnowledge.baseUrl.trim(),
+        embeddingModel: normalizedKnowledge.embeddingModel.trim(),
+        rerankModel: normalizedKnowledge.rerankModel.trim(),
+        rerankInstruction: normalizedKnowledge.rerankInstruction.trim(),
+        topicTopN: normalizedKnowledge.topicTopN,
+        conceptTopN: normalizedKnowledge.conceptTopN,
+        candidateMultiplier: normalizedKnowledge.candidateMultiplier,
+        contextMaxChars: normalizedKnowledge.contextMaxChars,
+        embeddingWeight: normalizedKnowledge.embeddingWeight,
+        ftsWeight: normalizedKnowledge.ftsWeight,
+        rerankWeight: normalizedKnowledge.rerankWeight,
+        polishEnabled: normalizedKnowledge.polishEnabled,
+        polishMaxChars: normalizedKnowledge.polishMaxChars,
       };
       const res = await adminCheckEmbedding(payload);
       setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
@@ -1275,24 +1333,26 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     setCheckingRerank(true);
     setKnowledgeCheckMsg('');
     try {
+      const normalizedKnowledge = normalizeKnowledgeNumericInputs(knowledge);
+      setKnowledge(normalizedKnowledge);
       const payload = {
-        enabled: knowledge.enabled,
-        embeddingEnabled: knowledge.embeddingEnabled,
-        rerankEnabled: knowledge.rerankEnabled,
-        apiKey: knowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : knowledge.apiKey.trim(),
-        baseUrl: knowledge.baseUrl.trim(),
-        embeddingModel: knowledge.embeddingModel.trim(),
-        rerankModel: knowledge.rerankModel.trim(),
-        rerankInstruction: knowledge.rerankInstruction.trim(),
-        topicTopN: knowledge.topicTopN,
-        conceptTopN: knowledge.conceptTopN,
-        candidateMultiplier: knowledge.candidateMultiplier,
-        contextMaxChars: knowledge.contextMaxChars,
-        embeddingWeight: knowledge.embeddingWeight,
-        ftsWeight: knowledge.ftsWeight,
-        rerankWeight: knowledge.rerankWeight,
-        polishEnabled: knowledge.polishEnabled,
-        polishMaxChars: knowledge.polishMaxChars,
+        enabled: normalizedKnowledge.enabled,
+        embeddingEnabled: normalizedKnowledge.embeddingEnabled,
+        rerankEnabled: normalizedKnowledge.rerankEnabled,
+        apiKey: normalizedKnowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : normalizedKnowledge.apiKey.trim(),
+        baseUrl: normalizedKnowledge.baseUrl.trim(),
+        embeddingModel: normalizedKnowledge.embeddingModel.trim(),
+        rerankModel: normalizedKnowledge.rerankModel.trim(),
+        rerankInstruction: normalizedKnowledge.rerankInstruction.trim(),
+        topicTopN: normalizedKnowledge.topicTopN,
+        conceptTopN: normalizedKnowledge.conceptTopN,
+        candidateMultiplier: normalizedKnowledge.candidateMultiplier,
+        contextMaxChars: normalizedKnowledge.contextMaxChars,
+        embeddingWeight: normalizedKnowledge.embeddingWeight,
+        ftsWeight: normalizedKnowledge.ftsWeight,
+        rerankWeight: normalizedKnowledge.rerankWeight,
+        polishEnabled: normalizedKnowledge.polishEnabled,
+        polishMaxChars: normalizedKnowledge.polishMaxChars,
       };
       const res = await adminCheckRerank(payload);
       setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
@@ -1510,34 +1570,34 @@ function AIConfigForm({ initial, onClose, onSaved }: {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <FormField label="主题 TopN">
                 <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.topicTopN}
-                  onChange={e => updateKnowledge('topicTopN', Math.max(1, Number(e.target.value) || 1))} />
+                  onChange={e => updateKnowledge('topicTopN', Number(e.target.value))} />
               </FormField>
               <FormField label="概念 TopN">
                 <input className="input font-mono text-sm" type="number" min={1} max={12} value={knowledge.conceptTopN}
-                  onChange={e => updateKnowledge('conceptTopN', Math.max(1, Number(e.target.value) || 2))} />
+                  onChange={e => updateKnowledge('conceptTopN', Number(e.target.value))} />
               </FormField>
               <FormField label="候选倍数">
                 <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.candidateMultiplier}
-                  onChange={e => updateKnowledge('candidateMultiplier', Math.max(1, Number(e.target.value) || 4))} />
+                  onChange={e => updateKnowledge('candidateMultiplier', Number(e.target.value))} />
               </FormField>
               <FormField label="上下文上限字数">
                 <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.contextMaxChars}
-                  onChange={e => updateKnowledge('contextMaxChars', Math.max(200, Number(e.target.value) || 800))} />
+                  onChange={e => updateKnowledge('contextMaxChars', Number(e.target.value))} />
               </FormField>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <FormField label="Embedding 权重">
                 <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.embeddingWeight}
-                  onChange={e => updateKnowledge('embeddingWeight', Math.max(0, Number(e.target.value) || 0))} />
+                  onChange={e => updateKnowledge('embeddingWeight', Number(e.target.value))} />
               </FormField>
               <FormField label="FTS 权重">
                 <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.ftsWeight}
-                  onChange={e => updateKnowledge('ftsWeight', Math.max(0, Number(e.target.value) || 0))} />
+                  onChange={e => updateKnowledge('ftsWeight', Number(e.target.value))} />
               </FormField>
               <FormField label="Rerank 最终权重">
                 <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.rerankWeight}
-                  onChange={e => updateKnowledge('rerankWeight', Math.max(0, Number(e.target.value) || 0))} />
+                  onChange={e => updateKnowledge('rerankWeight', Number(e.target.value))} />
               </FormField>
             </div>
 
@@ -1548,32 +1608,41 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               </label>
               <FormField label="AI 精简字数上限">
                 <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.polishMaxChars}
-                  onChange={e => updateKnowledge('polishMaxChars', Math.max(200, Number(e.target.value) || 1200))} />
+                  onChange={e => updateKnowledge('polishMaxChars', Number(e.target.value))} />
               </FormField>
             </div>
 
             <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50">
-              <div className="text-xs font-semibold text-slate-700">建房页 RAG 高级设置默认值</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-slate-700">建房页 RAG 高级设置默认值</div>
+                <button
+                  type="button"
+                  onClick={() => setShowRagHelp(true)}
+                  className="text-[11px] px-2 py-1 rounded-md border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition-colors"
+                >
+                  ❓ 参数说明
+                </button>
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <FormField label="主题 TopN">
                   <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.roomDefaultTopicTopN}
-                    onChange={e => updateKnowledge('roomDefaultTopicTopN', Math.max(1, Number(e.target.value) || 1))} />
+                    onChange={e => updateKnowledge('roomDefaultTopicTopN', Number(e.target.value))} />
                 </FormField>
                 <FormField label="概念 TopN">
                   <input className="input font-mono text-sm" type="number" min={1} max={12} value={knowledge.roomDefaultConceptTopN}
-                    onChange={e => updateKnowledge('roomDefaultConceptTopN', Math.max(1, Number(e.target.value) || 2))} />
+                    onChange={e => updateKnowledge('roomDefaultConceptTopN', Number(e.target.value))} />
                 </FormField>
                 <FormField label="上下文最大字数">
                   <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.roomDefaultContextMaxChars}
-                    onChange={e => updateKnowledge('roomDefaultContextMaxChars', Math.max(200, Number(e.target.value) || 800))} />
+                    onChange={e => updateKnowledge('roomDefaultContextMaxChars', Number(e.target.value))} />
                 </FormField>
                 <FormField label="FTS 候选倍率">
                   <input className="input font-mono text-sm" type="number" min={1} max={20} value={knowledge.roomDefaultFtsMultiplier}
-                    onChange={e => updateKnowledge('roomDefaultFtsMultiplier', Math.max(1, Number(e.target.value) || 4))} />
+                    onChange={e => updateKnowledge('roomDefaultFtsMultiplier', Number(e.target.value))} />
                 </FormField>
                 <FormField label="FTS 最少候选数">
                   <input className="input font-mono text-sm" type="number" min={1} max={200} value={knowledge.roomDefaultFtsMinCandidates}
-                    onChange={e => updateKnowledge('roomDefaultFtsMinCandidates', Math.max(1, Number(e.target.value) || 12))} />
+                    onChange={e => updateKnowledge('roomDefaultFtsMinCandidates', Number(e.target.value))} />
                 </FormField>
                 <FormField label="拼接分隔">
                   <select className="input text-sm" value={knowledge.roomDefaultJoinSeparator}
@@ -1592,6 +1661,37 @@ function AIConfigForm({ initial, onClose, onSaved }: {
                 默认在聊天区显示 AI 教材摘录
               </label>
             </div>
+            {showRagHelp && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                style={{ background: 'rgba(15, 23, 42, 0.55)' }}
+                onClick={() => setShowRagHelp(false)}
+              >
+                <div
+                  className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-4"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-base font-semibold text-slate-900">RAG 参数说明</h3>
+                    <button
+                      type="button"
+                      className="text-sm px-2 py-1 rounded-md border border-slate-300 text-slate-700"
+                      onClick={() => setShowRagHelp(false)}
+                    >
+                      关闭
+                    </button>
+                  </div>
+                  <div className="space-y-2.5 text-sm max-h-[55vh] overflow-y-auto pr-1 text-slate-700">
+                    {ADMIN_RAG_PARAM_DOCS.map(item => (
+                      <div key={item.name}>
+                        <div className="font-semibold text-slate-900">{item.name}</div>
+                        <div>{item.desc}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckEmbedding} disabled={checkingEmbedding}>
