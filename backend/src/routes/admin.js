@@ -23,7 +23,7 @@ const messageSvc = require('../services/messageService');
 const settlementSvc = require('../services/settlementService');
 const curationSvc = require('../services/curationService');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
-const { parseObject } = require('../utils/json');
+const { parseArray, parseObject } = require('../utils/json');
 const { normalizeGameSettings } = require('../utils/gameSettings');
 
 const router = express.Router();
@@ -188,7 +188,7 @@ router.put('/games/:id/concepts/:conceptId', (req, res) => {
     : concept.description;
   const nextTags = Array.isArray(body.tags)
     ? body.tags.map(tag => String(tag).trim()).filter(Boolean)
-    : parseObject(concept.tags, []);
+    : parseArray(concept.tags, []);
 
   db.updateConceptAdmin.run(
     nextRawInput,
@@ -204,7 +204,7 @@ router.put('/games/:id/concepts/:conceptId', (req, res) => {
   const updated = db.getConceptById.get(conceptId);
   const payload = {
     ...updated,
-    tags: parseObject(updated.tags, []),
+    tags: parseArray(updated.tags, []),
     extra: parseObject(updated.extra, {}),
   };
 

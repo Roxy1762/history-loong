@@ -482,6 +482,10 @@ export default function Game() {
       // Concept edit/delete events
       onSocket('concept:edited', ({ concept }) => {
         updatePendingConcept(concept);
+        useGameStore.getState().setTimeline(
+          useGameStore.getState().timeline
+            .map(c => c.id === concept.id ? concept : c)
+        );
       }),
       onSocket('concept:deleted', ({ conceptId }) => {
         removePendingConcept(conceptId);

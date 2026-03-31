@@ -440,7 +440,6 @@ function looksSpecificConceptQuery(concept) {
   const cleanConcept = String(concept || '').trim();
   if (!cleanConcept) return false;
   if (/^[A-Za-z][A-Za-z0-9 .:_-]{1,40}$/.test(cleanConcept)) return true;
-  if (/^[\u3400-\u9fff·]{2,8}$/.test(cleanConcept)) return true;
   if (/\d/.test(cleanConcept)) return true;
   return /(之战|战役|事变|起义|条约|会议|政变|运动|革命|铁路|帝国|王朝|皇帝|总统|将军|人物)$/.test(cleanConcept);
 }
