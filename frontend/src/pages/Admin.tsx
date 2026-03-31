@@ -1559,6 +1559,17 @@ function KnowledgePanel() {
                   <div className="text-xs text-slate-400 mt-0.5">
                     {doc.filename} · {doc.total_chunks} 个片段 · {doc.created_at.slice(0, 10)}
                   </div>
+                  <div className="mt-1">
+                    {doc.vectorized_at ? (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        已向量化 · {doc.vectorized_at.slice(0, 16).replace('T', ' ')}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+                        未向量化
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2456,6 +2467,7 @@ function AIDecisionsPanel() {
                       'bg-indigo-100 text-indigo-700'}`}>
                     {selected.validation_method === 'kb' ? '知识库命中' :
                      selected.validation_method === 'cache' ? '缓存命中' :
+                     selected.validation_method === 'rag+ai' ? 'RAG + AI' :
                      selected.validation_method === 'admin_override' ? '管理员覆写' : 'AI 验证'}
                   </span>
                 </div>
@@ -2482,9 +2494,53 @@ function AIDecisionsPanel() {
               </div>
 
               {/* AI Response (JSON pretty-print) */}
+              {selected.ai_prompt && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-600 mb-1.5">🧾 完整提示词（Prompt）</div>
+                  <pre className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700 max-h-52 overflow-y-auto">
+                    {selected.ai_prompt}
+                  </pre>
+                </div>
+              )}
               {selected.ai_response && (
                 <div>
                   <div className="text-xs font-semibold text-slate-600 mb-1.5">📤 AI 完整回复</div>
+                  {(() => {
+                    try {
+                      const parsed = JSON.parse(selected.ai_response);
+                      const rag = parsed?.rag;
+                      const rawOutput = parsed?.rawOutput;
+                      const ragFlow = rag?.flow;
+                      return (
+                        <div className="space-y-2 mb-2">
+                          {rag && (
+                            <div className="text-xs bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 text-indigo-700">
+                              <div className="font-semibold mb-1">RAG 全流程</div>
+                              <div>是否启用：{rag.used ? '是' : '否'}</div>
+                              <div className="mt-1 whitespace-pre-wrap break-all">
+                                检索上下文：{rag.context ? String(rag.context) : '（空）'}
+                              </div>
+                              {ragFlow && (
+                                <pre className="mt-2 text-[11px] font-mono bg-white/70 border border-indigo-100 rounded p-2 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                                  {JSON.stringify(ragFlow, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+                          {rawOutput && (
+                            <div>
+                              <div className="text-xs font-semibold text-slate-600 mb-1">🧠 模型原始输出</div>
+                              <pre className="text-xs font-mono bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-amber-900 max-h-52 overflow-y-auto">
+                                {String(rawOutput)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    } catch {
+                      return null;
+                    }
+                  })()}
                   <pre className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700 max-h-64 overflow-y-auto">
                     {(() => {
                       try { return JSON.stringify(JSON.parse(selected.ai_response), null, 2); }
@@ -2535,7 +2591,7 @@ function AIDecisionsPanel() {
                         ${d.validation_method === 'kb' ? 'bg-green-100 text-green-700' :
                           d.validation_method === 'cache' ? 'bg-blue-100 text-blue-700' :
                           'bg-slate-100 text-slate-600'}`}>
-                        {d.validation_method === 'kb' ? 'KB' : d.validation_method === 'cache' ? '缓存' : 'AI'}
+                        {d.validation_method === 'kb' ? 'KB' : d.validation_method === 'cache' ? '缓存' : d.validation_method === 'rag+ai' ? 'RAG' : 'AI'}
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-xs text-slate-400">{d.decision_ms ? `${d.decision_ms}ms` : '—'}</td>
@@ -2563,7 +2619,7 @@ function AIDecisionsPanel() {
       )}
 
       <InfoBox>
-        <strong>AI 完整回复</strong>：显示每次验证中 AI 返回的完整 JSON（包括 difficulty、tags 等字段），以及验证方式（AI / 知识库命中 / 缓存）和耗时。点击「查看」可展开完整内容。
+        <strong>AI 完整回复</strong>：显示每次验证中 AI 返回的完整 JSON（包括 difficulty、tags 等字段）、完整 Prompt、模型原始输出，以及 RAG 是否启用与检索上下文全流程。点击「查看」可展开完整内容。
       </InfoBox>
     </div>
   );
