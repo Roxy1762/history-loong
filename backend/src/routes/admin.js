@@ -23,6 +23,7 @@ const messageSvc = require('../services/messageService');
 const settlementSvc = require('../services/settlementService');
 const curationSvc = require('../services/curationService');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
+const { getGameSettings, parseConceptRecord } = require('../utils/game');
 
 const router = express.Router();
 const upload = multer({
@@ -80,7 +81,7 @@ router.get('/games', (req, res) => {
     const pendingCount = db.getPendingConceptCount.get(g.id)?.count || 0;
     // Live connected players from in-memory room (more accurate than DB count)
     const onlineCount  = rooms?.get(g.id)?.players?.size ?? 0;
-    return { ...g, settings: JSON.parse(g.settings || '{}'), conceptCount, playerCount, pendingCount, onlineCount };
+    return { ...g, settings: getGameSettings(g, {}), conceptCount, playerCount, pendingCount, onlineCount };
   });
   console.log(`[Admin] GET /games enriched ${enriched.length} games`);
   res.json({ games: enriched });
@@ -92,14 +93,12 @@ router.get('/games/:id', (req, res) => {
   const game = db.getGame.get(id);
   if (!game) return res.status(404).json({ error: '游戏不存在' });
 
-  const concepts = db.getConceptsByGame.all(id).map(c => ({
-    ...c, tags: JSON.parse(c.tags || '[]'), extra: JSON.parse(c.extra || '{}'),
-  }));
+  const concepts = db.getConceptsByGame.all(id).map(parseConceptRecord);
   const players = db.getPlayers.all(id);
   const messageCount = db.getMessageCount.get(id)?.count || 0;
 
   res.json({
-    game: { ...game, settings: JSON.parse(game.settings || '{}') },
+    game: { ...game, settings: getGameSettings(game, {}) },
     concepts,
     players,
     messageCount,
@@ -158,7 +157,7 @@ router.put('/games/:id/settings', (req, res) => {
   }
 
   // Merge with existing settings
-  const existing = JSON.parse(game.settings || '{}');
+  const existing = getGameSettings(game, {});
   const merged = { ...existing, ...settings };
   db.updateGameSettings.run(JSON.stringify(merged), id);
   console.log(`[Admin] Updated settings for ${id}`);

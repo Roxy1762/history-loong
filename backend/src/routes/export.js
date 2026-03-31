@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { ExportService } = require('../services/exportService');
 const { TimelineService } = require('../services/timelineService');
+const { withGameSettings, parseMessageRecord } = require('../utils/game');
 
 const router = express.Router();
 const exportService = new ExportService();
@@ -17,16 +18,15 @@ router.get('/:gameId', (req, res) => {
   const gameId = req.params.gameId.toUpperCase();
   const format = req.query.format || 'json';
 
-  const game = db.getGame.get(gameId);
+  const game = withGameSettings(db.getGame.get(gameId), {});
   if (!game) return res.status(404).json({ error: '房间不存在' });
-  game.settings = JSON.parse(game.settings || '{}');
 
   const conceptRows = db.getConceptsByGame.all(gameId);
   const messageRows = db.getMessagesByGame.all(gameId);
 
   const ts = new TimelineService();
   const timeline = ts.buildTimeline(conceptRows);
-  const messages = messageRows.map((m) => ({ ...m, meta: JSON.parse(m.meta || '{}') }));
+  const messages = messageRows.map(parseMessageRecord);
 
   try {
     const result = exportService.export({ game, timeline, messages }, format);

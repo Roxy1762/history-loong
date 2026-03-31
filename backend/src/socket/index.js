@@ -26,7 +26,9 @@ const db = require('../db');
 const ai = require('../services/aiService');
 const {
   getContextForConceptAdvanced,
+  getContextForConceptAdvancedWithTrace,
   searchContextAdvanced,
+  searchContextAdvancedWithTrace,
   ingestAIConfirmedConcept,
   validateFromKnowledge,
 } = require('../services/knowledgeService');
@@ -35,7 +37,12 @@ const { pluginEvents } = require('../plugins');
 const auditSvc = require('../services/auditService');
 const profileSvc = require('../services/profileService');
 const settlementSvc = require('../services/settlementService');
-const { parseArray, parseObject } = require('../utils/json');
+const {
+  getGameSettings,
+  parseConceptRecord,
+  parseMessageRecord,
+  buildValidationOptions,
+} = require('../utils/game');
 
 // ── In-memory rooms ───────────────────────────────────────────────────────────
 
@@ -115,10 +122,6 @@ function hasMode(game, settings, mode) {
   if (game.mode === mode) return true;
   if (Array.isArray(settings?.extraModes) && settings.extraModes.includes(mode)) return true;
   return false;
-}
-
-function getActiveModes(game, settings) {
-  return [...new Set([game.mode, ...(Array.isArray(settings?.extraModes) ? settings.extraModes : [])].filter(Boolean))];
 }
 
 function normalizePlayerId(raw) {
@@ -257,14 +260,117 @@ function sysMessage(io, gameId, content, meta = {}) {
   console.log(`[Socket] sysMessage gameId=${gameId}: ${content}`);
 }
 
-function parseConcept(row) {
-  return { ...row, tags: parseArray(row.tags, []), extra: parseObject(row.extra, {}) };
+function normalizeDifficulty(rawDifficulty, defaultValue = 3) {
+  const parsed = parseInt(rawDifficulty, 10);
+  if (!Number.isFinite(parsed)) return defaultValue;
+  return Math.max(1, Math.min(5, parsed));
+}
+
+function normalizeTags(tags) {
+  return Array.isArray(tags) ? tags : [];
+}
+
+function getValidatedConceptHistory(gameId) {
+  return db.getConceptsByGame.all(gameId)
+    .filter(c => c.validated)
+    .map(c => ({ name: c.name, period: c.period }));
+}
+
+async function resolveConceptContext(input, topic) {
+  if (typeof getContextForConceptAdvancedWithTrace === 'function') {
+    const flow = await getContextForConceptAdvancedWithTrace(input, topic);
+    return { context: flow?.context || null, trace: flow || null };
+  }
+  const context = await getContextForConceptAdvanced(input, topic);
+  return { context: context || null, trace: null };
+}
+
+async function resolveSettleContext(topic, limit = 2) {
+  if (typeof searchContextAdvancedWithTrace === 'function') {
+    const flow = await searchContextAdvancedWithTrace(topic, limit);
+    return { context: flow?.context || null, trace: flow || null };
+  }
+  const context = await searchContextAdvanced(topic, limit);
+  return { context: context || null, trace: null };
+}
+
+async function validateConceptWithFallback(input, topic, existing, options, context) {
+  if (typeof ai.validateConceptWithTrace === 'function') {
+    const traced = await ai.validateConceptWithTrace(input, topic, existing, options, context);
+    return { result: traced?.result || null, trace: traced?.trace || null };
+  }
+  const result = await ai.validateConcept(input, topic, existing, options, context);
+  return { result, trace: null };
+}
+
+function buildAcceptedConceptPayload({
+  conceptId,
+  gameId,
+  row,
+  result,
+  difficulty,
+  timelineService,
+}) {
+  return {
+    id: conceptId,
+    game_id: gameId,
+    player_id: row.player_id,
+    player_name: row.player_name,
+    raw_input: row.raw_input,
+    name: result.name || row.raw_input,
+    period: result.period,
+    year: result.year ?? null,
+    dynasty: result.dynasty,
+    description: result.description,
+    tags: normalizeTags(result.tags),
+    extra: { difficulty },
+    validated: 1,
+    rejected: 0,
+    eraLabel: timelineService.getEraLabel(result.year ?? null, result.dynasty),
+    created_at: row.created_at,
+  };
+}
+
+function emitConceptRejected(io, gameId, { conceptId, row, reason }) {
+  const rejectReason = reason || '不符合主题';
+  io.to(gameId).emit('concept:settled', {
+    conceptId,
+    accepted: false,
+    reason: rejectReason,
+    playerName: row.player_name,
+    rawInput: row.raw_input,
+  });
+
+  const rejMsg = {
+    id: uuidv4(),
+    type: 'system',
+    game_id: gameId,
+    content: `「${row.raw_input}」被驳回：${reason || '与主题无关'}`,
+    meta: { conceptId, rejected: true },
+    created_at: new Date().toISOString(),
+  };
+  db.insertMessage.run(rejMsg.id, gameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
+  io.to(gameId).emit('message:new', rejMsg);
+}
+
+function emitConceptAcceptedConfirmation(io, gameId, { conceptId, name, dynasty, period }) {
+  const confirmContent = `✓ 「${name}」已加入时间轴（${dynasty || period || '年代不详'}）`;
+  const confirmId = uuidv4();
+  db.insertMessage.run(confirmId, gameId, null, null, 'system', confirmContent, JSON.stringify({ conceptId, concept: true }));
+  io.to(gameId).emit('message:new', {
+    id: confirmId,
+    type: 'system',
+    game_id: gameId,
+    content: confirmContent,
+    meta: { conceptId, concept: true },
+    created_at: new Date().toISOString(),
+  });
 }
 
 function buildGameSnapshot(game, room, player) {
-  const settings = parseObject(game.settings, {});
+  const settings = getGameSettings(game, {});
   const ts = new TimelineService();
-  const allConcepts = db.getConceptsByGame.all(game.id).map(parseConcept);
+  const allConcepts = db.getConceptsByGame.all(game.id).map(parseConceptRecord);
   const latestMessages = db.getLatestMessages.all(game.id, 500).reverse();
 
   return {
@@ -272,8 +378,8 @@ function buildGameSnapshot(game, room, player) {
     game: { ...game, settings },
     player,
     timeline: ts.buildTimeline(allConcepts),
-    pendingConcepts: db.getPendingConcepts.all(game.id).map(parseConcept),
-    messages: latestMessages.map(m => ({ ...m, meta: parseObject(m.meta, {}) })),
+    pendingConcepts: db.getPendingConcepts.all(game.id).map(parseConceptRecord),
+    messages: latestMessages.map(parseMessageRecord),
     messageTruncated: db.getMessageCount.get(game.id)?.count > latestMessages.length,
     scores: Object.fromEntries(room.scores),
     turnState: hasMode(game, settings, 'turn-order') ? getTurnStatePayload(room) : null,
@@ -303,7 +409,7 @@ module.exports = function setupSocket(io) {
         if (!game) return callback?.({ error: '房间不存在' });
 
         const room = getRoom(id);
-        const settings = JSON.parse(game.settings || '{}');
+        const settings = getGameSettings(game, {});
         const normalizedPlayerId = normalizePlayerId(playerId) || socket.id;
         const existingPlayer = room.players.get(normalizedPlayerId);
         const activePlayerIds = getActivePlayerIds(room);
@@ -385,7 +491,7 @@ module.exports = function setupSocket(io) {
       const input = (rawInput || '').trim();
       if (!input) return callback?.({ error: '请输入内容' });
 
-      const settings = JSON.parse(game.settings || '{}');
+      const settings = getGameSettings(game, {});
       const isDeferred = settings.validationMode === 'deferred';
 
       const submitCooldownSec = Number(settings.submitCooldownSec) || 0;
@@ -461,13 +567,13 @@ module.exports = function setupSocket(io) {
       });
 
       try {
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const existing = getValidatedConceptHistory(currentGameId);
 
-        const knowledgeContext = await getContextForConceptAdvanced(input, game.topic);
+        const ragFlow = await resolveConceptContext(input, game.topic);
+        const knowledgeContext = ragFlow.context;
         const kbCheck = validateFromKnowledge(input, game.topic);
         let result;
+        let aiTrace = null;
         let validationMethod = 'ai';
         const tsAI = Date.now();
 
@@ -476,7 +582,9 @@ module.exports = function setupSocket(io) {
           validationMethod = 'kb';
         } else {
           validationMethod = knowledgeContext ? 'rag+ai' : 'ai';
-          result = await ai.validateConcept(input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
+          const traced = await validateConceptWithFallback(input, game.topic, existing, buildValidationOptions(game, settings), knowledgeContext);
+          result = traced.result;
+          aiTrace = traced.trace;
         }
 
         const msElapsed = Date.now() - tsAI;
@@ -487,7 +595,9 @@ module.exports = function setupSocket(io) {
             input, input, null, null, null, null, '[]', 0, 1, result.reason || '无效', '{}');
 
           auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+            prompt: aiTrace?.prompt || null,
             response: JSON.stringify({ valid: false, reason: result.reason }),
+            rawOutput: aiTrace?.rawOutput || null,
             ms: msElapsed,
           });
           profileSvc.recordConceptResult(currentPlayer.id, false, false);
@@ -515,7 +625,9 @@ module.exports = function setupSocket(io) {
           result.dynasty, result.description, tags, 1, 0, null, extra);
 
         auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+          prompt: aiTrace?.prompt || null,
           response: JSON.stringify(result),
+          rawOutput: aiTrace?.rawOutput || null,
           ms: msElapsed,
         });
         profileSvc.recordConceptResult(currentPlayer.id, true, false);
@@ -673,8 +785,9 @@ module.exports = function setupSocket(io) {
       callback?.({ ok: true, total: pending.length });
 
       try {
-        const settleSettings = JSON.parse(game.settings || '{}');
-        const knowledgeContext = await searchContextAdvanced(game.topic, 2);
+        const settleSettings = getGameSettings(game, {});
+        const settleRagFlow = await resolveSettleContext(game.topic, 2);
+        const knowledgeContext = settleRagFlow.context;
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
         const ts = new TimelineService();
@@ -770,59 +883,66 @@ module.exports = function setupSocket(io) {
       });
 
       try {
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const existing = getValidatedConceptHistory(currentGameId);
 
-        const settings = JSON.parse(game.settings || '{}');
+        const settings = getGameSettings(game, {});
         const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
         let result;
+        let aiTrace = null;
+        let validationMethod = 'ai';
         if (kbCheck.confident) {
           result = kbCheck.result;
+          validationMethod = 'kb';
         } else {
-          const knowledgeContext = await getContextForConceptAdvanced(row.raw_input, game.topic);
-          result = await ai.validateConcept(row.raw_input, game.topic, existing, { mode: game.mode, modes: getActiveModes(game, settings), ...settings }, knowledgeContext);
+          const ragFlow = await resolveConceptContext(row.raw_input, game.topic);
+          const traced = await validateConceptWithFallback(
+            row.raw_input,
+            game.topic,
+            existing,
+            buildValidationOptions(game, settings),
+            ragFlow.context
+          );
+          result = traced.result;
+          aiTrace = traced.trace;
+          validationMethod = ragFlow.context ? 'rag+ai' : 'ai';
         }
-
-        const ts = new TimelineService();
 
         if (!result.valid) {
           db.rejectConcept.run(result.reason || '不符合主题', conceptId);
-          io.to(currentGameId).emit('concept:settled', {
-            conceptId, accepted: false,
-            reason: result.reason || '不符合主题',
-            playerName: row.player_name, rawInput: row.raw_input,
+          emitConceptRejected(io, currentGameId, { conceptId, row, reason: result.reason });
+          auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+            prompt: aiTrace?.prompt || null,
+            response: JSON.stringify({ valid: false, reason: result.reason || '不符合主题' }),
+            rawOutput: aiTrace?.rawOutput || null,
           });
-          const rejMsg = {
-            id: uuidv4(), type: 'system', game_id: currentGameId,
-            content: `「${row.raw_input}」被驳回：${result.reason || '与主题无关'}`,
-            meta: { conceptId, rejected: true }, created_at: new Date().toISOString(),
-          };
-          db.insertMessage.run(rejMsg.id, currentGameId, null, null, 'system', rejMsg.content, JSON.stringify(rejMsg.meta));
-          io.to(currentGameId).emit('message:new', rejMsg);
           if (hasMode(game, settings, 'survival')) {
             applyLifePenalty(io, currentGameId, room, row.player_id, row.player_name);
           }
           return callback?.({ ok: true });
         }
 
-        const difficulty = Math.max(1, Math.min(5, parseInt(result.difficulty) || 3));
-        const tags  = JSON.stringify(Array.isArray(result.tags) ? result.tags : []);
+        const ts = new TimelineService();
+        const difficulty = normalizeDifficulty(result.difficulty);
+        const tags  = JSON.stringify(normalizeTags(result.tags));
         const extra = JSON.stringify({ difficulty });
         db.acceptConcept.run(
           result.name || row.raw_input, result.period || null, result.year ?? null,
           result.dynasty || null, result.description || null, tags, extra, conceptId
         );
+        auditSvc.logDecision(conceptId, currentGameId, validationMethod, {
+          prompt: aiTrace?.prompt || null,
+          response: JSON.stringify(result),
+          rawOutput: aiTrace?.rawOutput || null,
+        });
 
-        const concept = {
-          id: conceptId, game_id: currentGameId,
-          player_id: row.player_id, player_name: row.player_name,
-          raw_input: row.raw_input, name: result.name || row.raw_input,
-          period: result.period, year: result.year ?? null, dynasty: result.dynasty,
-          description: result.description, tags: Array.isArray(result.tags) ? result.tags : [],
-          extra: { difficulty }, validated: 1, rejected: 0,
-          eraLabel: ts.getEraLabel(result.year ?? null, result.dynasty), created_at: row.created_at,
-        };
+        const concept = buildAcceptedConceptPayload({
+          conceptId,
+          gameId: currentGameId,
+          row,
+          result,
+          difficulty,
+          timelineService: ts,
+        });
 
         io.to(currentGameId).emit('concept:settled', { conceptId, accepted: true, concept });
         if (hasMode(game, settings, 'survival')) {
@@ -832,12 +952,11 @@ module.exports = function setupSocket(io) {
           broadcastPlayers(io, currentGameId);
         }
 
-        const confirmContent = `✓ 「${result.name}」已加入时间轴（${result.dynasty || result.period || '年代不详'}）`;
-        const confirmId = uuidv4();
-        db.insertMessage.run(confirmId, currentGameId, null, null, 'system', confirmContent, JSON.stringify({ conceptId, concept: true }));
-        io.to(currentGameId).emit('message:new', {
-          id: confirmId, type: 'system', game_id: currentGameId,
-          content: confirmContent, meta: { conceptId, concept: true }, created_at: new Date().toISOString(),
+        emitConceptAcceptedConfirmation(io, currentGameId, {
+          conceptId,
+          name: concept.name,
+          dynasty: concept.dynasty,
+          period: concept.period,
         });
 
         try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
@@ -870,7 +989,7 @@ module.exports = function setupSocket(io) {
       try {
         const game = db.getGame.get(currentGameId);
         const room = getRoom(currentGameId);
-        const settings = JSON.parse(game?.settings || '{}');
+        const settings = getGameSettings(game, {});
         const hintCooldownSec = Number(settings.hintCooldownSec) || 0;
         if (hintCooldownSec > 0 && currentPlayer?.id) {
           const last = room.lastHintAt.get(currentPlayer.id) || 0;
@@ -893,7 +1012,7 @@ module.exports = function setupSocket(io) {
       if (!currentGameId || !currentPlayer) return callback?.({ error: '请先加入房间' });
       const game = db.getGame.get(currentGameId);
       if (!game) return callback?.({ error: '房间不存在' });
-      const settings = JSON.parse(game.settings || '{}');
+      const settings = getGameSettings(game, {});
       if (!hasMode(game, settings, 'challenge')) return callback?.({ error: '当前不是挑战模式' });
 
       const room = getRoom(currentGameId);
@@ -989,7 +1108,7 @@ module.exports = function setupSocket(io) {
       if (!game) return callback?.({ error: '房间不存在' });
 
       const room = getRoom(id);
-      const settings = JSON.parse(game.settings || '{}');
+      const settings = getGameSettings(game, {});
 
       if (currentPlayer && !isObserverPlayer(currentPlayer) && room.players.has(currentPlayer.id)) {
         currentPlayer.isAdmin = true;
@@ -1062,7 +1181,7 @@ module.exports = function setupSocket(io) {
 
         const game = db.getGame.get(currentGameId);
         if (game) {
-          const settings = JSON.parse(game.settings || '{}');
+          const settings = getGameSettings(game, {});
           if (hasMode(game, settings, 'turn-order')) broadcastTurnState(io, currentGameId);
         }
       } catch (err) {
@@ -1075,7 +1194,7 @@ module.exports = function setupSocket(io) {
 // ── Turn/relay state advancement (internal helper) ────────────────────────────
 
 function _advanceTurnState(io, gameId, game, room, playerId) {
-  const settings = JSON.parse(game.settings || '{}');
+  const settings = getGameSettings(game, {});
 
   if (hasMode(game, settings, 'turn-order')) {
     const order = getActivePlayerIds(room);
