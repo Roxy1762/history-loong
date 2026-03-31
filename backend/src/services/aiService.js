@@ -340,6 +340,37 @@ function getAuxiliaryConfig() {
   };
 }
 
+function resolveAuxiliaryConfigFromOverrides(overrides = {}) {
+  const provider_type = String(overrides.providerType || overrides.provider_type || 'openai-compatible').trim();
+  const base_url = String(overrides.baseUrl || overrides.base_url || '').trim();
+  const api_key = String(overrides.apiKey || overrides.api_key || '').trim();
+  const model = String(overrides.model || '').trim();
+  const system_prompt = typeof overrides.systemPrompt === 'string'
+    ? overrides.systemPrompt
+    : (typeof overrides.system_prompt === 'string' ? overrides.system_prompt : '');
+  return { provider_type, base_url, api_key, model, system_prompt };
+}
+
+async function testAuxiliaryConnection(overrides = null) {
+  const aux = overrides ? resolveAuxiliaryConfigFromOverrides(overrides) : getAuxiliaryConfig();
+  if (!aux?.provider_type) throw new Error('辅助 LLM 配置缺少 provider_type');
+  if (!aux?.api_key) throw new Error('辅助 LLM 配置缺少 API Key');
+  if (!aux?.model) throw new Error('辅助 LLM 配置缺少 model');
+  if (aux.provider_type === 'openai-compatible' && !aux.base_url) {
+    throw new Error('辅助 LLM 配置缺少 base_url');
+  }
+  const handler = PROVIDER_HANDLERS[aux.provider_type];
+  if (!handler) throw new Error(`辅助 LLM 不支持的 provider_type: ${aux.provider_type}`);
+  const reply = await handler(aux, '请只回复“辅助连接成功”。', 30);
+  return {
+    ok: true,
+    provider: aux.provider_type,
+    model: aux.model,
+    baseUrl: aux.base_url || '',
+    reply: String(reply || '').slice(0, 200),
+  };
+}
+
 async function completeWithAuxiliary(prompt, maxTokens = 200) {
   const aux = getAuxiliaryConfig();
   if (!aux.enabled) return null;
@@ -354,8 +385,9 @@ async function completeWithAuxiliary(prompt, maxTokens = 200) {
 }
 
 async function planValidationAssist(concept, topic, existing = []) {
+  const heuristicSkipTopic = shouldSkipTopicQuery(topic, concept);
   const fallback = {
-    useRag: true, topicQuery: topic, conceptQuery: concept, note: 'disabled',
+    useRag: true, topicQuery: topic, conceptQuery: concept, useTopicSearch: !heuristicSkipTopic, note: 'disabled',
     _trace: { enabled: false, prompt: null, rawOutput: null, parsedOutput: null },
   };
   const aux = getAuxiliaryConfig();
@@ -363,14 +395,15 @@ async function planValidationAssist(concept, topic, existing = []) {
 
   const recent = existing.slice(-3).map(c => c.name).join('、') || '无';
   const prompt = `你是历史概念检索规划助手。仅返回JSON：
-{"useRag":true,"topicQuery":"主题检索词","conceptQuery":"概念检索词","note":"<=20字"}
+{"useRag":true,"useTopicSearch":false,"topicQuery":"主题检索词","conceptQuery":"概念检索词","note":"<=20字"}
 主题：${topic}
 概念：${concept}
 已有概念：${recent}
 要求：
 1) useRag=true表示应启用RAG，false表示直接走主模型。
-2) topicQuery/conceptQuery必须简短，去除引号、箭头和噪声符号。
-3) 禁止输出markdown。`;
+2) 当概念词已足够具体（人名、地名、事件名）时，useTopicSearch必须为false，避免检索大主题噪声。
+3) topicQuery/conceptQuery必须简短，去除引号、箭头和噪声符号。
+4) 禁止输出markdown。`;
   const text = await completeWithAuxiliary(prompt, 180);
   let parsed = null;
   if (text) {
@@ -385,11 +418,22 @@ async function planValidationAssist(concept, topic, existing = []) {
 
   return {
     useRag: aux.sceneRagGate ? parsed.useRag !== false : true,
+    useTopicSearch: parsed.useTopicSearch == null ? !heuristicSkipTopic : parsed.useTopicSearch !== false,
     topicQuery: aux.sceneQueryRewrite && parsed.topicQuery ? String(parsed.topicQuery).trim() : topic,
     conceptQuery: aux.sceneQueryRewrite && parsed.conceptQuery ? String(parsed.conceptQuery).trim() : concept,
     note: parsed.note ? String(parsed.note).slice(0, 30) : 'ok',
     _trace: { enabled: true, prompt, rawOutput: text || null, parsedOutput: parsed },
   };
+}
+
+function shouldSkipTopicQuery(topic, concept) {
+  const cleanTopic = String(topic || '').trim();
+  const cleanConcept = String(concept || '').trim();
+  if (!cleanConcept) return false;
+  if (!cleanTopic) return true;
+  if (cleanConcept === cleanTopic) return false;
+  if (cleanTopic.includes(cleanConcept) || cleanConcept.includes(cleanTopic)) return false;
+  return /史|历史|文明|朝代|中国史|世界史|近代史|现代史|古代史/.test(cleanTopic);
 }
 
 async function guardRagContext(topic, concept, context) {
@@ -729,6 +773,7 @@ module.exports = {
   guardRagContext,
   inferThemeEraHint,
   testConfig,
+  testAuxiliaryConnection,
   resolveConfig,
   resolveConfigs,
   registerProviderHandler,

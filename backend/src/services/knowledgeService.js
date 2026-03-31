@@ -186,8 +186,20 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
   const runtime = getRagRuntimeConfig(runtimeOverrides);
   const conceptQuery = runtimeOverrides?.conceptQuery || concept;
   const topicQuery = runtimeOverrides?.topicQuery || topic;
+  const useTopicSearch = runtimeOverrides?.useTopicSearch !== false;
+  const byTopicPromise = useTopicSearch
+    ? searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime)
+    : Promise.resolve({
+      context: '',
+      trace: {
+        query: topicQuery,
+        stage: 'skipped_topic',
+        candidates: 0,
+        ranked: [],
+      },
+    });
   const [byTopic, byConcept] = await Promise.all([
-    searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime),
+    byTopicPromise,
     searchContextAdvancedWithTrace(conceptQuery, runtime.conceptTopN, runtime),
   ]);
   const combined = [byTopic.context, byConcept.context].filter(Boolean).join(runtime.joinSeparator);
@@ -198,6 +210,7 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
       concept: byConcept.trace,
       topicQuery,
       conceptQuery,
+      useTopicSearch,
       runtime,
     },
   };

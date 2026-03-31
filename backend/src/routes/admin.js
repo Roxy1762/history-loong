@@ -495,6 +495,17 @@ router.post('/knowledge/check/rerank', async (_req, res) => {
   }
 });
 
+router.post('/knowledge/check/auxiliary', async (_req, res) => {
+  try {
+    const result = await ai.testAuxiliaryConnection(_req.body?.auxiliary || _req.body || {});
+    res.json({ message: '辅助 LLM 检测通过', ...result });
+  } catch (err) {
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Auxiliary check FAILED: ${detail}`);
+    res.status(400).json({ error: err.message || '辅助 LLM 检测失败', detail });
+  }
+});
+
 // ── AI-Confirmed Knowledge Base ───────────────────────────────────────────────
 
 router.get('/ai-confirmed', (_req, res) => {
