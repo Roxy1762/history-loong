@@ -70,6 +70,7 @@ const COMBINABLE_MODES = {
   challenge:    { label: '挑战接龙', description: '叠加挑战卡系统，完成挑战获额外奖励' },
   ordered:      { label: '时序约束', description: '叠加时序限制，概念须按时间顺序' },
   relay:        { label: '接力制',   description: '叠加接力机制，每轮每人提交一次' },
+  survival:     { label: '生存机制', description: '叠加生命值规则，被驳回会扣血，血量为零进入旁观' },
 };
 
 // ── Plugin context ────────────────────────────────────────────────────────────
