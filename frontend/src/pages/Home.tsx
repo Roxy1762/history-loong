@@ -38,6 +38,14 @@ export default function Home() {
   const [challengeThreshold, setChallengeThreshold] = useState(2);
   const [skipCooldownMs, setSkipCooldownMs] = useState(0);
   const [maxPlayers, setMaxPlayers] = useState(0); // 0 = unlimited
+  const [ragTopicTopN, setRagTopicTopN] = useState(1);
+  const [ragConceptTopN, setRagConceptTopN] = useState(2);
+  const [ragContextMaxChars, setRagContextMaxChars] = useState(800);
+  const [ragFtsCandidateMultiplier, setRagFtsCandidateMultiplier] = useState(4);
+  const [ragFtsMinCandidates, setRagFtsMinCandidates] = useState(12);
+  const [ragShowPolishedInChat, setRagShowPolishedInChat] = useState(false);
+  const [ragJoinSeparator, setRagJoinSeparator] = useState<'rule' | 'double_newline'>('rule');
+  const [showRagHelp, setShowRagHelp] = useState(false);
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
@@ -46,6 +54,16 @@ export default function Home() {
     getGameModes().then(data => {
       setModes(data.modes);
       setCombinableModes(data.combinableModes || {});
+      const d = (data.ragDefaults || {}) as Record<string, unknown>;
+      if (Number.isFinite(Number(d.ragTopicTopN))) setRagTopicTopN(Math.max(1, Number(d.ragTopicTopN)));
+      if (Number.isFinite(Number(d.ragConceptTopN))) setRagConceptTopN(Math.max(1, Number(d.ragConceptTopN)));
+      if (Number.isFinite(Number(d.ragContextMaxChars))) setRagContextMaxChars(Math.max(200, Number(d.ragContextMaxChars)));
+      if (Number.isFinite(Number(d.ragFtsCandidateMultiplier))) setRagFtsCandidateMultiplier(Math.max(1, Number(d.ragFtsCandidateMultiplier)));
+      if (Number.isFinite(Number(d.ragFtsMinCandidates))) setRagFtsMinCandidates(Math.max(1, Number(d.ragFtsMinCandidates)));
+      if (typeof d.ragShowPolishedInChat === 'boolean') setRagShowPolishedInChat(d.ragShowPolishedInChat);
+      if (d.ragJoinSeparator === 'double_newline' || d.ragJoinSeparator === 'rule') {
+        setRagJoinSeparator(d.ragJoinSeparator);
+      }
     }).catch(() => {});
   }, []);
 
@@ -61,6 +79,11 @@ export default function Home() {
   }
 
   const normalizedExtraModes = normalizeExtraModes(mode, extraModes);
+  const parseInputNumber = (value: string, fallback: number) => {
+    if (value === '') return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
   const combinedModes = getCombinedModes(mode, extraModes);
   const hasChallengeMode = combinedModes.includes('challenge');
   const hasScoreMode = combinedModes.includes('score-race') || combinedModes.includes('challenge');
@@ -81,6 +104,13 @@ export default function Home() {
       }
 
       if (maxPlayers > 0) settings.maxPlayers = maxPlayers;
+      settings.ragTopicTopN = ragTopicTopN;
+      settings.ragConceptTopN = ragConceptTopN;
+      settings.ragContextMaxChars = ragContextMaxChars;
+      settings.ragFtsCandidateMultiplier = ragFtsCandidateMultiplier;
+      settings.ragFtsMinCandidates = ragFtsMinCandidates;
+      settings.ragShowPolishedInChat = ragShowPolishedInChat;
+      settings.ragJoinSeparator = ragJoinSeparator;
 
       const game = await createGame(topic.trim(), mode, settings);
       navigate(`/game/${game.id}`);
@@ -423,6 +453,74 @@ export default function Home() {
                                 {maxPlayers === 0 ? '∞' : maxPlayers}
                               </span>
                             </div>
+                          </div>
+
+                          <div className="pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+                            <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+                              📚 RAG 检索参数
+                              <button
+                                type="button"
+                                onClick={() => setShowRagHelp(v => !v)}
+                                className="ml-2 text-[11px] px-2 py-0.5 rounded border"
+                                style={{ color: 'var(--brand)', borderColor: 'var(--border)' }}
+                              >
+                                {showRagHelp ? '收起说明' : '参数说明'}
+                              </button>
+                            </div>
+                            {showRagHelp && (
+                              <div className="text-xs rounded-lg border p-2 mb-2 space-y-1" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
+                                <p><strong>主题 TopN</strong>：按主题检索返回的片段数量。</p>
+                                <p><strong>概念 TopN</strong>：按提交概念检索返回的片段数量。</p>
+                                <p><strong>上下文最大字数</strong>：最终拼接后送给 AI 的最大字数上限。</p>
+                                <p><strong>FTS 候选倍率</strong>：候选池大小约为 <code>TopN × 倍率</code>。</p>
+                                <p><strong>FTS 最少候选数</strong>：候选池下限，避免候选过少。</p>
+                                <p><strong>拼接分隔</strong>：检索片段之间的连接方式（分隔线/空行）。</p>
+                                <p><strong>聊天区教材摘录</strong>：通过后是否把 AI 精简教材摘录发到聊天区。</p>
+                              </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>主题 TopN</label>
+                                <input className="input text-sm" type="number" min={1} max={10} value={ragTopicTopN}
+                                  onChange={e => setRagTopicTopN(parseInputNumber(e.target.value, ragTopicTopN))} />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>概念 TopN</label>
+                                <input className="input text-sm" type="number" min={1} max={12} value={ragConceptTopN}
+                                  onChange={e => setRagConceptTopN(parseInputNumber(e.target.value, ragConceptTopN))} />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>上下文最大字数</label>
+                                <input className="input text-sm" type="number" min={200} max={4000} value={ragContextMaxChars}
+                                  onChange={e => setRagContextMaxChars(parseInputNumber(e.target.value, ragContextMaxChars))} />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 候选倍率</label>
+                                <input className="input text-sm" type="number" min={1} max={20} value={ragFtsCandidateMultiplier}
+                                  onChange={e => setRagFtsCandidateMultiplier(parseInputNumber(e.target.value, ragFtsCandidateMultiplier))} />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 最少候选数</label>
+                                <input className="input text-sm" type="number" min={1} max={200} value={ragFtsMinCandidates}
+                                  onChange={e => setRagFtsMinCandidates(parseInputNumber(e.target.value, ragFtsMinCandidates))} />
+                              </div>
+                              <div>
+                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>拼接分隔</label>
+                                <select className="input text-sm" value={ragJoinSeparator} onChange={e => setRagJoinSeparator(e.target.value as 'rule' | 'double_newline')}>
+                                  <option value="rule">分隔线（---）</option>
+                                  <option value="double_newline">空行</option>
+                                </select>
+                              </div>
+                            </div>
+                            <label className="mt-2 inline-flex items-center gap-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                              <input
+                                type="checkbox"
+                                checked={ragShowPolishedInChat}
+                                onChange={e => setRagShowPolishedInChat(e.target.checked)}
+                                style={{ accentColor: 'var(--brand)' }}
+                              />
+                              在聊天区显示 AI 教材摘录
+                            </label>
                           </div>
                         </div>
                       )}

@@ -170,14 +170,17 @@ function MessageRow({ msg, isMe }: { msg: Message; isMe: boolean }) {
     const meta = msg.meta as Record<string, unknown>;
     const isRejected = meta?.rejected;
     const isChallengeComplete = meta?.type === 'challenge_complete';
+    const isRag = Boolean(meta?.rag);
     return (
       <div className="flex justify-center animate-fade-in">
-        <span className={`text-xs px-3 py-1.5 rounded-full border
+        <span className={`text-xs px-3 py-1.5 rounded-2xl border whitespace-pre-wrap max-w-[92%]
           ${isRejected
             ? 'bg-red-50 text-red-500 border-red-100'
             : isChallengeComplete
               ? 'bg-purple-50 text-purple-600 border-purple-100 font-semibold'
-              : meta?.concept
+              : isRag
+                ? 'bg-cyan-50 text-cyan-700 border-cyan-100'
+                : meta?.concept
                 ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
                 : 'bg-slate-100 text-slate-500 border-slate-200'
           }`}>

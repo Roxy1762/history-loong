@@ -53,7 +53,11 @@ export async function getGameMessages(
 }
 
 export async function getGameModes() {
-  const { data } = await api.get<{ modes: Record<string, GameModeConfig>; combinableModes: Record<string, GameModeConfig> }>('/modes');
+  const { data } = await api.get<{
+    modes: Record<string, GameModeConfig>;
+    combinableModes: Record<string, GameModeConfig>;
+    ragDefaults?: Record<string, unknown>;
+  }>('/modes');
   return data;
 }
 
@@ -391,6 +395,11 @@ export async function adminDeleteCategory(id: string) {
 export async function adminCategorizeConcept(id: string, categoryId: string, remove = false) {
   const { data } = await api.post(`/admin/curation/concepts/${id}/categorize`, { categoryId, remove }, { headers: adminHeaders() });
   return data;
+}
+
+export async function adminCategorizeConceptsBatch(conceptIds: string[], categoryId: string, remove = false) {
+  const { data } = await api.post('/admin/curation/concepts/categorize-batch', { conceptIds, categoryId, remove }, { headers: adminHeaders() });
+  return data as { ok: boolean; affected: number };
 }
 
 // ── Admin: AI Validation Audit ───────────────────────────────────────────────

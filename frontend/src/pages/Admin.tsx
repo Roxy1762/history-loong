@@ -22,7 +22,7 @@ import {
   adminGetCurationPending, adminGetCurationActive,
   adminApproveConcept, adminApproveAll, adminArchiveConcept, adminRejectConcept,
   adminEditConcept, adminMergeConcepts,
-  adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept,
+  adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept, adminCategorizeConceptsBatch,
   adminGetAIDecisions, adminGetAIDecision,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision,
@@ -840,6 +840,22 @@ function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
     embeddingModel: typeof extra?.kb_embedding_model === 'string' ? extra.kb_embedding_model : '',
     rerankModel: typeof extra?.kb_rerank_model === 'string' ? extra.kb_rerank_model : '',
     rerankInstruction: typeof extra?.kb_rerank_instruction === 'string' ? extra.kb_rerank_instruction : '',
+    topicTopN: typeof extra?.kb_topic_top_n === 'number' ? extra.kb_topic_top_n : 1,
+    conceptTopN: typeof extra?.kb_concept_top_n === 'number' ? extra.kb_concept_top_n : 2,
+    candidateMultiplier: typeof extra?.kb_candidate_multiplier === 'number' ? extra.kb_candidate_multiplier : 4,
+    contextMaxChars: typeof extra?.kb_context_max_chars === 'number' ? extra.kb_context_max_chars : 800,
+    embeddingWeight: typeof extra?.kb_embedding_weight === 'number' ? extra.kb_embedding_weight : 0.85,
+    ftsWeight: typeof extra?.kb_fts_weight === 'number' ? extra.kb_fts_weight : 0.15,
+    rerankWeight: typeof extra?.kb_rerank_weight === 'number' ? extra.kb_rerank_weight : 0.8,
+    polishEnabled: typeof extra?.kb_polish_enabled === 'boolean' ? extra.kb_polish_enabled : true,
+    polishMaxChars: typeof extra?.kb_polish_max_chars === 'number' ? extra.kb_polish_max_chars : 1200,
+    roomDefaultTopicTopN: typeof extra?.kb_room_default_topic_top_n === 'number' ? extra.kb_room_default_topic_top_n : 1,
+    roomDefaultConceptTopN: typeof extra?.kb_room_default_concept_top_n === 'number' ? extra.kb_room_default_concept_top_n : 2,
+    roomDefaultContextMaxChars: typeof extra?.kb_room_default_context_max_chars === 'number' ? extra.kb_room_default_context_max_chars : 800,
+    roomDefaultFtsMultiplier: typeof extra?.kb_room_default_fts_multiplier === 'number' ? extra.kb_room_default_fts_multiplier : 4,
+    roomDefaultFtsMinCandidates: typeof extra?.kb_room_default_fts_min_candidates === 'number' ? extra.kb_room_default_fts_min_candidates : 12,
+    roomDefaultShowPolishedInChat: typeof extra?.kb_room_default_show_polished_in_chat === 'boolean' ? extra.kb_room_default_show_polished_in_chat : false,
+    roomDefaultJoinSeparator: extra?.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
   };
 }
 
@@ -854,6 +870,22 @@ function writeKnowledgeExtra(
     embeddingModel: string;
     rerankModel: string;
     rerankInstruction: string;
+    topicTopN: number;
+    conceptTopN: number;
+    candidateMultiplier: number;
+    contextMaxChars: number;
+    embeddingWeight: number;
+    ftsWeight: number;
+    rerankWeight: number;
+    polishEnabled: boolean;
+    polishMaxChars: number;
+    roomDefaultTopicTopN: number;
+    roomDefaultConceptTopN: number;
+    roomDefaultContextMaxChars: number;
+    roomDefaultFtsMultiplier: number;
+    roomDefaultFtsMinCandidates: number;
+    roomDefaultShowPolishedInChat: boolean;
+    roomDefaultJoinSeparator: string;
   },
   preservedApiKey = ''
 ) {
@@ -868,6 +900,22 @@ function writeKnowledgeExtra(
   delete merged.kb_embedding_model;
   delete merged.kb_rerank_model;
   delete merged.kb_rerank_instruction;
+  delete merged.kb_topic_top_n;
+  delete merged.kb_concept_top_n;
+  delete merged.kb_candidate_multiplier;
+  delete merged.kb_context_max_chars;
+  delete merged.kb_embedding_weight;
+  delete merged.kb_fts_weight;
+  delete merged.kb_rerank_weight;
+  delete merged.kb_polish_enabled;
+  delete merged.kb_polish_max_chars;
+  delete merged.kb_room_default_topic_top_n;
+  delete merged.kb_room_default_concept_top_n;
+  delete merged.kb_room_default_context_max_chars;
+  delete merged.kb_room_default_fts_multiplier;
+  delete merged.kb_room_default_fts_min_candidates;
+  delete merged.kb_room_default_show_polished_in_chat;
+  delete merged.kb_room_default_join_separator;
 
   const apiKey = next.apiKey === SECRET_MASK ? preservedApiKey : next.apiKey.trim();
   const baseUrl = next.baseUrl.trim().replace(/\/$/, '');
@@ -875,7 +923,13 @@ function writeKnowledgeExtra(
   const rerankModel = next.rerankModel.trim();
   const rerankInstruction = next.rerankInstruction.trim();
 
-  const hasAnyValue = Boolean(apiKey || baseUrl || embeddingModel || rerankModel || rerankInstruction || next.enabled || next.embeddingEnabled || next.rerankEnabled);
+  const hasAnyValue = Boolean(
+    apiKey || baseUrl || embeddingModel || rerankModel || rerankInstruction ||
+    next.enabled || next.embeddingEnabled || next.rerankEnabled ||
+    next.roomDefaultTopicTopN || next.roomDefaultConceptTopN || next.roomDefaultContextMaxChars ||
+    next.roomDefaultFtsMultiplier || next.roomDefaultFtsMinCandidates ||
+    next.roomDefaultShowPolishedInChat
+  );
   if (!hasAnyValue) return merged;
 
   merged.kb_provider = 'siliconflow';
@@ -887,6 +941,22 @@ function writeKnowledgeExtra(
   if (embeddingModel) merged.kb_embedding_model = embeddingModel;
   if (rerankModel) merged.kb_rerank_model = rerankModel;
   if (rerankInstruction) merged.kb_rerank_instruction = rerankInstruction;
+  merged.kb_topic_top_n = Number(next.topicTopN) || 1;
+  merged.kb_concept_top_n = Number(next.conceptTopN) || 2;
+  merged.kb_candidate_multiplier = Number(next.candidateMultiplier) || 4;
+  merged.kb_context_max_chars = Number(next.contextMaxChars) || 800;
+  merged.kb_embedding_weight = Number(next.embeddingWeight) || 0.85;
+  merged.kb_fts_weight = Number(next.ftsWeight) || 0.15;
+  merged.kb_rerank_weight = Number(next.rerankWeight) || 0.8;
+  merged.kb_polish_enabled = Boolean(next.polishEnabled);
+  merged.kb_polish_max_chars = Number(next.polishMaxChars) || 1200;
+  merged.kb_room_default_topic_top_n = Number(next.roomDefaultTopicTopN) || 1;
+  merged.kb_room_default_concept_top_n = Number(next.roomDefaultConceptTopN) || 2;
+  merged.kb_room_default_context_max_chars = Number(next.roomDefaultContextMaxChars) || 800;
+  merged.kb_room_default_fts_multiplier = Number(next.roomDefaultFtsMultiplier) || 4;
+  merged.kb_room_default_fts_min_candidates = Number(next.roomDefaultFtsMinCandidates) || 12;
+  merged.kb_room_default_show_polished_in_chat = Boolean(next.roomDefaultShowPolishedInChat);
+  merged.kb_room_default_join_separator = next.roomDefaultJoinSeparator === 'double_newline' ? 'double_newline' : 'rule';
 
   return merged;
 }
@@ -1088,6 +1158,22 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     embeddingModel: initialKnowledge.embeddingModel,
     rerankModel: initialKnowledge.rerankModel,
     rerankInstruction: initialKnowledge.rerankInstruction,
+    topicTopN: initialKnowledge.topicTopN,
+    conceptTopN: initialKnowledge.conceptTopN,
+    candidateMultiplier: initialKnowledge.candidateMultiplier,
+    contextMaxChars: initialKnowledge.contextMaxChars,
+    embeddingWeight: initialKnowledge.embeddingWeight,
+    ftsWeight: initialKnowledge.ftsWeight,
+    rerankWeight: initialKnowledge.rerankWeight,
+    polishEnabled: initialKnowledge.polishEnabled,
+    polishMaxChars: initialKnowledge.polishMaxChars,
+    roomDefaultTopicTopN: initialKnowledge.roomDefaultTopicTopN,
+    roomDefaultConceptTopN: initialKnowledge.roomDefaultConceptTopN,
+    roomDefaultContextMaxChars: initialKnowledge.roomDefaultContextMaxChars,
+    roomDefaultFtsMultiplier: initialKnowledge.roomDefaultFtsMultiplier,
+    roomDefaultFtsMinCandidates: initialKnowledge.roomDefaultFtsMinCandidates,
+    roomDefaultShowPolishedInChat: initialKnowledge.roomDefaultShowPolishedInChat,
+    roomDefaultJoinSeparator: initialKnowledge.roomDefaultJoinSeparator,
   });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
@@ -1096,11 +1182,17 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const [err, setErr] = useState('');
   const [knowledgeCheckMsg, setKnowledgeCheckMsg] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showRagHelp, setShowRagHelp] = useState(false);
 
   function update(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
   function updateKnowledge<K extends keyof typeof knowledge>(key: K, value: typeof knowledge[K]) {
     setKnowledge(prev => ({ ...prev, [key]: value }));
   }
+  const parseInputNumber = (value: string, fallback: number) => {
+    if (value === '') return fallback;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
 
   const PRESETS: { label: string; base_url: string; model: string }[] = [
     { label: 'OpenAI',    base_url: 'https://api.openai.com/v1',         model: 'gpt-4o' },
@@ -1166,6 +1258,15 @@ function AIConfigForm({ initial, onClose, onSaved }: {
         embeddingModel: knowledge.embeddingModel.trim(),
         rerankModel: knowledge.rerankModel.trim(),
         rerankInstruction: knowledge.rerankInstruction.trim(),
+        topicTopN: knowledge.topicTopN,
+        conceptTopN: knowledge.conceptTopN,
+        candidateMultiplier: knowledge.candidateMultiplier,
+        contextMaxChars: knowledge.contextMaxChars,
+        embeddingWeight: knowledge.embeddingWeight,
+        ftsWeight: knowledge.ftsWeight,
+        rerankWeight: knowledge.rerankWeight,
+        polishEnabled: knowledge.polishEnabled,
+        polishMaxChars: knowledge.polishMaxChars,
       };
       const res = await adminCheckEmbedding(payload);
       setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
@@ -1189,6 +1290,15 @@ function AIConfigForm({ initial, onClose, onSaved }: {
         embeddingModel: knowledge.embeddingModel.trim(),
         rerankModel: knowledge.rerankModel.trim(),
         rerankInstruction: knowledge.rerankInstruction.trim(),
+        topicTopN: knowledge.topicTopN,
+        conceptTopN: knowledge.conceptTopN,
+        candidateMultiplier: knowledge.candidateMultiplier,
+        contextMaxChars: knowledge.contextMaxChars,
+        embeddingWeight: knowledge.embeddingWeight,
+        ftsWeight: knowledge.ftsWeight,
+        rerankWeight: knowledge.rerankWeight,
+        polishEnabled: knowledge.polishEnabled,
+        polishMaxChars: knowledge.polishMaxChars,
       };
       const res = await adminCheckRerank(payload);
       setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
@@ -1402,6 +1512,111 @@ function AIConfigForm({ initial, onClose, onSaved }: {
                 onChange={e => updateKnowledge('rerankInstruction', e.target.value)}
               />
             </FormField>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="col-span-full">
+                <button
+                  type="button"
+                  className="text-xs px-2 py-1 rounded border text-slate-600 hover:bg-slate-100"
+                  onClick={() => setShowRagHelp(v => !v)}
+                >
+                  {showRagHelp ? '收起 RAG 参数说明' : '查看 RAG 参数说明'}
+                </button>
+                {showRagHelp && (
+                  <div className="mt-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-1">
+                    <p><strong>主题/概念 TopN</strong>：分别控制按主题与按概念检索返回片段数量。</p>
+                    <p><strong>候选倍数</strong>：FTS 初筛候选规模，约等于 TopN × 倍数。</p>
+                    <p><strong>上下文上限字数</strong>：检索结果拼接后的最终截断长度。</p>
+                    <p><strong>Embedding/FTS/Rerank 权重</strong>：影响排序融合策略，数值越高影响越大。</p>
+                    <p><strong>AI 精简字数上限</strong>：教材摘录在润色后的最大输出长度。</p>
+                    <p><strong>建房页默认值</strong>：玩家创建房间时，RAG 高级设置的初始值。</p>
+                  </div>
+                )}
+              </div>
+              <FormField label="主题 TopN">
+                <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.topicTopN}
+                  onChange={e => updateKnowledge('topicTopN', parseInputNumber(e.target.value, knowledge.topicTopN))} />
+              </FormField>
+              <FormField label="概念 TopN">
+                <input className="input font-mono text-sm" type="number" min={1} max={12} value={knowledge.conceptTopN}
+                  onChange={e => updateKnowledge('conceptTopN', parseInputNumber(e.target.value, knowledge.conceptTopN))} />
+              </FormField>
+              <FormField label="候选倍数">
+                <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.candidateMultiplier}
+                  onChange={e => updateKnowledge('candidateMultiplier', parseInputNumber(e.target.value, knowledge.candidateMultiplier))} />
+              </FormField>
+              <FormField label="上下文上限字数">
+                <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.contextMaxChars}
+                  onChange={e => updateKnowledge('contextMaxChars', parseInputNumber(e.target.value, knowledge.contextMaxChars))} />
+              </FormField>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <FormField label="Embedding 权重">
+                <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.embeddingWeight}
+                  onChange={e => updateKnowledge('embeddingWeight', Math.max(0, Number(e.target.value) || 0))} />
+              </FormField>
+              <FormField label="FTS 权重">
+                <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.ftsWeight}
+                  onChange={e => updateKnowledge('ftsWeight', Math.max(0, Number(e.target.value) || 0))} />
+              </FormField>
+              <FormField label="Rerank 最终权重">
+                <input className="input font-mono text-sm" type="number" step="0.05" min={0} max={1} value={knowledge.rerankWeight}
+                  onChange={e => updateKnowledge('rerankWeight', Math.max(0, Number(e.target.value) || 0))} />
+              </FormField>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={knowledge.polishEnabled} onChange={e => updateKnowledge('polishEnabled', e.target.checked)} />
+                启用 AI 精简 RAG 结果并展示到回复/时间轴
+              </label>
+              <FormField label="AI 精简字数上限">
+                <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.polishMaxChars}
+                  onChange={e => updateKnowledge('polishMaxChars', parseInputNumber(e.target.value, knowledge.polishMaxChars))} />
+              </FormField>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50">
+              <div className="text-xs font-semibold text-slate-700">建房页 RAG 高级设置默认值</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <FormField label="主题 TopN">
+                  <input className="input font-mono text-sm" type="number" min={1} max={10} value={knowledge.roomDefaultTopicTopN}
+                    onChange={e => updateKnowledge('roomDefaultTopicTopN', parseInputNumber(e.target.value, knowledge.roomDefaultTopicTopN))} />
+                </FormField>
+                <FormField label="概念 TopN">
+                  <input className="input font-mono text-sm" type="number" min={1} max={12} value={knowledge.roomDefaultConceptTopN}
+                    onChange={e => updateKnowledge('roomDefaultConceptTopN', parseInputNumber(e.target.value, knowledge.roomDefaultConceptTopN))} />
+                </FormField>
+                <FormField label="上下文最大字数">
+                  <input className="input font-mono text-sm" type="number" min={200} max={4000} value={knowledge.roomDefaultContextMaxChars}
+                    onChange={e => updateKnowledge('roomDefaultContextMaxChars', parseInputNumber(e.target.value, knowledge.roomDefaultContextMaxChars))} />
+                </FormField>
+                <FormField label="FTS 候选倍率">
+                  <input className="input font-mono text-sm" type="number" min={1} max={20} value={knowledge.roomDefaultFtsMultiplier}
+                    onChange={e => updateKnowledge('roomDefaultFtsMultiplier', parseInputNumber(e.target.value, knowledge.roomDefaultFtsMultiplier))} />
+                </FormField>
+                <FormField label="FTS 最少候选数">
+                  <input className="input font-mono text-sm" type="number" min={1} max={200} value={knowledge.roomDefaultFtsMinCandidates}
+                    onChange={e => updateKnowledge('roomDefaultFtsMinCandidates', parseInputNumber(e.target.value, knowledge.roomDefaultFtsMinCandidates))} />
+                </FormField>
+                <FormField label="拼接分隔">
+                  <select className="input text-sm" value={knowledge.roomDefaultJoinSeparator}
+                    onChange={e => updateKnowledge('roomDefaultJoinSeparator', (e.target.value === 'double_newline' ? 'double_newline' : 'rule'))}>
+                    <option value="rule">分隔线（---）</option>
+                    <option value="double_newline">空行</option>
+                  </select>
+                </FormField>
+              </div>
+              <label className="inline-flex items-center gap-2 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={knowledge.roomDefaultShowPolishedInChat}
+                  onChange={e => updateKnowledge('roomDefaultShowPolishedInChat', e.target.checked)}
+                />
+                默认在聊天区显示 AI 教材摘录
+              </label>
+            </div>
 
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckEmbedding} disabled={checkingEmbedding}>
@@ -1988,6 +2203,8 @@ function CurationPanel() {
   const [newCatColor, setNewCatColor] = useState('#6366f1');
   const [savingCat,   setSavingCat]   = useState(false);
   const [batchApproving, setBatchApproving] = useState(false);
+  const [batchCategoryId, setBatchCategoryId] = useState('');
+  const [batchCategorizing, setBatchCategorizing] = useState(false);
 
   const reloadPending = useCallback(() => {
     setLoading(true);
@@ -2090,6 +2307,22 @@ function CurationPanel() {
       await adminCategorizeConcept(conceptId, categoryId, remove);
       reloadActive();
     } catch { showMsg('分类操作失败', true); }
+  }
+
+  async function handleBatchCategorize(remove = false) {
+    const conceptIds = Array.from(selected);
+    if (!batchCategoryId || conceptIds.length === 0) return;
+    setBatchCategorizing(true);
+    try {
+      const res = await adminCategorizeConceptsBatch(conceptIds, batchCategoryId, remove);
+      showMsg(`${remove ? '批量移除分类' : '批量归类'}完成，处理 ${res.affected} 条`);
+      reloadActive();
+      setSelected(new Set());
+    } catch {
+      showMsg('批量分类失败', true);
+    } finally {
+      setBatchCategorizing(false);
+    }
   }
 
   // Filtered active list
@@ -2211,6 +2444,34 @@ function CurationPanel() {
               </div>
             )}
             <div className="ml-auto flex gap-2">
+              {selected.size > 0 && categories.length > 0 && (
+                <>
+                  <select
+                    value={batchCategoryId}
+                    onChange={e => setBatchCategoryId(e.target.value)}
+                    className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600"
+                  >
+                    <option value="">选择批量分类</option>
+                    {categories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    disabled={!batchCategoryId || batchCategorizing}
+                    onClick={() => handleBatchCategorize(false)}
+                    className="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white rounded-lg transition-colors font-medium"
+                  >
+                    {batchCategorizing ? '处理中...' : `批量归类 (${selected.size})`}
+                  </button>
+                  <button
+                    disabled={!batchCategoryId || batchCategorizing}
+                    onClick={() => handleBatchCategorize(true)}
+                    className="text-xs px-3 py-1.5 bg-slate-200 hover:bg-slate-300 disabled:bg-slate-100 text-slate-700 rounded-lg transition-colors font-medium"
+                  >
+                    批量移除分类
+                  </button>
+                </>
+              )}
               {selected.size >= 2 && (
                 <button onClick={() => setShowMerge(true)}
                   className="text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors font-medium">

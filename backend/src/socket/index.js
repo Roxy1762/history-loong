@@ -27,6 +27,7 @@ const ai = require('../services/aiService');
 const {
   getContextForConceptAdvancedWithTrace,
   searchContextAdvancedWithTrace,
+  getRagRuntimeConfig,
   ingestAIConfirmedConcept,
   validateFromKnowledge,
 } = require('../services/knowledgeService');
@@ -461,12 +462,16 @@ module.exports = function setupSocket(io) {
       });
 
       try {
+        const ragRuntime = getRagRuntimeConfig(settings);
         const existing = db.getConceptsByGame.all(currentGameId)
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
 
-        const ragFlow = await getContextForConceptAdvancedWithTrace(input, game.topic);
+        const ragFlow = await getContextForConceptAdvancedWithTrace(input, game.topic, settings);
         const knowledgeContext = ragFlow.context;
+        const polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
+          ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)
+          : '';
         const kbCheck = validateFromKnowledge(input, game.topic);
         let result;
         let aiTrace = null;
@@ -530,7 +535,7 @@ module.exports = function setupSocket(io) {
         // ── Accepted ──────────────────────────────────────────────────────
         const difficulty = Math.max(1, Math.min(5, parseInt(result.difficulty) || 3));
         const tags  = JSON.stringify(Array.isArray(result.tags) ? result.tags : []);
-        const extra = JSON.stringify(result.extra || { difficulty });
+        const extra = JSON.stringify({ ...(result.extra || {}), difficulty, ragPolished: polishedRag });
         db.insertConcept.run(conceptId, currentGameId, currentPlayer.id, currentPlayer.name,
           input, result.name, result.period, result.year ?? null,
           result.dynasty, result.description, tags, 1, 0, null, extra);
@@ -559,7 +564,7 @@ module.exports = function setupSocket(io) {
           raw_input: input, name: result.name, period: result.period,
           year: result.year ?? null, dynasty: result.dynasty,
           description: result.description, tags: Array.isArray(result.tags) ? result.tags : [],
-          extra: { difficulty, ...(result.extra || {}) }, validated: 1, rejected: 0,
+          extra: { difficulty, ...(result.extra || {}), ragPolished: polishedRag }, validated: 1, rejected: 0,
           eraLabel: ts.getEraLabel(result.year ?? null, result.dynasty), created_at: new Date().toISOString(),
         };
 
@@ -569,6 +574,15 @@ module.exports = function setupSocket(io) {
           id: uuidv4(), type: 'system', game_id: currentGameId,
           content: confirmContent, meta: { conceptId, concept: true }, created_at: new Date().toISOString(),
         });
+        if (polishedRag && ragRuntime.showPolishedInChat) {
+          const ragMsg = `🧠 教材检索参考（AI精简）：\n${polishedRag}`;
+          const ragId = uuidv4();
+          db.insertMessage.run(ragId, currentGameId, null, null, 'system', ragMsg, JSON.stringify({ conceptId, rag: true }));
+          io.to(currentGameId).emit('message:new', {
+            id: ragId, type: 'system', game_id: currentGameId,
+            content: ragMsg, meta: { conceptId, rag: true }, created_at: new Date().toISOString(),
+          });
+        }
         io.to(currentGameId).emit('concept:new', { concept });
         room.lastSubmitAt.set(currentPlayer.id, Date.now());
 
@@ -706,8 +720,12 @@ module.exports = function setupSocket(io) {
 
       try {
         const settleSettings = JSON.parse(game.settings || '{}');
-        const settleRagFlow = await searchContextAdvancedWithTrace(game.topic, 2);
+        const ragRuntime = getRagRuntimeConfig(settleSettings);
+        const settleRagFlow = await searchContextAdvancedWithTrace(game.topic, 2, settleSettings);
         const knowledgeContext = settleRagFlow.context;
+        const polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
+          ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)
+          : '';
         const results = await ai.batchValidateConcepts(pending, game.topic, knowledgeContext);
 
         const ts = new TimelineService();
@@ -720,7 +738,7 @@ module.exports = function setupSocket(io) {
           if (r.valid) {
             const tags  = JSON.stringify(Array.isArray(r.tags) ? r.tags : []);
             const difficulty = Math.max(1, Math.min(5, parseInt(r.difficulty) || 3));
-            const extra = JSON.stringify({ difficulty });
+            const extra = JSON.stringify({ difficulty, ragPolished: polishedRag });
             db.acceptConcept.run(
               r.name || row.raw_input, r.period || null, r.year ?? null,
               r.dynasty || null, r.description || null, tags, extra, r.id
@@ -747,7 +765,7 @@ module.exports = function setupSocket(io) {
               raw_input: row.raw_input, name: r.name || row.raw_input,
               period: r.period, year: r.year ?? null, dynasty: r.dynasty,
               description: r.description, tags: Array.isArray(r.tags) ? r.tags : [],
-              extra: { difficulty }, validated: 1, rejected: 0,
+              extra: { difficulty, ragPolished: polishedRag }, validated: 1, rejected: 0,
               eraLabel: ts.getEraLabel(r.year ?? null, r.dynasty), created_at: row.created_at,
             };
             io.to(currentGameId).emit('concept:settled', { conceptId: r.id, accepted: true, concept });
@@ -829,20 +847,24 @@ module.exports = function setupSocket(io) {
       });
 
       try {
+        const settings = JSON.parse(game.settings || '{}');
+        const ragRuntime = getRagRuntimeConfig(settings);
         const existing = db.getConceptsByGame.all(currentGameId)
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
-
-        const settings = JSON.parse(game.settings || '{}');
         const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
         let result;
         let aiTrace = null;
         let ragFlow = null;
+        let polishedRag = '';
         if (kbCheck.confident) {
           result = kbCheck.result;
         } else {
-          ragFlow = await getContextForConceptAdvancedWithTrace(row.raw_input, game.topic);
+          ragFlow = await getContextForConceptAdvancedWithTrace(row.raw_input, game.topic, settings);
           const knowledgeContext = ragFlow.context;
+          polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
+            ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)
+            : '';
           const traced = await ai.validateConceptWithTrace(
             row.raw_input,
             game.topic,
@@ -892,7 +914,7 @@ module.exports = function setupSocket(io) {
 
         const difficulty = Math.max(1, Math.min(5, parseInt(result.difficulty) || 3));
         const tags  = JSON.stringify(Array.isArray(result.tags) ? result.tags : []);
-        const extra = JSON.stringify({ difficulty });
+        const extra = JSON.stringify({ difficulty, ragPolished: polishedRag });
         db.acceptConcept.run(
           result.name || row.raw_input, result.period || null, result.year ?? null,
           result.dynasty || null, result.description || null, tags, extra, conceptId
@@ -904,7 +926,7 @@ module.exports = function setupSocket(io) {
           raw_input: row.raw_input, name: result.name || row.raw_input,
           period: result.period, year: result.year ?? null, dynasty: result.dynasty,
           description: result.description, tags: Array.isArray(result.tags) ? result.tags : [],
-          extra: { difficulty }, validated: 1, rejected: 0,
+          extra: { difficulty, ragPolished: polishedRag }, validated: 1, rejected: 0,
           eraLabel: ts.getEraLabel(result.year ?? null, result.dynasty), created_at: row.created_at,
         };
 
@@ -937,7 +959,15 @@ module.exports = function setupSocket(io) {
           id: confirmId, type: 'system', game_id: currentGameId,
           content: confirmContent, meta: { conceptId, concept: true }, created_at: new Date().toISOString(),
         });
-
+        if (polishedRag && ragRuntime.showPolishedInChat) {
+          const ragMsg = `🧠 教材检索参考（AI精简）：\n${polishedRag}`;
+          const ragId = uuidv4();
+          db.insertMessage.run(ragId, currentGameId, null, null, 'system', ragMsg, JSON.stringify({ conceptId, rag: true }));
+          io.to(currentGameId).emit('message:new', {
+            id: ragId, type: 'system', game_id: currentGameId,
+            content: ragMsg, meta: { conceptId, rag: true }, created_at: new Date().toISOString(),
+          });
+        }
         try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
         callback?.({ ok: true });
       } catch (err) {

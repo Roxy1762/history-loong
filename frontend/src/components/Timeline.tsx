@@ -308,6 +308,7 @@ interface CardProps {
 }
 
 const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle, isAdmin, onDelete }: CardProps) {
+  const ragPolished = String((c.extra as Record<string, unknown>)?.ragPolished || '').trim();
   const handleToggle = useCallback(
     () => onToggle(expanded ? null : c.id),
     [onToggle, expanded, c.id],
@@ -381,6 +382,12 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
           {expanded && c.description && (
             <div className="mt-3 pt-3 border-t border-slate-50 text-sm text-slate-600 leading-relaxed text-left animate-slide-down">
               {c.description}
+            </div>
+          )}
+          {expanded && ragPolished && (
+            <div className="mt-2 text-xs text-cyan-800 bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2 whitespace-pre-wrap leading-relaxed">
+              <div className="font-semibold mb-1">📚 教材检索参考（AI精简）</div>
+              {ragPolished}
             </div>
           )}
         </div>
