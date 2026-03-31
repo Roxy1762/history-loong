@@ -180,6 +180,8 @@ function getActiveKnowledgeOverrides() {
     return {
       provider: typeof extra.kb_provider === 'string' ? extra.kb_provider.trim() : '',
       enabled: typeof extra.kb_enabled === 'boolean' ? extra.kb_enabled : null,
+      embeddingEnabled: typeof extra.kb_embedding_enabled === 'boolean' ? extra.kb_embedding_enabled : null,
+      rerankEnabled: typeof extra.kb_rerank_enabled === 'boolean' ? extra.kb_rerank_enabled : null,
       apiKey: typeof extra.kb_api_key === 'string' ? extra.kb_api_key.trim() : '',
       baseUrl: typeof extra.kb_base_url === 'string' ? extra.kb_base_url.trim() : '',
       embeddingModel: typeof extra.kb_embedding_model === 'string' ? extra.kb_embedding_model.trim() : '',
@@ -191,8 +193,7 @@ function getActiveKnowledgeOverrides() {
   }
 }
 
-function getSiliconFlowConfig() {
-  const overrides = getActiveKnowledgeOverrides();
+function buildSiliconFlowConfig(overrides = {}) {
   const apiKey = overrides.apiKey || process.env.SILICONFLOW_API_KEY || '';
   const baseUrl = (overrides.baseUrl || process.env.SILICONFLOW_BASE_URL || DEFAULT_SILICONFLOW_BASE_URL).replace(/\/$/, '');
   const embeddingModel = overrides.embeddingModel || process.env.SILICONFLOW_EMBED_MODEL || '';
@@ -202,6 +203,8 @@ function getSiliconFlowConfig() {
   const allowEnhancement = overrides.enabled == null
     ? enabledByEnv !== '0' && enabledByEnv !== 'false'
     : overrides.enabled;
+  const allowEmbedding = overrides.embeddingEnabled == null ? allowEnhancement : overrides.embeddingEnabled;
+  const allowRerank = overrides.rerankEnabled == null ? allowEnhancement : overrides.rerankEnabled;
   const provider = overrides.provider || 'siliconflow';
 
   return {
@@ -210,8 +213,61 @@ function getSiliconFlowConfig() {
     embeddingModel,
     rerankModel,
     rerankInstruction,
-    enableEmbedding: Boolean(provider === 'siliconflow' && apiKey && embeddingModel && allowEnhancement),
-    enableRerank: Boolean(provider === 'siliconflow' && apiKey && rerankModel && allowEnhancement),
+    enableEmbedding: Boolean(provider === 'siliconflow' && apiKey && embeddingModel && allowEmbedding),
+    enableRerank: Boolean(provider === 'siliconflow' && apiKey && rerankModel && allowRerank),
+  };
+}
+
+function getSiliconFlowConfig() {
+  return buildSiliconFlowConfig(getActiveKnowledgeOverrides());
+}
+
+function normalizeKnowledgeOverrides(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const toNullableBool = (v) => (typeof v === 'boolean' ? v : null);
+  const toTrimmed = (v) => (typeof v === 'string' ? v.trim() : '');
+  return {
+    provider: toTrimmed(source.provider || source.kb_provider || 'siliconflow') || 'siliconflow',
+    enabled: toNullableBool(source.enabled ?? source.kb_enabled),
+    embeddingEnabled: toNullableBool(source.embeddingEnabled ?? source.kb_embedding_enabled),
+    rerankEnabled: toNullableBool(source.rerankEnabled ?? source.kb_rerank_enabled),
+    apiKey: toTrimmed(source.apiKey || source.kb_api_key),
+    baseUrl: toTrimmed(source.baseUrl || source.kb_base_url),
+    embeddingModel: toTrimmed(source.embeddingModel || source.kb_embedding_model),
+    rerankModel: toTrimmed(source.rerankModel || source.kb_rerank_model),
+    rerankInstruction: toTrimmed(source.rerankInstruction || source.kb_rerank_instruction),
+  };
+}
+
+async function testEmbeddingConnection(overridesInput) {
+  const config = buildSiliconFlowConfig(normalizeKnowledgeOverrides(overridesInput || getActiveKnowledgeOverrides()));
+  if (!config.enableEmbedding) {
+    throw new Error('嵌入模型未启用或配置不完整（请检查 API Key、模型名和开关）');
+  }
+  await embedTexts(config, ['测试向量化连通性']);
+  return {
+    ok: true,
+    model: config.embeddingModel,
+    endpoint: `${config.baseUrl}/embeddings`,
+  };
+}
+
+async function testRerankConnection(overridesInput) {
+  const config = buildSiliconFlowConfig(normalizeKnowledgeOverrides(overridesInput || getActiveKnowledgeOverrides()));
+  if (!config.enableRerank) {
+    throw new Error('重排模型未启用或配置不完整（请检查 API Key、模型名和开关）');
+  }
+  const rows = await rerankWithSiliconFlow(
+    config,
+    '测试重排',
+    [{ content: '隋朝建立于581年。' }, { content: '唐朝建立于618年。' }],
+    1
+  );
+  return {
+    ok: true,
+    model: config.rerankModel,
+    endpoint: `${config.baseUrl}/rerank`,
+    topResult: rows[0]?.content || '',
   };
 }
 
@@ -563,6 +619,8 @@ module.exports = {
   getContextForConceptAdvanced,
   listDocuments,
   vectorizeDocument,
+  testEmbeddingConnection,
+  testRerankConnection,
   ingestAIConfirmedConcept,
   listAIConfirmedDocs,
   validateFromKnowledge,

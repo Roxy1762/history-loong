@@ -189,6 +189,27 @@ export async function adminVectorizeDoc(id: string) {
   return data as { message: string; docId: string; chunks: number; vectorized: number };
 }
 
+export interface KnowledgeCheckPayload {
+  enabled?: boolean;
+  embeddingEnabled?: boolean;
+  rerankEnabled?: boolean;
+  apiKey?: string;
+  baseUrl?: string;
+  embeddingModel?: string;
+  rerankModel?: string;
+  rerankInstruction?: string;
+}
+
+export async function adminCheckEmbedding(knowledge?: KnowledgeCheckPayload) {
+  const { data } = await api.post('/admin/knowledge/check/embedding', { knowledge }, { headers: adminHeaders() });
+  return data as { message: string; ok: boolean; model: string; endpoint: string };
+}
+
+export async function adminCheckRerank(knowledge?: KnowledgeCheckPayload) {
+  const { data } = await api.post('/admin/knowledge/check/rerank', { knowledge }, { headers: adminHeaders() });
+  return data as { message: string; ok: boolean; model: string; endpoint: string; topResult?: string };
+}
+
 // ── Admin: Game Management ───────────────────────────────────────────────────
 
 export interface AdminGame extends Game {

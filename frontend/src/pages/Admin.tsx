@@ -14,7 +14,7 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
   adminGetLogs, getGameModes,
@@ -28,6 +28,7 @@ import {
   type CurationConcept, type Category, type AIDecision,
 } from '../services/api';
 import type { Game, GameModeConfig } from '../types';
+import axios from 'axios';
 
 // ── Login screen ──────────────────────────────────────────────────────────────
 
@@ -44,6 +45,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       setErr('密钥错误，请重试');
     }
   }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
       <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-8 w-full max-w-sm border border-white/20 shadow-2xl">
@@ -817,10 +819,22 @@ function GamesPanel() {
 
 const SECRET_MASK = '••••••••';
 
+function formatApiError(err: unknown, fallback = '请求失败') {
+  if (axios.isAxiosError(err)) {
+    const detail = err.response?.data?.detail;
+    const msg = err.response?.data?.error || err.message || fallback;
+    return detail ? `${msg}\n${String(detail).slice(0, 400)}` : msg;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
 function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
+  const legacyEnabled = typeof extra?.kb_enabled === 'boolean' ? extra.kb_enabled : false;
   return {
     provider: typeof extra?.kb_provider === 'string' ? extra.kb_provider : 'siliconflow',
-    enabled: Boolean(extra?.kb_enabled),
+    enabled: legacyEnabled,
+    embeddingEnabled: typeof extra?.kb_embedding_enabled === 'boolean' ? extra.kb_embedding_enabled : legacyEnabled,
+    rerankEnabled: typeof extra?.kb_rerank_enabled === 'boolean' ? extra.kb_rerank_enabled : legacyEnabled,
     apiKey: typeof extra?.kb_api_key === 'string' ? extra.kb_api_key : '',
     baseUrl: typeof extra?.kb_base_url === 'string' ? extra.kb_base_url : '',
     embeddingModel: typeof extra?.kb_embedding_model === 'string' ? extra.kb_embedding_model : '',
@@ -833,6 +847,8 @@ function writeKnowledgeExtra(
   existingExtra: Record<string, unknown>,
   next: {
     enabled: boolean;
+    embeddingEnabled: boolean;
+    rerankEnabled: boolean;
     apiKey: string;
     baseUrl: string;
     embeddingModel: string;
@@ -845,6 +861,8 @@ function writeKnowledgeExtra(
 
   delete merged.kb_provider;
   delete merged.kb_enabled;
+  delete merged.kb_embedding_enabled;
+  delete merged.kb_rerank_enabled;
   delete merged.kb_api_key;
   delete merged.kb_base_url;
   delete merged.kb_embedding_model;
@@ -857,11 +875,13 @@ function writeKnowledgeExtra(
   const rerankModel = next.rerankModel.trim();
   const rerankInstruction = next.rerankInstruction.trim();
 
-  const hasAnyValue = Boolean(apiKey || baseUrl || embeddingModel || rerankModel || rerankInstruction || next.enabled);
+  const hasAnyValue = Boolean(apiKey || baseUrl || embeddingModel || rerankModel || rerankInstruction || next.enabled || next.embeddingEnabled || next.rerankEnabled);
   if (!hasAnyValue) return merged;
 
   merged.kb_provider = 'siliconflow';
   merged.kb_enabled = next.enabled;
+  merged.kb_embedding_enabled = next.embeddingEnabled;
+  merged.kb_rerank_enabled = next.rerankEnabled;
   if (apiKey) merged.kb_api_key = apiKey;
   if (baseUrl) merged.kb_base_url = baseUrl;
   if (embeddingModel) merged.kb_embedding_model = embeddingModel;
@@ -986,12 +1006,12 @@ function AIConfigPanel() {
                     </span>
                     {knowledge.embeddingModel && (
                       <span className="text-xs px-2 py-0.5 rounded-full border bg-cyan-50 text-cyan-700 border-cyan-200">
-                        Embedding: <span className="font-mono">{knowledge.embeddingModel}</span>
+                        Embedding{knowledge.embeddingEnabled ? '已启用' : '已配置'}: <span className="font-mono">{knowledge.embeddingModel}</span>
                       </span>
                     )}
                     {knowledge.rerankModel && (
                       <span className="text-xs px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
-                        Rerank: <span className="font-mono">{knowledge.rerankModel}</span>
+                        Rerank{knowledge.rerankEnabled ? '已启用' : '已配置'}: <span className="font-mono">{knowledge.rerankModel}</span>
                       </span>
                     )}
                   </div>
@@ -1061,6 +1081,8 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   });
   const [knowledge, setKnowledge] = useState({
     enabled: initialKnowledge.enabled,
+    embeddingEnabled: initialKnowledge.embeddingEnabled,
+    rerankEnabled: initialKnowledge.rerankEnabled,
     apiKey: initialKnowledge.apiKey ? SECRET_MASK : '',
     baseUrl: initialKnowledge.baseUrl,
     embeddingModel: initialKnowledge.embeddingModel,
@@ -1069,7 +1091,10 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
+  const [checkingEmbedding, setCheckingEmbedding] = useState(false);
+  const [checkingRerank, setCheckingRerank] = useState(false);
   const [err, setErr] = useState('');
+  const [knowledgeCheckMsg, setKnowledgeCheckMsg] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
 
   function update(k: string, v: string) { setForm(f => ({ ...f, [k]: v })); }
@@ -1098,8 +1123,14 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       if (knowledge.enabled && !knowledgeApiKey) {
         throw new Error('启用知识库增强时，请填写 SiliconFlow API Key');
       }
-      if (knowledge.enabled && !knowledge.embeddingModel.trim() && !knowledge.rerankModel.trim()) {
-        throw new Error('启用知识库增强时，至少填写一个嵌入模型或重排序模型');
+      if (knowledge.enabled && !knowledge.embeddingEnabled && !knowledge.rerankEnabled) {
+        throw new Error('启用知识库增强时，请至少启用 Embedding 或 Rerank');
+      }
+      if (knowledge.embeddingEnabled && !knowledge.embeddingModel.trim()) {
+        throw new Error('已启用 Embedding，请填写嵌入模型');
+      }
+      if (knowledge.rerankEnabled && !knowledge.rerankModel.trim()) {
+        throw new Error('已启用 Rerank，请填写重排序模型');
       }
 
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
@@ -1116,9 +1147,55 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       }
       onSaved();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : '保存失败');
+      setErr(formatApiError(e, '保存失败'));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleCheckEmbedding() {
+    setCheckingEmbedding(true);
+    setKnowledgeCheckMsg('');
+    try {
+      const payload = {
+        enabled: knowledge.enabled,
+        embeddingEnabled: knowledge.embeddingEnabled,
+        rerankEnabled: knowledge.rerankEnabled,
+        apiKey: knowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : knowledge.apiKey.trim(),
+        baseUrl: knowledge.baseUrl.trim(),
+        embeddingModel: knowledge.embeddingModel.trim(),
+        rerankModel: knowledge.rerankModel.trim(),
+        rerankInstruction: knowledge.rerankInstruction.trim(),
+      };
+      const res = await adminCheckEmbedding(payload);
+      setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
+    } catch (e: unknown) {
+      setKnowledgeCheckMsg(`❌ ${formatApiError(e, 'Embedding 检测失败')}`);
+    } finally {
+      setCheckingEmbedding(false);
+    }
+  }
+
+  async function handleCheckRerank() {
+    setCheckingRerank(true);
+    setKnowledgeCheckMsg('');
+    try {
+      const payload = {
+        enabled: knowledge.enabled,
+        embeddingEnabled: knowledge.embeddingEnabled,
+        rerankEnabled: knowledge.rerankEnabled,
+        apiKey: knowledge.apiKey === SECRET_MASK ? initialKnowledge.apiKey : knowledge.apiKey.trim(),
+        baseUrl: knowledge.baseUrl.trim(),
+        embeddingModel: knowledge.embeddingModel.trim(),
+        rerankModel: knowledge.rerankModel.trim(),
+        rerankInstruction: knowledge.rerankInstruction.trim(),
+      };
+      const res = await adminCheckRerank(payload);
+      setKnowledgeCheckMsg(`✅ ${res.message}（${res.model}）`);
+    } catch (e: unknown) {
+      setKnowledgeCheckMsg(`❌ ${formatApiError(e, 'Rerank 检测失败')}`);
+    } finally {
+      setCheckingRerank(false);
     }
   }
 
@@ -1258,6 +1335,25 @@ function AIConfigForm({ initial, onClose, onSaved }: {
             </div>
           </div>
           <div className="p-4 space-y-4 bg-white">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={knowledge.embeddingEnabled}
+                  onChange={e => updateKnowledge('embeddingEnabled', e.target.checked)}
+                />
+                启用 Embedding 向量检索
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={knowledge.rerankEnabled}
+                  onChange={e => updateKnowledge('rerankEnabled', e.target.checked)}
+                />
+                启用 Rerank 重排
+              </label>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormField label="SiliconFlow API Key">
                 <input
@@ -1306,6 +1402,20 @@ function AIConfigForm({ initial, onClose, onSaved }: {
                 onChange={e => updateKnowledge('rerankInstruction', e.target.value)}
               />
             </FormField>
+
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckEmbedding} disabled={checkingEmbedding}>
+                {checkingEmbedding ? 'Embedding 检测中...' : '检测 Embedding'}
+              </button>
+              <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckRerank} disabled={checkingRerank}>
+                {checkingRerank ? 'Rerank 检测中...' : '检测 Rerank'}
+              </button>
+            </div>
+            {knowledgeCheckMsg && (
+              <p className={`text-xs whitespace-pre-wrap ${knowledgeCheckMsg.startsWith('✅') ? 'text-green-600' : 'text-red-500'}`}>
+                {knowledgeCheckMsg}
+              </p>
+            )}
 
             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
               请求会按 SiliconFlow 官方接口结构发送：
@@ -1399,7 +1509,7 @@ function KnowledgePanel() {
       const res = await adminVectorizeDoc(id);
       setMsg(`✅ 「${title}」向量化完成，共处理 ${res.vectorized} 个片段`);
     } catch (err: unknown) {
-      setMsg(`❌ ${err instanceof Error ? err.message : '向量化失败'}`);
+      setMsg(`❌ ${formatApiError(err, '向量化失败')}`);
     } finally {
       setVectorizingDocId(null);
     }
