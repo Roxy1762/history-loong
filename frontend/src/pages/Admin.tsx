@@ -14,7 +14,7 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives,
   adminGetLogs, getGameModes,
@@ -1313,6 +1313,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [checkingEmbedding, setCheckingEmbedding] = useState(false);
   const [checkingRerank, setCheckingRerank] = useState(false);
+  const [checkingAuxiliary, setCheckingAuxiliary] = useState(false);
   const [err, setErr] = useState('');
   const [knowledgeCheckMsg, setKnowledgeCheckMsg] = useState('');
   const [showPrompt, setShowPrompt] = useState(false);
@@ -1443,6 +1444,26 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       setKnowledgeCheckMsg(`❌ ${formatApiError(e, 'Rerank 检测失败')}`);
     } finally {
       setCheckingRerank(false);
+    }
+  }
+
+  async function handleCheckAuxiliary() {
+    setCheckingAuxiliary(true);
+    setKnowledgeCheckMsg('');
+    try {
+      const payload = {
+        providerType: aux.providerType,
+        baseUrl: aux.baseUrl.trim(),
+        apiKey: aux.apiKey === SECRET_MASK ? initialAux.apiKey : aux.apiKey.trim(),
+        model: aux.model.trim(),
+        systemPrompt: aux.systemPrompt.trim(),
+      };
+      const res = await adminCheckAuxiliary(payload);
+      setKnowledgeCheckMsg(`✅ ${res.message}（${res.provider} / ${res.model}）`);
+    } catch (e: unknown) {
+      setKnowledgeCheckMsg(`❌ ${formatApiError(e, '辅助 LLM 检测失败')}`);
+    } finally {
+      setCheckingAuxiliary(false);
     }
   }
 
@@ -1782,6 +1803,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               </button>
               <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckRerank} disabled={checkingRerank}>
                 {checkingRerank ? 'Rerank 检测中...' : '检测 Rerank'}
+              </button>
+              <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckAuxiliary} disabled={checkingAuxiliary}>
+                {checkingAuxiliary ? '辅助 LLM 检测中...' : '检测辅助 LLM'}
               </button>
             </div>
             {knowledgeCheckMsg && (
@@ -2976,6 +3000,7 @@ function AIDecisionsPanel() {
                     try {
                       const parsed = JSON.parse(selected.ai_response);
                       const rag = parsed?.rag;
+                      const auxiliary = parsed?.auxiliary || rag?.auxTrace;
                       const rawOutput = parsed?.rawOutput;
                       const ragFlow = rag?.flow;
                       return (
@@ -2999,6 +3024,14 @@ function AIDecisionsPanel() {
                               <div className="text-xs font-semibold text-slate-600 mb-1">🧠 模型原始输出</div>
                               <pre className="text-xs font-mono bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 overflow-x-auto whitespace-pre-wrap break-all text-amber-900 max-h-52 overflow-y-auto">
                                 {String(rawOutput)}
+                              </pre>
+                            </div>
+                          )}
+                          {auxiliary && (
+                            <div className="text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-emerald-700">
+                              <div className="font-semibold mb-1">🧩 辅助 LLM 日志</div>
+                              <pre className="mt-1 text-[11px] font-mono bg-white/70 border border-emerald-100 rounded p-2 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                                {JSON.stringify(auxiliary, null, 2)}
                               </pre>
                             </div>
                           )}
