@@ -28,6 +28,15 @@ const EXAMPLE_TOPICS = [
   '中国近代史', '古希腊文明',
 ];
 
+const SHI_JI_QUOTES = [
+  { quote: '人固有一死，或重于泰山，或轻于鸿毛。', source: '《史记·报任少卿书》' },
+  { quote: '项庄舞剑，意在沛公。', source: '《史记·项羽本纪》' },
+  { quote: '燕雀安知鸿鹄之志哉。', source: '《史记·陈涉世家》' },
+  { quote: '桃李不言，下自成蹊。', source: '《史记·李将军列传》' },
+  { quote: '运筹策帷帐之中，决胜于千里之外。', source: '《史记·高祖本纪》' },
+  { quote: '众口铄金，积毁销骨。', source: '《史记·张仪列传》' },
+] as const;
+
 function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
   return [...new Set(extraModes.filter(Boolean))].filter(mode => mode !== primaryMode);
 }
@@ -73,6 +82,7 @@ export default function Home() {
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
+  const [heroQuote] = useState(() => SHI_JI_QUOTES[Math.floor(Math.random() * SHI_JI_QUOTES.length)]);
 
   useEffect(() => {
     getGameModes().then(data => {
@@ -223,21 +233,21 @@ export default function Home() {
         {/* Hero title */}
         <div className="text-center mb-7 animate-fade-in">
           <div
-            className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full mb-4 border"
+            className="max-w-2xl mx-auto px-4 py-4 rounded-2xl border"
             style={{
-              background: 'var(--brand-light)',
-              color: 'var(--brand)',
-              borderColor: 'color-mix(in srgb, var(--brand) 25%, transparent)',
+              background: 'color-mix(in srgb, var(--brand-light) 45%, var(--bg-card))',
+              borderColor: 'color-mix(in srgb, var(--brand) 20%, transparent)',
             }}
           >
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--brand)' }} />
-            多人实时 · AI 验证 · 自动时间轴
+            <p className="text-xl sm:text-2xl font-heading font-bold leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+              「{heroQuote.quote}」
+            </p>
+            <p className="mt-2 text-sm sm:text-base" style={{ color: 'var(--text-secondary)' }}>
+              —— {heroQuote.source}
+            </p>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-heading font-black mb-2.5 leading-tight" style={{ color: 'var(--text-primary)' }}>
-            <span className="gradient-text">历史接龙</span>
-          </h1>
-          <p className="text-sm sm:text-base max-w-sm mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            多人实时历史知识接龙，AI 自动验证并生成时间轴
+          <p className="text-xs sm:text-sm max-w-md mx-auto leading-relaxed mt-3" style={{ color: 'var(--text-muted)' }}>
+            每次打开页面随机展示一则《史记》名句
           </p>
         </div>
 
