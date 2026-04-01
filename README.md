@@ -76,6 +76,10 @@ bash setup.sh --prod  # 生产模式（自动构建）
 bash setup.sh --docker# Docker 一键部署
 ```
 
+## 📘 API 文档
+
+- 详见：`docs/API.md`
+
 ---
 
 ## 🚀 快速开始（详细）
