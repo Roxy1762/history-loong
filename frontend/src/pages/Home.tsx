@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { createGame, getGameModes } from '../services/api';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import type { GameModeConfig } from '../types';
+import { SHI_JI_QUOTES } from '../constants/shijiQuotes';
 
 const RAG_LIMITS = {
   topicTopN: { min: 1, max: 10, fallback: 1 },
@@ -73,6 +74,7 @@ export default function Home() {
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
+  const [heroQuote] = useState(() => SHI_JI_QUOTES[Math.floor(Math.random() * SHI_JI_QUOTES.length)]);
 
   useEffect(() => {
     getGameModes().then(data => {
@@ -223,21 +225,21 @@ export default function Home() {
         {/* Hero title */}
         <div className="text-center mb-7 animate-fade-in">
           <div
-            className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full mb-4 border"
+            className="max-w-2xl mx-auto px-4 py-4 rounded-2xl border"
             style={{
-              background: 'var(--brand-light)',
-              color: 'var(--brand)',
-              borderColor: 'color-mix(in srgb, var(--brand) 25%, transparent)',
+              background: 'color-mix(in srgb, var(--brand-light) 45%, var(--bg-card))',
+              borderColor: 'color-mix(in srgb, var(--brand) 20%, transparent)',
             }}
           >
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--brand)' }} />
-            多人实时 · AI 验证 · 自动时间轴
+            <p className="text-xl sm:text-2xl font-heading font-bold leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+              「{heroQuote.quote}」
+            </p>
+            <p className="mt-2 text-sm sm:text-base" style={{ color: 'var(--text-secondary)' }}>
+              —— {heroQuote.source}
+            </p>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-heading font-black mb-2.5 leading-tight" style={{ color: 'var(--text-primary)' }}>
-            <span className="gradient-text">历史接龙</span>
-          </h1>
-          <p className="text-sm sm:text-base max-w-sm mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            多人实时历史知识接龙，AI 自动验证并生成时间轴
+          <p className="text-xs sm:text-sm max-w-md mx-auto leading-relaxed mt-3" style={{ color: 'var(--text-muted)' }}>
+            每次打开页面随机展示一则《史记》名句
           </p>
         </div>
 
