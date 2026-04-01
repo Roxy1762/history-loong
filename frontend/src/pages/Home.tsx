@@ -28,6 +28,41 @@ const EXAMPLE_TOPICS = [
   '中国近代史', '古希腊文明',
 ];
 
+const SHI_JI_QUOTES = [
+  { quote: '项庄舞剑，意在沛公。', source: '《史记·项羽本纪》' },
+  { quote: '燕雀安知鸿鹄之志哉。', source: '《史记·陈涉世家》' },
+  { quote: '桃李不言，下自成蹊。', source: '《史记·李将军列传》' },
+  { quote: '运筹策帷帐之中，决胜于千里之外。', source: '《史记·高祖本纪》' },
+  { quote: '众口铄金，积毁销骨。', source: '《史记·张仪列传》' },
+  { quote: '大行不顾细谨，大礼不辞小让。', source: '《史记·项羽本纪》' },
+  { quote: '人为刀俎，我为鱼肉。', source: '《史记·项羽本纪》' },
+  { quote: '沛公居山东时，贪于财货，好美姬。', source: '《史记·项羽本纪》' },
+  { quote: '王侯将相宁有种乎！', source: '《史记·陈涉世家》' },
+  { quote: '燕雀安知鸿鹄之志。', source: '《史记·陈涉世家》' },
+  { quote: '反听之谓聪，内视之谓明，自胜之谓强。', source: '《史记·商君列传》' },
+  { quote: '智者千虑，必有一失；愚者千虑，必有一得。', source: '《史记·淮阴侯列传》' },
+  { quote: '狡兔死，走狗烹；高鸟尽，良弓藏。', source: '《史记·越王勾践世家》' },
+  { quote: '飞鸟尽，良弓藏；狡兔死，走狗烹。', source: '《史记·越王勾践世家》' },
+  { quote: '祸兮福所倚，福兮祸所伏。', source: '《史记·管晏列传》' },
+  { quote: '能行之者未必能言，能言之者未必能行。', source: '《史记·孙子吴起列传》' },
+  { quote: '前事不忘，后事之师。', source: '《史记·秦始皇本纪》' },
+  { quote: '天下熙熙，皆为利来；天下攘攘，皆为利往。', source: '《史记·货殖列传》' },
+  { quote: '不鸣则已，一鸣惊人。', source: '《史记·滑稽列传》' },
+  { quote: '积羽沉舟，群轻折轴。', source: '《史记·张仪列传》' },
+  { quote: '当断不断，反受其乱。', source: '《史记·齐悼惠王世家》' },
+  { quote: '以权利合者，权利尽而交疏。', source: '《史记·郑世家》' },
+  { quote: '士为知己者死，女为悦己者容。', source: '《史记·刺客列传》' },
+  { quote: '千人之诺诺，不如一士之谔谔。', source: '《史记·商君列传》' },
+  { quote: '慈母有败子，而严家无格虏。', source: '《史记·李斯列传》' },
+  { quote: '日中则移，月满则亏。', source: '《史记·范雎蔡泽列传》' },
+  { quote: '欲而不知止，失其所以欲；有而不知足，失其所以有。', source: '《史记·日者列传》' },
+  { quote: '以三寸之舌，强于百万之师。', source: '《史记·平原君虞卿列传》' },
+  { quote: '仓廪实而知礼节，衣食足而知荣辱。', source: '《史记·管晏列传》' },
+  { quote: '得黄金百斤，不如得季布一诺。', source: '《史记·季布栾布列传》' },
+  { quote: '人弃我取，人取我与。', source: '《史记·货殖列传》' },
+  { quote: '将相和，则国家兴。', source: '《史记·廉颇蔺相如列传》' },
+] as const;
+
 function normalizeExtraModes(primaryMode: string, extraModes: string[]) {
   return [...new Set(extraModes.filter(Boolean))].filter(mode => mode !== primaryMode);
 }
@@ -73,6 +108,7 @@ export default function Home() {
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
+  const [heroQuote] = useState(() => SHI_JI_QUOTES[Math.floor(Math.random() * SHI_JI_QUOTES.length)]);
 
   useEffect(() => {
     getGameModes().then(data => {
@@ -223,21 +259,21 @@ export default function Home() {
         {/* Hero title */}
         <div className="text-center mb-7 animate-fade-in">
           <div
-            className="inline-flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full mb-4 border"
+            className="max-w-2xl mx-auto px-4 py-4 rounded-2xl border"
             style={{
-              background: 'var(--brand-light)',
-              color: 'var(--brand)',
-              borderColor: 'color-mix(in srgb, var(--brand) 25%, transparent)',
+              background: 'color-mix(in srgb, var(--brand-light) 45%, var(--bg-card))',
+              borderColor: 'color-mix(in srgb, var(--brand) 20%, transparent)',
             }}
           >
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--brand)' }} />
-            多人实时 · AI 验证 · 自动时间轴
+            <p className="text-xl sm:text-2xl font-heading font-bold leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+              「{heroQuote.quote}」
+            </p>
+            <p className="mt-2 text-sm sm:text-base" style={{ color: 'var(--text-secondary)' }}>
+              —— {heroQuote.source}
+            </p>
           </div>
-          <h1 className="text-4xl sm:text-5xl font-heading font-black mb-2.5 leading-tight" style={{ color: 'var(--text-primary)' }}>
-            <span className="gradient-text">历史接龙</span>
-          </h1>
-          <p className="text-sm sm:text-base max-w-sm mx-auto leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-            多人实时历史知识接龙，AI 自动验证并生成时间轴
+          <p className="text-xs sm:text-sm max-w-md mx-auto leading-relaxed mt-3" style={{ color: 'var(--text-muted)' }}>
+            每次打开页面随机展示一则《史记》名句
           </p>
         </div>
 
