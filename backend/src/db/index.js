@@ -277,6 +277,21 @@ try {
   db.exec(`ALTER TABLE knowledge_docs ADD COLUMN chunk_strategy TEXT NOT NULL DEFAULT 'plain'`);
 } catch { /* already exists */ }
 
+// v2.0.0: user accounts (optional login system)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id           TEXT PRIMARY KEY,
+    username     TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    nickname     TEXT,
+    avatar_color TEXT NOT NULL DEFAULT '#6366f1',
+    avatar_emoji TEXT NOT NULL DEFAULT '🐉',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
+`);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -469,4 +484,13 @@ module.exports = {
   updateGameTurnState:      stmt(`UPDATE games SET turn_state=?, updated_at=datetime('now') WHERE id=?`),
   updateGameScores:         stmt(`UPDATE games SET scores=?, updated_at=datetime('now') WHERE id=?`),
   updateGameChallengeState: stmt(`UPDATE games SET challenge_state=?, updated_at=datetime('now') WHERE id=?`),
+
+  // User accounts
+  insertUser:       stmt(`INSERT INTO users (id, username, password_hash, nickname, avatar_color, avatar_emoji) VALUES (?, ?, ?, ?, ?, ?)`),
+  getUserById:      stmt(`SELECT * FROM users WHERE id = ?`),
+  getUserByUsername:stmt(`SELECT * FROM users WHERE username = ? COLLATE NOCASE`),
+  updateUser:       stmt(`UPDATE users SET nickname=?, avatar_color=?, avatar_emoji=?, updated_at=datetime('now') WHERE id=?`),
+  updateUserPassword: stmt(`UPDATE users SET password_hash=?, updated_at=datetime('now') WHERE id=?`),
+  listUsers:        stmt(`SELECT id, username, nickname, avatar_color, avatar_emoji, created_at, updated_at FROM users ORDER BY created_at DESC`),
+  deleteUser:       stmt(`DELETE FROM users WHERE id = ?`),
 };

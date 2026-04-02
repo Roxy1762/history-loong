@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { createGame, getGameModes } from '../services/api';
 import ThemeSwitcher from '../components/ThemeSwitcher';
+import UserMenu from '../components/UserMenu';
+import LoginModal from '../components/LoginModal';
 import type { GameModeConfig } from '../types';
+import { useAuthStore } from '../store/authStore';
 
 const RAG_LIMITS = {
   topicTopN: { min: 1, max: 10, fallback: 1 },
@@ -87,6 +90,8 @@ function parseAndClampInt(value: string, rule: { min: number; max: number; fallb
 
 export default function Home() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [tab, setTab] = useState<'create' | 'join'>('create');
   const [prevTab, setPrevTab] = useState<'create' | 'join'>('create');
 
@@ -205,6 +210,8 @@ export default function Home() {
   const slideDir = tab === 'join' && prevTab === 'create' ? 'animate-tab-in' : 'animate-tab-in-left';
 
   return (
+    <>
+    {showLoginModal && <LoginModal onClose={() => setShowLoginModal(false)} />}
     <div
       className="min-h-dvh flex flex-col relative overflow-hidden paper-bg"
       style={{ backgroundColor: 'var(--bg-page)' }}
@@ -254,6 +261,7 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeSwitcher />
+          <UserMenu />
           <Link
             to="/admin"
             className="text-xs transition-all flex items-center gap-1.5 px-3 py-1.5 rounded-lg border"
@@ -707,6 +715,21 @@ export default function Home() {
                     >
                       加入房间 →
                     </button>
+                    {user ? (
+                      <p className="text-xs text-center mt-2 animate-fade-in" style={{ color: 'var(--brand)' }}>
+                        将以昵称「{user.nickname || user.username}」加入
+                      </p>
+                    ) : (
+                      <p className="text-xs text-center mt-2" style={{ color: 'var(--text-muted)' }}>
+                        <button
+                          type="button"
+                          className="underline"
+                          onClick={() => setShowLoginModal(true)}
+                          style={{ color: 'var(--brand)' }}
+                        >登录账号</button>
+                        {' '}可跨设备保留记录、自动填入昵称
+                      </p>
+                    )}
                   </form>
                 )}
               </div>
@@ -740,5 +763,6 @@ export default function Home() {
         </div>
       </div>
     </div>
+    </>
   );
 }

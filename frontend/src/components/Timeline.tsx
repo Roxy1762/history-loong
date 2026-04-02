@@ -64,12 +64,17 @@ function formatYear(year: number | null): string {
 }
 
 // Difficulty stars (1–5) from concept.extra.difficulty
-function DifficultyStars({ difficulty }: { difficulty?: unknown }) {
-  const d = Math.max(1, Math.min(5, parseInt(String(difficulty)) || 0));
-  if (!d) return null;
-  const colors = ['', 'text-slate-300', 'text-slate-400', 'text-amber-400', 'text-orange-500', 'text-red-500'];
+function DifficultyStars({ difficulty, isNew }: { difficulty?: unknown; isNew?: boolean }) {
+  const raw = parseInt(String(difficulty));
+  if (!Number.isFinite(raw) || raw < 1 || raw > 5) return null;
+  const d = raw;
+  const colors = ['', 'text-slate-400', 'text-slate-500', 'text-amber-400', 'text-orange-500', 'text-red-500'];
+  const isHigh = d >= 4;
   return (
-    <span title={`冷僻程度 ${d}/5`} className={`text-xs ${colors[d] || 'text-slate-300'}`}>
+    <span
+      title={`冷僻程度 ${d}/5`}
+      className={`text-xs font-medium ${colors[d] || 'text-slate-400'} ${isNew && isHigh ? 'animate-star-burst' : isNew ? 'animate-pop-in' : ''}`}
+    >
       {'★'.repeat(d)}{'☆'.repeat(5 - d)}
     </span>
   );
@@ -357,7 +362,7 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
                   <span className="text-xs px-2 py-0.5 text-white rounded-full font-medium animate-pop-in" style={{ background: 'var(--brand)' }}>新</span>
                 )}
                 {/* Difficulty stars */}
-                <DifficultyStars difficulty={(c.extra as Record<string, unknown>)?.difficulty} />
+                <DifficultyStars difficulty={(c.extra as Record<string, unknown>)?.difficulty} isNew={isNew} />
               </div>
               <div className="flex items-center gap-2 mt-1.5">
                 <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>{formatYear(c.year)}</span>

@@ -1094,6 +1094,24 @@ h1, h2, h3, h4, .font-heading { text-wrap: balance; }
 /* Timeline pulse for new concepts */
 .timeline-dot-new { animation: dotPulse 1.2s ease-in-out 3; will-change: box-shadow; }
 
+/* High-difficulty star burst — for 4-5 star concepts */
+@keyframes starBurst {
+  0%   { transform: scale(0.6) rotate(-15deg); opacity: 0; letter-spacing: -2px; }
+  40%  { transform: scale(1.3) rotate(6deg);  opacity: 1; letter-spacing: 1px; }
+  70%  { transform: scale(0.95) rotate(-2deg); letter-spacing: 0.5px; }
+  100% { transform: scale(1)   rotate(0deg);  opacity: 1; letter-spacing: 0; }
+}
+@keyframes starShine {
+  0%, 100% { filter: brightness(1);   text-shadow: none; }
+  50%       { filter: brightness(1.5); text-shadow: 0 0 8px currentColor; }
+}
+.animate-star-burst {
+  animation: starBurst 0.55s cubic-bezier(0.34,1.56,0.64,1) both,
+             starShine 1.2s ease-in-out 0.55s 2;
+  will-change: transform, opacity;
+  display: inline-block;
+}
+
 /* Staggered list entrance (apply with JS or inline style) */
 .stagger-1 { animation-delay: 60ms; }
 .stagger-2 { animation-delay: 120ms; }

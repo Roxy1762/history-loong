@@ -12,6 +12,7 @@ const gamesRouter = require('./routes/games');
 const exportRouter = require('./routes/export');
 const adminRouter  = require('./routes/admin');
 const profileRouter = require('./routes/profile');
+const authRouter   = require('./routes/auth');
 const setupSocket  = require('./socket');
 const { loadPlugins, GAME_MODES, COMBINABLE_MODES } = require('./plugins');
 const db = require('./db');
@@ -69,6 +70,7 @@ app.use('/api/games', gamesRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/profile', profileRouter);
+app.use('/api/auth', authRouter);
 
 app.get('/api/modes', (_req, res) => {
   let ragDefaults = {};
