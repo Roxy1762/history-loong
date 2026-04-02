@@ -208,26 +208,44 @@ export default function Home() {
       className="min-h-dvh flex flex-col relative overflow-hidden paper-bg"
       style={{ backgroundColor: 'var(--bg-page)' }}
     >
-      {/* Background decoration — ink wash blobs */}
+      {/* Background decoration — ink wash blobs + per-theme cultural panels */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        {/* Ink wash gradient blobs */}
         <div className="deco-blob absolute -top-32 -right-32 w-80 h-80 opacity-70" style={{ background: 'var(--deco-blob1)' }} />
         <div className="deco-blob absolute -bottom-32 -left-32 w-80 h-80 opacity-70" style={{ background: 'var(--deco-blob2)' }} />
         <div className="deco-blob absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] opacity-50" style={{ background: 'var(--deco-blob3)' }} />
-        {/* Decorative Chinese characters background */}
-        <div className="absolute top-8 left-8 writing-vertical text-[80px] font-heading font-black select-none pointer-events-none opacity-[0.04]"
-          style={{ color: 'var(--text-primary)', lineHeight: 1 }}>
+
+        {/* Per-theme side & bottom decorations */}
+        <div className="theme-side-deco theme-side-deco--l" />
+        <div className="theme-side-deco theme-side-deco--r" />
+        <div className="theme-bottom-deco" />
+
+        {/* Watermark Chinese characters — large opacity-adjusted glyphs */}
+        <div
+          className="absolute top-8 left-8 writing-vertical text-[90px] font-heading font-black select-none"
+          style={{ color: 'var(--text-primary)', lineHeight: 1, opacity: 'var(--ink-char-opacity, 0.038)' }}
+        >
           史
         </div>
-        <div className="absolute bottom-8 right-8 writing-vertical text-[80px] font-heading font-black select-none pointer-events-none opacity-[0.04]"
-          style={{ color: 'var(--text-primary)', lineHeight: 1 }}>
+        <div
+          className="absolute bottom-8 right-8 writing-vertical text-[90px] font-heading font-black select-none"
+          style={{ color: 'var(--text-primary)', lineHeight: 1, opacity: 'var(--ink-char-opacity, 0.038)' }}
+        >
           龙
+        </div>
+        {/* Extra watermark — center subtle char */}
+        <div
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-[220px] font-heading font-black select-none"
+          style={{ color: 'var(--brand)', opacity: 0.018, lineHeight: 1, pointerEvents: 'none' }}
+        >
+          历
         </div>
       </div>
 
       {/* Nav */}
       <nav className="relative z-30 flex items-center justify-between px-5 py-3.5">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center text-xl shadow-sm"
+          <div className="nav-logo-btn w-9 h-9 rounded-lg flex items-center justify-center text-xl shadow-sm cursor-default"
             style={{ background: 'var(--brand)', color: '#fff' }}>
             龙
           </div>
@@ -267,18 +285,23 @@ export default function Home() {
         {/* Hero title */}
         <div className="text-center mb-7 animate-fade-in">
           <div
-            className="max-w-2xl mx-auto px-4 py-4 rounded-2xl border"
+            className="hero-scroll max-w-2xl mx-auto px-6 py-5 rounded-2xl border"
             style={{
               background: 'color-mix(in srgb, var(--brand-light) 45%, var(--bg-card))',
               borderColor: 'color-mix(in srgb, var(--brand) 20%, transparent)',
+              boxShadow: '0 2px 16px var(--shadow), inset 0 1px 0 color-mix(in srgb, var(--card-shimmer, white) 40%, transparent)',
             }}
           >
-            <p className="text-xl sm:text-2xl font-heading font-bold leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+            <p className="text-xl sm:text-2xl font-heading font-bold leading-relaxed tracking-wide" style={{ color: 'var(--text-primary)' }}>
               「{heroQuote.quote}」
             </p>
-            <p className="mt-2 text-sm sm:text-base" style={{ color: 'var(--text-secondary)' }}>
-              —— {heroQuote.source}
-            </p>
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <span className="h-px w-8 rounded" style={{ background: 'var(--gradient-start)', opacity: 0.4 }} />
+              <p className="text-sm sm:text-base font-heading" style={{ color: 'var(--text-secondary)' }}>
+                {heroQuote.source}
+              </p>
+              <span className="h-px w-8 rounded" style={{ background: 'var(--gradient-end)', opacity: 0.4 }} />
+            </div>
           </div>
           <p className="text-xs sm:text-sm max-w-md mx-auto leading-relaxed mt-3" style={{ color: 'var(--text-muted)' }}>
             每次打开页面随机展示一则《史记》名句
@@ -295,8 +318,8 @@ export default function Home() {
               boxShadow: '0 8px 40px var(--shadow), 0 1px 0 color-mix(in srgb, var(--gold-accent) 20%, transparent) inset',
             }}
           >
-            {/* Gold top bar */}
-            <div className="h-0.5 w-full" style={{ background: 'linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end))' }} />
+            {/* Themed top accent bar */}
+            <div className="h-1 w-full" style={{ background: 'linear-gradient(to right, var(--gradient-start), var(--gradient-mid), var(--gradient-end))' }} />
 
             {/* Tab switcher */}
             <div className="flex" style={{ background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)' }}>
@@ -681,7 +704,7 @@ export default function Home() {
             ].map((f, i) => (
               <div
                 key={f.title}
-                className="rounded-xl p-3 text-center hover-lift animate-fade-in"
+                className="feature-card rounded-xl p-3 text-center hover-lift animate-fade-in"
                 style={{
                   background: 'color-mix(in srgb, var(--bg-card) 90%, transparent)',
                   border: '1px solid var(--border-subtle)',

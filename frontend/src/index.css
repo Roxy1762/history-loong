@@ -749,5 +749,568 @@
   .animate-rotate-in,
   .animate-expand-width,
   .timeline-dot-new,
-  .skeleton { animation: none !important; will-change: auto !important; }
+  .skeleton,
+  /* Cultural animations */
+  .animate-seal-stamp,
+  .animate-ink-spread,
+  .animate-brush-reveal,
+  .animate-lantern-sway,
+  .animate-ink-glow,
+  .animate-bamboo-breeze,
+  .animate-water-ripple,
+  .animate-wave-drift,
+  .animate-ink-drop { animation: none !important; will-change: auto !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CHINESE CULTURAL DESIGN — per-theme textures, decorations & animations
+══════════════════════════════════════════════════════════════════════════ */
+
+/* ── New per-theme design tokens ─────────────────────────────────────────── */
+:root {
+  --texture-line:  rgba(180,160,120,0.042);
+  --glow-accent:   rgba(79,111,160,0.12);
+  --card-shimmer:  rgba(255,255,255,0.5);
+  --ink-char-opacity: 0.038;
+}
+[data-theme="dark"] {
+  --texture-line:  rgba(200,180,150,0.028);
+  --glow-accent:   rgba(124,160,200,0.18);
+  --card-shimmer:  rgba(200,220,255,0.025);
+  --ink-char-opacity: 0.05;
+}
+[data-theme="gold"] {
+  --texture-line:  rgba(200,155,70,0.048);
+  --glow-accent:   rgba(200,168,75,0.22);
+  --card-shimmer:  rgba(255,220,150,0.35);
+  --ink-char-opacity: 0.055;
+}
+[data-theme="jade"] {
+  --texture-line:  rgba(50,135,85,0.04);
+  --glow-accent:   rgba(46,125,94,0.16);
+  --card-shimmer:  rgba(180,240,200,0.25);
+  --ink-char-opacity: 0.045;
+}
+
+/* ── Per-theme page background textures ──────────────────────────────────── */
+/* 清雅 — horizontal rice paper fiber lines */
+.paper-bg {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 22px,
+      var(--texture-line) 22px,
+      var(--texture-line) 23px
+    );
+}
+
+/* 墨韵 — diagonal brushstroke grain */
+[data-theme="dark"] .paper-bg {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.045'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      125deg,
+      transparent,
+      transparent 52px,
+      var(--texture-line) 52px,
+      var(--texture-line) 53px
+    );
+}
+
+/* 锦绣 — diamond silk-weave lattice */
+[data-theme="gold"] .paper-bg {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 15px,
+      var(--texture-line) 15px,
+      var(--texture-line) 16px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 15px,
+      var(--texture-line) 15px,
+      var(--texture-line) 16px
+    );
+}
+
+/* 竹青 — vertical bamboo groove pattern */
+[data-theme="jade"] .paper-bg {
+  background-image:
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.035'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 40px,
+      var(--texture-line) 40px,
+      var(--texture-line) 41px,
+      transparent 41px,
+      transparent 42px
+    );
+}
+
+/* ── Per-theme scroll-card enhancements ──────────────────────────────────── */
+
+/* 清雅: subtle inner shimmer at top */
+.scroll-card::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 0; right: 0;
+  height: 48px;
+  background: linear-gradient(to bottom, var(--card-shimmer) 0%, transparent 100%);
+  border-radius: 4px 4px 0 0;
+  pointer-events: none;
+  opacity: 0.25;
+}
+
+/* 墨韵: ink glow on hover */
+[data-theme="dark"] .scroll-card:hover {
+  box-shadow:
+    0 0 0 1px rgba(124,160,200,0.18),
+    0 4px 20px rgba(0,0,0,0.55),
+    0 0 18px rgba(124,160,200,0.07);
+}
+
+/* 锦绣: thicker vermilion-to-gold top bar */
+[data-theme="gold"] .scroll-card::before {
+  height: 4px;
+  background: linear-gradient(to right, #8b1a10, #c0392b 40%, #c8a84b 80%, #d4a83c);
+  opacity: 0.9;
+}
+[data-theme="gold"] .scroll-card {
+  box-shadow: 0 2px 16px rgba(100,40,10,0.12), inset 0 0 0 0 transparent;
+}
+[data-theme="gold"] .scroll-card:hover {
+  box-shadow: 0 6px 28px rgba(100,40,10,0.16), 0 0 0 1px rgba(192,57,43,0.12);
+}
+
+/* 竹青: jade-green gradient top bar */
+[data-theme="jade"] .scroll-card::before {
+  background: linear-gradient(to right, #14432e, #2e7d5e 50%, #4a9870);
+}
+[data-theme="jade"] .scroll-card:hover {
+  box-shadow: 0 6px 22px rgba(10,50,20,0.14), 0 0 0 1px rgba(46,125,94,0.12);
+}
+
+/* ── Per-theme corner ornament styles ────────────────────────────────────── */
+[data-theme="gold"] .corner-ornament::before,
+[data-theme="gold"] .corner-ornament::after {
+  border-color: var(--seal-red);
+  width: 18px; height: 18px;
+  opacity: 0.5;
+}
+[data-theme="dark"] .corner-ornament::before,
+[data-theme="dark"] .corner-ornament::after {
+  border-color: var(--brand);
+  opacity: 0.28;
+}
+[data-theme="jade"] .corner-ornament::before,
+[data-theme="jade"] .corner-ornament::after {
+  border-color: var(--brand);
+  opacity: 0.4;
+  width: 14px; height: 14px;
+}
+
+/* ── Per-theme era color bands ────────────────────────────────────────────── */
+/* Dark — subdued translucent */
+[data-theme="dark"] .era-ancient   { border-left-color: #b8860b;  background-color: rgba(64,48,8,0.35); }
+[data-theme="dark"] .era-medieval  { border-left-color: #7b4f9e;  background-color: rgba(40,18,54,0.35); }
+[data-theme="dark"] .era-imperial  { border-left-color: #c0392b;  background-color: rgba(62,14,14,0.35); }
+[data-theme="dark"] .era-song-yuan { border-left-color: #2a6fa8;  background-color: rgba(12,28,60,0.35); }
+[data-theme="dark"] .era-ming-qing { border-left-color: #2d7a3e;  background-color: rgba(8,40,18,0.35); }
+[data-theme="dark"] .era-modern    { border-left-color: #4f6fa0;  background-color: rgba(18,24,52,0.35); }
+[data-theme="dark"] .era-unknown   { border-left-color: #5a5248;  background-color: rgba(28,24,18,0.35); }
+
+/* Gold — warm vermilion / amber tones */
+[data-theme="gold"] .era-medieval  { border-left-color: #7b3f9e; background-color: rgba(248,232,255,0.75); }
+[data-theme="gold"] .era-song-yuan { border-left-color: #1a6ea8; background-color: rgba(228,244,255,0.75); }
+[data-theme="gold"] .era-ming-qing { border-left-color: #2d7a3e; background-color: rgba(228,252,232,0.75); }
+
+/* Jade — cool green tones */
+[data-theme="jade"] .era-ancient   { border-left-color: #2e7d5e; background-color: rgba(224,248,232,0.75); }
+[data-theme="jade"] .era-imperial  { border-left-color: #c8402c; background-color: rgba(255,234,228,0.75); }
+[data-theme="jade"] .era-medieval  { border-left-color: #4a6a9e; background-color: rgba(224,234,255,0.75); }
+[data-theme="jade"] .era-ming-qing { border-left-color: #2e7d5e; background-color: rgba(218,244,224,0.75); }
+[data-theme="jade"] .era-modern    { border-left-color: #4a9870; background-color: rgba(224,248,235,0.75); }
+
+/* ── New cultural animations ─────────────────────────────────────────────── */
+
+/* Seal stamp — validation success drop */
+@keyframes sealStamp {
+  0%   { transform: scale(2.2) rotate(-14deg); opacity: 0; filter: blur(4px); }
+  45%  { transform: scale(0.94) rotate(3deg);  opacity: 0.95; filter: blur(0); }
+  68%  { transform: scale(1.06) rotate(-1deg); }
+  100% { transform: scale(1)    rotate(0deg);  opacity: 1; }
+}
+.animate-seal-stamp {
+  animation: sealStamp 0.48s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Ink spread — concept validated reveal */
+@keyframes inkSpread {
+  0%   { clip-path: circle(0% at 35% 50%);   opacity: 0; }
+  20%  { opacity: 1; }
+  100% { clip-path: circle(150% at 35% 50%); opacity: 1; }
+}
+.animate-ink-spread {
+  animation: inkSpread 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: clip-path, opacity;
+}
+
+/* Brush stroke reveal — horizontal left-to-right */
+@keyframes brushReveal {
+  0%   { clip-path: inset(0 100% 0 0 round 1px 3px 3px 1px); }
+  100% { clip-path: inset(0 0%   0 0 round 1px 3px 3px 1px); }
+}
+.animate-brush-reveal {
+  animation: brushReveal 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: clip-path;
+}
+
+/* Lantern sway — gold theme pendulum */
+@keyframes lanternSway {
+  0%, 100% { transform: rotate(-3deg) translateY(0px); }
+  25%       { transform: rotate(-1deg) translateY(-1px); }
+  50%       { transform: rotate(3deg)  translateY(0px); }
+  75%       { transform: rotate(1deg)  translateY(-1px); }
+}
+.animate-lantern-sway {
+  animation: lanternSway 5.5s ease-in-out infinite;
+  transform-origin: top center;
+  will-change: transform;
+}
+
+/* Ink glow — dark theme luminous pulse */
+@keyframes inkGlow {
+  0%, 100% { opacity: 0.82; }
+  50%       {
+    opacity: 1;
+    text-shadow: 0 0 18px color-mix(in srgb, var(--brand) 55%, transparent),
+                 0 0 40px color-mix(in srgb, var(--brand) 25%, transparent);
+  }
+}
+.animate-ink-glow {
+  animation: inkGlow 4s ease-in-out infinite;
+  will-change: opacity;
+}
+
+/* Bamboo breeze — jade theme swaying */
+@keyframes bambooBreeze {
+  0%, 100% { transform: rotate(0deg)    translateY(0px);  }
+  28%       { transform: rotate(0.45deg) translateY(-2px); }
+  65%       { transform: rotate(-0.4deg) translateY(1px);  }
+}
+.animate-bamboo-breeze {
+  animation: bambooBreeze 6.5s ease-in-out infinite;
+  transform-origin: bottom center;
+  will-change: transform;
+}
+
+/* Water ripple — click/tap feedback */
+@keyframes waterRipple {
+  0%   { transform: scale(0.8); opacity: 0.55; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+.animate-water-ripple {
+  animation: waterRipple 1.2s ease-out both;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+/* Wave drift — slow gradient animation */
+@keyframes waveDrift {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+.animate-wave-drift {
+  animation: waveDrift 9s ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+/* ── New decorative utility classes ──────────────────────────────────────── */
+
+/* Brush underline — thematic heading accent */
+.brush-underline {
+  position: relative;
+  display: inline-block;
+}
+.brush-underline::after {
+  content: '';
+  position: absolute;
+  bottom: -2px; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    var(--gradient-start) 15%,
+    var(--gradient-mid)   50%,
+    var(--gradient-end)   85%,
+    transparent 100%
+  );
+  border-radius: 2px;
+  opacity: 0.65;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.brush-underline:hover::after,
+.brush-underline.active::after {
+  transform: scaleX(1);
+}
+
+/* Hero scroll — quote container with side accent bars */
+.hero-scroll {
+  position: relative;
+  overflow: visible;
+}
+.hero-scroll::before,
+.hero-scroll::after {
+  content: '';
+  position: absolute;
+  top: 12%; bottom: 12%;
+  width: 3px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--gradient-start) 30%,
+    var(--gradient-mid)   70%,
+    transparent
+  );
+  border-radius: 2px;
+  opacity: 0.35;
+}
+.hero-scroll::before { left: 0; }
+.hero-scroll::after  { right: 0; }
+[data-theme="gold"] .hero-scroll::before,
+[data-theme="gold"] .hero-scroll::after {
+  background: linear-gradient(to bottom, transparent, var(--seal-red) 35%, var(--gold-accent) 65%, transparent);
+  opacity: 0.45;
+}
+[data-theme="dark"] .hero-scroll::before,
+[data-theme="dark"] .hero-scroll::after {
+  opacity: 0.22;
+}
+
+/* Cloud scroll background — soft radial accent for sections */
+.cloud-scroll-bg {
+  background-image:
+    radial-gradient(ellipse 75% 55% at 10% 50%, color-mix(in srgb, var(--brand) 7%, transparent) 0%, transparent 70%),
+    radial-gradient(ellipse 75% 55% at 90% 50%, color-mix(in srgb, var(--brand) 5%, transparent) 0%, transparent 70%);
+}
+
+/* Silk texture overlay — for gold theme accents */
+.texture-silk {
+  background-image:
+    repeating-linear-gradient(
+      45deg,
+      transparent, transparent 11px,
+      var(--texture-line) 11px, var(--texture-line) 12px
+    ),
+    repeating-linear-gradient(
+      -45deg,
+      transparent, transparent 11px,
+      var(--texture-line) 11px, var(--texture-line) 12px
+    );
+}
+
+/* Nav brand logo glow on hover */
+.nav-logo-btn {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.nav-logo-btn:hover {
+  box-shadow: 0 0 0 3px var(--glow-accent), 0 2px 10px var(--shadow);
+  transform: scale(1.06);
+}
+
+/* Timeline era dot — theme-aware pulse ring color */
+[data-theme="gold"] .timeline-dot-new {
+  animation: dotPulseGold 1.2s ease-in-out 3;
+}
+[data-theme="jade"] .timeline-dot-new {
+  animation: dotPulseJade 1.2s ease-in-out 3;
+}
+[data-theme="dark"] .timeline-dot-new {
+  animation: dotPulseDark 1.2s ease-in-out 3;
+}
+@keyframes dotPulseGold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.55); }
+  60%       { box-shadow: 0 0 0 9px rgba(192,57,43,0); }
+}
+@keyframes dotPulseJade {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46,125,94,0.55); }
+  60%       { box-shadow: 0 0 0 9px rgba(46,125,94,0); }
+}
+@keyframes dotPulseDark {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124,160,200,0.55); }
+  60%       { box-shadow: 0 0 0 9px rgba(124,160,200,0); }
+}
+
+/* Ink-wash section backdrop */
+.ink-wash-section {
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand-light) 60%, transparent) 0%,
+    color-mix(in srgb, var(--bg-card) 80%, transparent) 50%,
+    color-mix(in srgb, var(--brand-light) 40%, transparent) 100%
+  );
+}
+
+/* ── Enhanced btn-primary with theme accents ─────────────────────────────── */
+[data-theme="gold"] .btn-primary {
+  background: linear-gradient(135deg, var(--brand) 0%, #d4622a 60%, var(--brand-dark) 100%);
+  box-shadow: 0 2px 12px rgba(150,40,27,0.3), inset 0 1px 0 rgba(255,220,150,0.2);
+}
+[data-theme="gold"] .btn-primary:hover {
+  background: linear-gradient(135deg, var(--brand-dark) 0%, var(--brand) 100%);
+  box-shadow: 0 4px 20px rgba(150,40,27,0.35), inset 0 1px 0 rgba(255,220,150,0.15);
+}
+[data-theme="dark"] .btn-primary {
+  box-shadow: 0 2px 12px rgba(124,160,200,0.2), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+[data-theme="dark"] .btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(124,160,200,0.25), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+[data-theme="jade"] .btn-primary {
+  box-shadow: 0 2px 12px rgba(46,125,94,0.25), inset 0 1px 0 rgba(255,255,255,0.12);
+}
+[data-theme="jade"] .btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(46,125,94,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+}
+
+/* ── Theme-specific nav accent ───────────────────────────────────────────── */
+/* Top micro-line on nav for Gold and Jade */
+[data-theme="gold"] nav::after,
+[data-theme="jade"] nav::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--gradient-start) 25%,
+    var(--gradient-end) 75%,
+    transparent
+  );
+  opacity: 0.35;
+  pointer-events: none;
+}
+[data-theme="gold"] nav,
+[data-theme="jade"] nav {
+  position: relative;
+}
+
+/* ── Feature card hover accent ───────────────────────────────────────────── */
+.feature-card {
+  position: relative;
+  overflow: hidden;
+}
+.feature-card::before {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(to right, var(--gradient-start), var(--gradient-end));
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  opacity: 0.6;
+  border-radius: 0 0 2px 2px;
+}
+.feature-card:hover::before { transform: scaleX(1); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PER-THEME DECORATIVE PANELS — unified API, single SVG per theme
+   Usage in JSX:
+     <div className="theme-side-deco theme-side-deco--l" aria-hidden="true"/>
+     <div className="theme-side-deco theme-side-deco--r" aria-hidden="true"/>
+     <div className="theme-bottom-deco"                  aria-hidden="true"/>
+══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Side decorations (left & right edges) ───────────────────────────────── */
+.theme-side-deco {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 120px;
+  pointer-events: none;
+  contain: paint;    /* isolate compositing */
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  background-repeat: repeat-y;
+  background-size: 120px auto;
+  background-position: top left;
+}
+.theme-side-deco--l { left: 0; }
+.theme-side-deco--r { right: 0; transform: scaleX(-1); }
+
+/* ── Bottom decoration (fullwidth) ──────────────────────────────────────── */
+.theme-bottom-deco {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 110px;
+  pointer-events: none;
+  contain: paint;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-position: bottom center;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   竹青 (jade) — bamboo stalks: two overlapping canes with joints & leaves
+───────────────────────────────────────────────────────────────────────── */
+[data-theme="jade"] .theme-side-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 120 500' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='36' y='0' width='10' height='500' rx='5' fill='%232e7d5e' opacity='0.16'/%3E%3Crect x='31' y='120' width='20' height='7' rx='3.5' fill='%23205c44' opacity='0.22'/%3E%3Crect x='31' y='265' width='20' height='7' rx='3.5' fill='%23205c44' opacity='0.22'/%3E%3Crect x='31' y='410' width='20' height='7' rx='3.5' fill='%23205c44' opacity='0.22'/%3E%3Cellipse cx='62' cy='128' rx='24' ry='5.5' transform='rotate(-33 62 128)' fill='%232e7d5e' opacity='0.2'/%3E%3Cellipse cx='26' cy='273' rx='23' ry='5' transform='rotate(30 26 273)' fill='%232e7d5e' opacity='0.18'/%3E%3Cellipse cx='63' cy='418' rx='22' ry='5' transform='rotate(-30 63 418)' fill='%232e7d5e' opacity='0.19'/%3E%3Crect x='80' y='65' width='7' height='435' rx='3.5' fill='%232e7d5e' opacity='0.10'/%3E%3Crect x='77' y='200' width='14' height='5' rx='2.5' fill='%23205c44' opacity='0.16'/%3E%3Crect x='77' y='355' width='14' height='5' rx='2.5' fill='%23205c44' opacity='0.16'/%3E%3Cellipse cx='97' cy='207' rx='20' ry='4.5' transform='rotate(-28 97 207)' fill='%232e7d5e' opacity='0.14'/%3E%3Cellipse cx='69' cy='362' rx='20' ry='4' transform='rotate(32 69 362)' fill='%232e7d5e' opacity='0.13'/%3E%3C%2Fsvg%3E");
+}
+/* jade: misty green gradient at bottom */
+[data-theme="jade"] .theme-bottom-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 110' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 110 L0 70 Q80 30 160 55 Q240 78 320 35 Q400 5 480 45 Q560 78 640 28 Q720 0 800 42 L800 110 Z' fill='%232e7d5e' opacity='0.05'/%3E%3Cpath d='M0 110 L0 88 Q150 55 300 72 Q450 88 600 60 Q700 45 800 68 L800 110 Z' fill='%232e7d5e' opacity='0.04'/%3E%3C%2Fsvg%3E");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   锦绣 (gold) — 祥云 auspicious cloud scrolls in vermilion & gold
+───────────────────────────────────────────────────────────────────────── */
+[data-theme="gold"] .theme-side-deco {
+  opacity: 1;
+  /* alternating gold and cinnabar cloud groups spaced every ~150px */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 450' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23c8a84b' opacity='0.13'%3E%3Ccircle cx='18' cy='55' r='16'/%3E%3Ccircle cx='34' cy='47' r='14'/%3E%3Ccircle cx='6' cy='63' r='12'/%3E%3Crect x='3' y='60' width='44' height='18' rx='2'/%3E%3C%2Fg%3E%3Cg fill='%23c0392b' opacity='0.10'%3E%3Ccircle cx='16' cy='200' r='15'/%3E%3Ccircle cx='31' cy='192' r='13'/%3E%3Ccircle cx='5' cy='208' r='11'/%3E%3Crect x='2' y='206' width='40' height='16' rx='2'/%3E%3C%2Fg%3E%3Cg fill='%23c8a84b' opacity='0.11'%3E%3Ccircle cx='17' cy='345' r='14'/%3E%3Ccircle cx='32' cy='338' r='12'/%3E%3Ccircle cx='5' cy='352' r='10'/%3E%3Crect x='2' y='350' width='38' height='15' rx='2'/%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+}
+/* gold: vermilion wave base */
+[data-theme="gold"] .theme-bottom-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 110' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 110 L0 75 Q100 30 200 58 Q300 82 400 42 Q500 10 600 50 Q700 82 800 52 L800 110 Z' fill='%23c0392b' opacity='0.04'/%3E%3Cpath d='M0 110 L0 90 Q200 60 400 78 Q600 92 800 72 L800 110 Z' fill='%23c8a84b' opacity='0.04'/%3E%3C%2Fsvg%3E");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   墨韵 (dark) — ink-wash 远山 distant mountains on sides + mist at bottom
+───────────────────────────────────────────────────────────────────────── */
+[data-theme="dark"] .theme-side-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 500' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 500 L0 340 Q20 280 40 310 Q55 330 70 290 Q82 260 100 295 L100 500 Z' fill='%237ca0c8' opacity='0.07'/%3E%3Cpath d='M0 500 L0 390 Q25 340 50 365 Q70 382 100 350 L100 500 Z' fill='%237ca0c8' opacity='0.05'/%3E%3Cpath d='M0 500 L0 430 Q30 395 60 415 Q78 428 100 408 L100 500 Z' fill='%237ca0c8' opacity='0.04'/%3E%3C%2Fsvg%3E");
+}
+[data-theme="dark"] .theme-bottom-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 110' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 110 L0 72 Q80 18 160 52 Q240 82 320 36 Q400 0 480 44 Q560 84 640 26 Q720 -8 800 48 L800 110 Z' fill='%237ca0c8' opacity='0.05'/%3E%3Cpath d='M0 110 L0 92 Q200 58 400 76 Q600 92 800 70 L800 110 Z' fill='%237ca0c8' opacity='0.04'/%3E%3C%2Fsvg%3E");
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   清雅 (light) — 青花瓷 blue-white porcelain brushwork panels
+───────────────────────────────────────────────────────────────────────── */
+:root:not([data-theme]) .theme-side-deco {
+  opacity: 1;
+  /* vertical brushstroke lines + simple lotus motif */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 500' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='10' y='0' width='1.5' height='500' fill='%234f6fa0' opacity='0.08'/%3E%3Crect x='22' y='0' width='1' height='500' fill='%234f6fa0' opacity='0.05'/%3E%3Cellipse cx='10' cy='120' rx='16' ry='10' fill='none' stroke='%234f6fa0' stroke-width='1' opacity='0.1'/%3E%3Ccircle cx='10' cy='120' r='4' fill='%234f6fa0' opacity='0.12'/%3E%3Cline x1='10' y1='110' x2='10' y2='94' stroke='%234f6fa0' stroke-width='1' opacity='0.1'/%3E%3Cellipse cx='10' cy='300' rx='14' ry='9' fill='none' stroke='%234f6fa0' stroke-width='1' opacity='0.09'/%3E%3Ccircle cx='10' cy='300' r='3.5' fill='%234f6fa0' opacity='0.11'/%3E%3Cline x1='10' y1='291' x2='10' y2='276' stroke='%234f6fa0' stroke-width='1' opacity='0.09'/%3E%3Cellipse cx='10' cy='450' rx='13' ry='8' fill='none' stroke='%234f6fa0' stroke-width='1' opacity='0.08'/%3E%3Ccircle cx='10' cy='450' r='3' fill='%234f6fa0' opacity='0.10'/%3E%3C%2Fsvg%3E");
+}
+:root:not([data-theme]) .theme-bottom-deco {
+  opacity: 1;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 800 110' preserveAspectRatio='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 110 Q100 75 200 90 Q300 105 400 72 Q500 50 600 80 Q700 106 800 76 L800 110 Z' fill='%234f6fa0' opacity='0.04'/%3E%3Cpath d='M0 110 Q150 90 300 100 Q450 108 600 85 Q700 72 800 92 L800 110 Z' fill='%234f6fa0' opacity='0.035'/%3E%3C%2Fsvg%3E");
 }
