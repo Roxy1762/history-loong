@@ -24,6 +24,13 @@ const avatarUpload = multer({
   },
 });
 
+function parseDbDateMs(value) {
+  if (!value || typeof value !== 'string') return NaN;
+  // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" (UTC), normalize to ISO 8601.
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  return Date.parse(normalized);
+}
+
 // ── Public: Register ──────────────────────────────────────────────────────────
 
 router.post('/register', async (req, res) => {
@@ -59,7 +66,8 @@ router.patch('/me', authSvc.requireAuth, async (req, res) => {
     const cooldownDays = parseInt(db.getSetting.get('username_change_cooldown_days')?.value ?? '30', 10);
     if (cooldownDays > 0 && user.username_changed_at) {
       const COOLDOWN_MS = cooldownDays * 24 * 60 * 60 * 1000;
-      const elapsed = Date.now() - new Date(user.username_changed_at).getTime();
+      const changedAtMs = parseDbDateMs(user.username_changed_at);
+      const elapsed = Number.isFinite(changedAtMs) ? Date.now() - changedAtMs : Number.POSITIVE_INFINITY;
       if (elapsed < COOLDOWN_MS) {
         const daysLeft = Math.ceil((COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
         return res.status(400).json({ error: `用户名修改冷却中，还需等待 ${daysLeft} 天` });

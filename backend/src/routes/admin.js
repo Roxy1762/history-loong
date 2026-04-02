@@ -1100,11 +1100,15 @@ router.post('/users/:id/reset-password', async (req, res) => {
 
 // Clear username change cooldown for a specific user
 router.post('/users/:id/clear-username-cooldown', (req, res) => {
-  const user = db.getUserById.get(req.params.id);
+  const rawId = String(req.params.id || '').trim();
+  let user = db.getUserById.get(rawId);
+  if (!user && /^\d+$/.test(rawId)) {
+    user = db.getUserByUid.get(parseInt(rawId, 10));
+  }
   if (!user) return res.status(404).json({ error: '用户不存在' });
-  db.clearUsernameCooldown.run(req.params.id);
-  logAdminAction('clear_username_cooldown', 'user', req.params.id, {});
-  const { password_hash: _, ...safe } = db.getUserById.get(req.params.id);
+  db.clearUsernameCooldown.run(user.id);
+  logAdminAction('clear_username_cooldown', 'user', user.id, {});
+  const { password_hash: _, ...safe } = db.getUserById.get(user.id);
   res.json({ ok: true, user: safe });
 });
 
