@@ -1011,6 +1011,30 @@ router.put('/ai-configs/:id/priority', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── User Account Management ───────────────────────────────────────────────────
+
+const authSvc = require('../services/authService');
+
+router.get('/users', requireAdmin, (_req, res) => {
+  const users = authSvc.listUsers();
+  res.json({ users });
+});
+
+router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
+  const { newPassword } = req.body || {};
+  const result = await authSvc.adminResetPassword(req.params.id, newPassword);
+  if (result.error) return res.status(400).json({ error: result.error });
+  logAdminAction('reset_user_password', 'user', req.params.id, {});
+  res.json(result);
+});
+
+router.delete('/users/:id', requireAdmin, (req, res) => {
+  const result = authSvc.adminDeleteUser(req.params.id);
+  if (result.error) return res.status(404).json({ error: result.error });
+  logAdminAction('delete_user', 'user', req.params.id, {});
+  res.json(result);
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function logAdminAction(action, resourceType, resourceId, changes) {

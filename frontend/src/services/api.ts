@@ -515,3 +515,83 @@ export async function adminGetLogs(limit = 200, level?: string) {
   });
   return data;
 }
+
+// ── User accounts ─────────────────────────────────────────────────────────────
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  nickname: string | null;
+  avatar_color: string;
+  avatar_emoji: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function authHeaders(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+export async function authRegister(username: string, password: string) {
+  try {
+    const { data } = await api.post<{ user: UserAccount; token: string }>('/auth/register', { username, password });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '注册失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function authLogin(username: string, password: string) {
+  try {
+    const { data } = await api.post<{ user: UserAccount; token: string }>('/auth/login', { username, password });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '登录失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function authGetMe(token: string) {
+  try {
+    const { data } = await api.get<{ user: UserAccount }>('/auth/me', { headers: authHeaders(token) });
+    return data;
+  } catch {
+    return { error: '登录已过期' } as { error: string };
+  }
+}
+
+export async function authUpdateMe(token: string, patches: Partial<Pick<UserAccount, 'nickname' | 'avatar_color' | 'avatar_emoji'>>) {
+  try {
+    const { data } = await api.patch<{ user: UserAccount }>('/auth/me', patches, { headers: authHeaders(token) });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '更新失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function authChangePassword(token: string, currentPassword: string, newPassword: string) {
+  try {
+    const { data } = await api.post<{ ok: boolean }>('/auth/change-password', { currentPassword, newPassword }, { headers: authHeaders(token) });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '修改失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function adminListUsers() {
+  const { data } = await api.get<{ users: UserAccount[] }>('/admin/users', { headers: adminHeaders() });
+  return data.users;
+}
+
+export async function adminResetUserPassword(userId: string, newPassword: string) {
+  const { data } = await api.post(`/admin/users/${userId}/reset-password`, { newPassword }, { headers: adminHeaders() });
+  return data as { ok: boolean };
+}
+
+export async function adminDeleteUser(userId: string) {
+  const { data } = await api.delete(`/admin/users/${userId}`, { headers: adminHeaders() });
+  return data as { ok: boolean };
+}

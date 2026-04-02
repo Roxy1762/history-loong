@@ -12,6 +12,8 @@ import Chat from '../components/Chat';
 import PlayerList from '../components/PlayerList';
 import ExportPanel from '../components/ExportPanel';
 import ThemeSwitcher from '../components/ThemeSwitcher';
+import UserMenu from '../components/UserMenu';
+import { useAuthStore } from '../store/authStore';
 import type { ChallengeCard, Concept, Game, Message, Player, TurnState } from '../types';
 
 function getActiveModeSet(game: Game | null | undefined): Set<string> {
@@ -221,6 +223,28 @@ function BonusToast({ bonus, playerName }: { bonus: number; playerName: string |
   );
 }
 
+// ── High-difficulty star toast ────────────────────────────────────────────────
+
+const STAR_LABELS: Record<number, string> = { 4: '冷僻难题', 5: '传世之谜' };
+
+function DifficultyToast({ difficulty, conceptName }: { difficulty: number; conceptName: string }) {
+  const starStr = '★'.repeat(difficulty) + '☆'.repeat(5 - difficulty);
+  const label = STAR_LABELS[difficulty] || '高难度';
+  const starColorClass = difficulty >= 5 ? 'text-red-300' : 'text-orange-300';
+  return (
+    <div className="fixed top-36 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-slide-up">
+      <div className="px-4 py-2.5 rounded-2xl shadow-2xl text-center animate-pop-in flex items-center gap-2"
+        style={{ background: 'linear-gradient(135deg, #7c3aed, #b45309)', border: '1px solid rgba(255,255,255,0.15)' }}>
+        <span className={`text-base animate-star-burst ${starColorClass}`}>{starStr}</span>
+        <div className="text-left">
+          <div className="text-xs font-heading font-bold text-white">{label}</div>
+          <div className="text-xs text-white/80 max-w-[120px] truncate">{conceptName}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Turn indicator banner ─────────────────────────────────────────────────────
 
 function TurnBanner({ turnState, me }: { turnState: { currentPlayerId: string | null; currentPlayerName: string | null } | null; me: { id: string } | null }) {
@@ -246,6 +270,7 @@ export default function Game() {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate   = useNavigate();
   const adminKey = getAdminKeyFromUrl();
+  const { user: authUser } = useAuthStore();
 
   const {
     game, me, players, timeline, pendingConcepts,
@@ -265,7 +290,8 @@ export default function Game() {
     reset,
   } = useGameStore();
 
-  const [showName,    setShowName]    = useState(!adminKey);
+  // If logged in with an account, skip the name dialog (auto-join)
+  const [showName,    setShowName]    = useState(!adminKey && !authUser);
   const [showExport,  setShowExport]  = useState(false);
   const [hints,       setHints]       = useState<string[]>([]);
   const [newestId,    setNewestId]    = useState<string | undefined>();
@@ -278,6 +304,7 @@ export default function Game() {
   const [validatingConceptIds, setValidatingConceptIds] = useState<Set<string>>(new Set());
   const [challengeRound, setChallengeRound] = useState(0);
   const [bonusToast, setBonusToast] = useState<{ bonus: number; playerName: string | null } | null>(null);
+  const [difficultyToast, setDifficultyToast] = useState<{ difficulty: number; conceptName: string } | null>(null);
   const [chatFill, setChatFill] = useState('');
   const [onlyMine, setOnlyMine] = useState(false);
   const [editingConceptId, setEditingConceptId] = useState<string | null>(null);
@@ -359,8 +386,16 @@ export default function Game() {
     setJoinError('');
     setShowName(false);
 
-    const normalizedName = (playerName || getStoredPlayerName() || '匿名玩家').trim().slice(0, 20) || '匿名玩家';
-    const stablePlayerId = explicitPlayerId || getStablePlayerId();
+    // Prefer auth user's nickname + ID for cross-device support
+    const currentAuthUser = useAuthStore.getState().user;
+    const resolvedName = (
+      playerName ||
+      (currentAuthUser ? (currentAuthUser.nickname || currentAuthUser.username) : '') ||
+      getStoredPlayerName() ||
+      '匿名玩家'
+    ).trim().slice(0, 20) || '匿名玩家';
+    const normalizedName = resolvedName;
+    const stablePlayerId = explicitPlayerId || (currentAuthUser ? currentAuthUser.id : getStablePlayerId());
     const res = await joinGame({ gameId, playerName: normalizedName, playerId: stablePlayerId });
     if (res.error) {
       setJoinError(res.error);
@@ -431,6 +466,16 @@ export default function Game() {
         setValidating(null);
         setActiveTab('timeline');
         setTimeout(() => setNewestId(undefined), 4000);
+        // Show difficulty toast for high-difficulty concepts in score/challenge modes
+        const currentModes = getActiveModeSet(gameRef.current);
+        const inScoreMode = currentModes.has('score-race') || currentModes.has('challenge');
+        if (inScoreMode) {
+          const d = parseInt(String((concept.extra as Record<string, unknown>)?.difficulty));
+          if (Number.isFinite(d) && d >= 4) {
+            setDifficultyToast({ difficulty: d, conceptName: concept.name });
+            setTimeout(() => setDifficultyToast(null), 3000);
+          }
+        }
       }),
       onSocket('concept:pending', ({ concept }: { concept: Concept }) => addPendingConcept(concept)),
       onSocket('concept:validating', e => setValidating(e)),
@@ -445,6 +490,16 @@ export default function Game() {
           setNewestId(e.concept.id);
           setActiveTab('timeline');
           setTimeout(() => setNewestId(undefined), 4000);
+          // Show difficulty toast in score/challenge modes during settlement too
+          const currentModes = getActiveModeSet(gameRef.current);
+          const inScoreMode = currentModes.has('score-race') || currentModes.has('challenge');
+          if (inScoreMode) {
+            const d = parseInt(String((e.concept.extra as Record<string, unknown>)?.difficulty));
+            if (Number.isFinite(d) && d >= 4) {
+              setDifficultyToast({ difficulty: d, conceptName: e.concept.name });
+              setTimeout(() => setDifficultyToast(null), 3000);
+            }
+          }
         }
       }),
       onSocket('game:settle:done', e => {
@@ -509,6 +564,13 @@ export default function Game() {
     if (!gameId || !adminKey || me) return;
     void joinAsAdminObserver(gameId);
   }, [adminKey, gameId, joinAsAdminObserver, me]);
+
+  // Auto-join with account credentials when logged in (no name dialog needed)
+  useEffect(() => {
+    if (!gameId || adminKey || me || !authUser) return;
+    void joinAsRegularPlayer(authUser.nickname || authUser.username || '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId, authUser?.id]);
 
   // ── Join ──────────────────────────────────────────────────────────────────
   const handleJoin = useCallback(async (playerName: string) => {
@@ -609,9 +671,10 @@ export default function Game() {
 
   return (
     <>
-      {showName  && <NameDialog initialName={getStoredPlayerName()} onConfirm={handleJoin} />}
+      {showName  && <NameDialog initialName={authUser ? (authUser.nickname || authUser.username) : getStoredPlayerName()} onConfirm={handleJoin} />}
       {showExport && gameId && <ExportPanel gameId={gameId} onClose={() => setShowExport(false)} />}
       {bonusToast && <BonusToast bonus={bonusToast.bonus} playerName={bonusToast.playerName} />}
+      {difficultyToast && <DifficultyToast difficulty={difficultyToast.difficulty} conceptName={difficultyToast.conceptName} />}
       <SettleOverlay />
       {settleResult && (
         <SettleResult
@@ -726,6 +789,7 @@ export default function Game() {
 
             {/* Actions */}
             <div className="flex items-center gap-2 flex-shrink-0">
+              <UserMenu compact />
               <ThemeSwitcher />
               <button onClick={handleHint} disabled={hintLoading}
                 className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
