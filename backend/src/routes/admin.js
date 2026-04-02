@@ -1098,6 +1098,42 @@ router.post('/users/:id/reset-password', async (req, res) => {
   res.json(result);
 });
 
+// Clear username change cooldown for a specific user
+router.post('/users/:id/clear-username-cooldown', (req, res) => {
+  const user = db.getUserById.get(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  db.clearUsernameCooldown.run(req.params.id);
+  logAdminAction('clear_username_cooldown', 'user', req.params.id, {});
+  const { password_hash: _, ...safe } = db.getUserById.get(req.params.id);
+  res.json({ ok: true, user: safe });
+});
+
+// ── System Settings ───────────────────────────────────────────────────────────
+
+router.get('/settings', (_req, res) => {
+  const rows = db.listSettings.all();
+  const settings = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json({ settings });
+});
+
+router.put('/settings/:key', (req, res) => {
+  const { key } = req.params;
+  const { value } = req.body || {};
+  if (value == null) return res.status(400).json({ error: '缺少 value 字段' });
+
+  // Validate known keys
+  if (key === 'username_change_cooldown_days') {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: '冷却天数须为非负整数（0 表示关闭）' });
+    db.setSetting.run(key, String(n));
+  } else {
+    db.setSetting.run(key, String(value));
+  }
+
+  logAdminAction('update_setting', 'setting', key, { value });
+  res.json({ ok: true, key, value: db.getSetting.get(key)?.value });
+});
+
 router.delete('/users/:id', (req, res) => {
   const result = authSvc.adminDeleteUser(req.params.id);
   if (result.error) return res.status(404).json({ error: result.error });

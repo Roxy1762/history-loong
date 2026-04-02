@@ -53,11 +53,12 @@ router.get('/me', authSvc.requireAuth, (req, res) => {
 router.patch('/me', authSvc.requireAuth, async (req, res) => {
   const { nickname, avatar_color, avatar_emoji, avatar_type, username } = req.body || {};
 
-  // Username self-service change (30-day cooldown)
+  // Username self-service change (admin-configurable cooldown)
   if (username != null) {
     const user = db.getUserById.get(req.userId);
-    const COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
-    if (user.username_changed_at) {
+    const cooldownDays = parseInt(db.getSetting.get('username_change_cooldown_days')?.value ?? '30', 10);
+    if (cooldownDays > 0 && user.username_changed_at) {
+      const COOLDOWN_MS = cooldownDays * 24 * 60 * 60 * 1000;
       const elapsed = Date.now() - new Date(user.username_changed_at).getTime();
       if (elapsed < COOLDOWN_MS) {
         const daysLeft = Math.ceil((COOLDOWN_MS - elapsed) / (24 * 60 * 60 * 1000));
@@ -136,6 +137,13 @@ router.delete('/avatar', authSvc.requireAuth, (req, res) => {
   // Revert to emoji type, clear avatar_url
   db.db.prepare(`UPDATE users SET avatar_url=NULL, avatar_type='emoji', updated_at=datetime('now') WHERE id=?`).run(req.userId);
   return res.json({ user: authSvc.sanitize(db.getUserById.get(req.userId)) });
+});
+
+// ── Public: Get username change cooldown setting ──────────────────────────────
+
+router.get('/settings/username-cooldown', (_req, res) => {
+  const days = parseInt(db.getSetting.get('username_change_cooldown_days')?.value ?? '30', 10);
+  res.json({ cooldownDays: days });
 });
 
 module.exports = router;

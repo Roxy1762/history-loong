@@ -25,7 +25,8 @@ import {
   adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept, adminCategorizeConceptsBatch,
   adminGetAIDecisions, adminGetAIDecision,
   adminListUsers, adminGetUser, adminUpdateUser, adminResetUserPassword, adminDeleteUser,
-  adminGetUserGames, adminGetUserConcepts,
+  adminGetUserGames, adminGetUserConcepts, adminClearUsernameCooldown,
+  adminGetSettings, adminSetSetting,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail,
 } from '../services/api';
@@ -215,6 +216,12 @@ function UsersPanel() {
   const [selected, setSelected] = useState<AdminUserDetail | null>(null);
   const [editMode, setEditMode] = useState(false);
 
+  // Cooldown setting
+  const [cooldownDays, setCooldownDays] = useState<number | null>(null);
+  const [cooldownInput, setCooldownInput] = useState('');
+  const [cooldownSaving, setCooldownSaving] = useState(false);
+  const [cooldownMsg, setCooldownMsg] = useState('');
+
   const load = useCallback(async (q?: string) => {
     setLoading(true);
     try { setUsers(await adminListUsers(q || undefined)); } catch { /* ignore */ }
@@ -222,6 +229,27 @@ function UsersPanel() {
   }, []);
 
   useEffect(() => { load(dSearch); }, [dSearch, load]);
+
+  useEffect(() => {
+    adminGetSettings().then(s => {
+      const d = parseInt(s.username_change_cooldown_days ?? '30', 10);
+      setCooldownDays(d);
+      setCooldownInput(String(d));
+    }).catch(() => {});
+  }, []);
+
+  async function saveCooldown() {
+    const n = parseInt(cooldownInput, 10);
+    if (!Number.isFinite(n) || n < 0) { setCooldownMsg('请输入非负整数（0 = 关闭）'); return; }
+    setCooldownSaving(true); setCooldownMsg('');
+    try {
+      await adminSetSetting('username_change_cooldown_days', String(n));
+      setCooldownDays(n);
+      setCooldownMsg('已保存');
+      setTimeout(() => setCooldownMsg(''), 2000);
+    } catch { setCooldownMsg('保存失败'); }
+    setCooldownSaving(false);
+  }
 
   async function handleResetPwd(u: AdminUserDetail) {
     if (!confirm(`将 @${u.username} 的密码重置为 000000？`)) return;
@@ -239,6 +267,36 @@ function UsersPanel() {
   return (
     <div className="space-y-5">
       <PageHeader title="玩家管理" subtitle={`共 ${users.length} 个账号`} />
+
+      {/* Cooldown config */}
+      <div className="rounded-2xl p-4 flex flex-wrap items-center gap-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <span className="text-sm font-medium flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>用户名修改冷却：</span>
+        <div className="flex items-center gap-2">
+          <input
+            className="input w-24 text-center font-mono"
+            type="number"
+            min={0}
+            value={cooldownInput}
+            onChange={e => setCooldownInput(e.target.value)}
+            placeholder="天数"
+          />
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>天</span>
+          <span className="text-xs" style={{ color: 'var(--text-muted)' }}>（0 = 关闭冷却）</span>
+        </div>
+        <button
+          onClick={saveCooldown}
+          disabled={cooldownSaving}
+          className="btn-primary px-4 py-1.5 text-sm font-heading disabled:opacity-60"
+        >{cooldownSaving ? '保存中…' : '保存'}</button>
+        {cooldownMsg && (
+          <span className="text-xs" style={{ color: cooldownMsg === '已保存' ? '#16a34a' : 'var(--seal-red)' }}>{cooldownMsg}</span>
+        )}
+        {cooldownDays !== null && (
+          <span className="text-xs ml-auto" style={{ color: 'var(--text-muted)' }}>
+            当前：{cooldownDays === 0 ? '已关闭' : `${cooldownDays} 天`}
+          </span>
+        )}
+      </div>
 
       {/* Search */}
       <div className="flex gap-2">
@@ -498,6 +556,16 @@ function UserDetailPanel({
                   className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
                   style={{ background: 'color-mix(in srgb, #ea580c 10%, transparent)', color: '#ea580c' }}
                 >重置密码为 000000</button>
+                {user.username_changed_at && (
+                  <button
+                    onClick={async () => {
+                      const res = await adminClearUsernameCooldown(user.id);
+                      if (res.ok) onSaved({ ...user, username_changed_at: null } as AdminUserDetail);
+                    }}
+                    className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
+                    style={{ background: 'color-mix(in srgb, #0891b2 10%, transparent)', color: '#0891b2' }}
+                  >清除用户名冷却</button>
+                )}
                 <button
                   onClick={() => onDelete(user)}
                   className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"

@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import LoginModal from '../components/LoginModal';
-import { authUploadAvatar, authDeleteAvatar } from '../services/api';
+import { authUploadAvatar, authDeleteAvatar, getAuthSettings } from '../services/api';
 
 const QUICK_EMOJIS = [
   '🐉','🦁','🐯','🦊','🐼','🦋','🌊','⚔️','🏯','📜',
@@ -15,12 +15,9 @@ const AVATAR_COLORS = [
   '#ca8a04', '#16a34a', '#0891b2', '#0284c7', '#374151',
 ];
 
-// 30-day cooldown for username changes
-const USERNAME_CHANGE_COOLDOWN_DAYS = 30;
-
-function daysUntilUsernameChange(changedAt: string | null): number {
-  if (!changedAt) return 0;
-  const ms = USERNAME_CHANGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+function daysUntilUsernameChange(changedAt: string | null, cooldownDays: number): number {
+  if (!changedAt || cooldownDays <= 0) return 0;
+  const ms = cooldownDays * 24 * 60 * 60 * 1000;
   const diff = ms - (Date.now() - new Date(changedAt).getTime());
   return diff > 0 ? Math.ceil(diff / (24 * 60 * 60 * 1000)) : 0;
 }
@@ -102,6 +99,11 @@ export default function Profile() {
   const [pwdLoading, setPwdLoading] = useState(false);
 
   const [showLogin, setShowLogin] = useState(false);
+  const [cooldownDays, setCooldownDays] = useState(30);
+
+  useEffect(() => {
+    getAuthSettings().then(s => setCooldownDays(s.cooldownDays)).catch(() => {});
+  }, []);
 
   // Sync local state when user changes
   useEffect(() => {
@@ -199,7 +201,7 @@ export default function Profile() {
     );
   }
 
-  const cooldownDays = daysUntilUsernameChange(user.username_changed_at);
+  const daysLeft = daysUntilUsernameChange(user.username_changed_at, cooldownDays);
 
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-page)' }}>
@@ -440,14 +442,18 @@ export default function Profile() {
         <div className="rounded-2xl p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
           <h2 className="font-heading font-bold mb-1" style={{ color: 'var(--text-primary)' }}>用户名</h2>
           <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
-            每 {USERNAME_CHANGE_COOLDOWN_DAYS} 天可修改一次用户名。当前：<span className="font-medium" style={{ color: 'var(--text-primary)' }}>@{user.username}</span>
+            {cooldownDays > 0
+              ? `每 ${cooldownDays} 天可修改一次用户名。`
+              : '用户名修改不限次数。'
+            }
+            当前：<span className="font-medium" style={{ color: 'var(--text-primary)' }}>@{user.username}</span>
           </p>
-          {cooldownDays > 0 ? (
+          {daysLeft > 0 ? (
             <div className="py-2 px-3 rounded-xl text-sm" style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}>
-              距下次可修改还有 <strong>{cooldownDays}</strong> 天
+              距下次可修改还有 <strong>{daysLeft}</strong> 天
             </div>
           ) : (
-            <UsernameChangeForm />
+            <UsernameChangeForm cooldownDays={cooldownDays} />
           )}
         </div>
 
@@ -502,8 +508,8 @@ export default function Profile() {
 
 // ── Username change form (self-service, with cooldown) ────────────────────────
 
-function UsernameChangeForm() {
-  const { token, updateProfile } = useAuthStore();
+function UsernameChangeForm({ cooldownDays }: { cooldownDays: number }) {
+  const { token } = useAuthStore();
   const [value, setValue] = useState('');
   const [err, setErr] = useState('');
   const [ok, setOk] = useState(false);

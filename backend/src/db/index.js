@@ -311,6 +311,16 @@ db.exec(`
 `);
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uid ON users(uid)`); } catch { /* already exists */ }
 
+// v2.1.1: system settings key-value store
+db.exec(`
+  CREATE TABLE IF NOT EXISTS system_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO system_settings (key, value) VALUES ('username_change_cooldown_days', '30');
+`);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -516,6 +526,12 @@ module.exports = {
   updateUserUid:    stmt(`UPDATE users SET uid=?, updated_at=datetime('now') WHERE id=?`),
   updateUserAvatarUrl: stmt(`UPDATE users SET avatar_url=?, avatar_type='image', updated_at=datetime('now') WHERE id=?`),
   recordUserLogin:  stmt(`UPDATE users SET last_login_at=datetime('now'), login_count=login_count+1, updated_at=datetime('now') WHERE id=?`),
+  clearUsernameCooldown: stmt(`UPDATE users SET username_changed_at=NULL, updated_at=datetime('now') WHERE id=?`),
   listUsers:        stmt(`SELECT id, uid, username, nickname, avatar_color, avatar_emoji, avatar_type, avatar_url, created_at, updated_at, last_login_at, login_count, username_changed_at FROM users ORDER BY uid ASC`),
   deleteUser:       stmt(`DELETE FROM users WHERE id = ?`),
+
+  // System settings
+  getSetting:   stmt(`SELECT value FROM system_settings WHERE key = ?`),
+  setSetting:   stmt(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))`),
+  listSettings: stmt(`SELECT key, value, updated_at FROM system_settings ORDER BY key ASC`),
 };

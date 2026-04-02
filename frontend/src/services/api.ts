@@ -654,3 +654,23 @@ export async function adminDeleteUser(userId: string) {
   const { data } = await api.delete(`/admin/users/${userId}`, { headers: adminHeaders() });
   return data as { ok: boolean };
 }
+
+export async function adminClearUsernameCooldown(userId: string) {
+  const { data } = await api.post<{ ok: boolean; user: UserAccount }>(`/admin/users/${userId}/clear-username-cooldown`, {}, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminGetSettings() {
+  const { data } = await api.get<{ settings: Record<string, string> }>('/admin/settings', { headers: adminHeaders() });
+  return data.settings;
+}
+
+export async function adminSetSetting(key: string, value: string) {
+  const { data } = await api.put<{ ok: boolean; key: string; value: string }>(`/admin/settings/${key}`, { value }, { headers: adminHeaders() });
+  return data;
+}
+
+export async function getAuthSettings() {
+  const { data } = await api.get<{ cooldownDays: number }>('/auth/settings/username-cooldown');
+  return data;
+}
