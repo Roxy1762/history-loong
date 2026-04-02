@@ -272,6 +272,11 @@ try {
   db.exec(`ALTER TABLE knowledge_docs ADD COLUMN vectorized_at TEXT`);
 } catch { /* already exists */ }
 
+// v1.6.0: chunk strategy on knowledge_docs (auto | textbook | plain)
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN chunk_strategy TEXT NOT NULL DEFAULT 'plain'`);
+} catch { /* already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -343,6 +348,7 @@ module.exports = {
   listAIConfirmedDocs: stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id, vectorized_at FROM knowledge_docs WHERE source = 'ai_confirmed' ORDER BY created_at DESC`),
   getDoc:         stmt(`SELECT * FROM knowledge_docs WHERE id = ?`),
   insertDoc:      stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks) VALUES (?, ?, ?, ?)`),
+  insertDocWithStrategy: stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, chunk_strategy) VALUES (?, ?, ?, ?, ?)`),
   insertDocFull:  stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id) VALUES (?, ?, ?, ?, ?, ?)`),
   insertDocDraft: stmt(`INSERT INTO knowledge_docs (id, title, filename, total_chunks, source, game_id, status) VALUES (?, ?, ?, ?, ?, ?, 'draft')`),
   deleteDoc:      stmt(`DELETE FROM knowledge_docs WHERE id = ?`),

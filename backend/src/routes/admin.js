@@ -559,15 +559,21 @@ router.post('/knowledge/upload', upload.single('file'), (req, res) => {
     return res.status(400).json({ error: '文件内容为空' });
   }
 
-  const title  = req.body.title || req.file.originalname.replace(/\.[^.]+$/, '');
-  const result = ingestDocument(title, req.file.originalname, content);
+  // multer stores originalname as latin1-encoded bytes; decode to UTF-8 for Chinese filenames
+  const decodedName = (() => {
+    try { return Buffer.from(req.file.originalname, 'latin1').toString('utf8'); } catch { return req.file.originalname; }
+  })();
 
-  console.log(`[Admin] Knowledge uploaded title="${title}" chunks=${result.chunks}`);
-  res.json({ message: '上传成功', docId: result.docId, chunks: result.chunks });
+  const title    = req.body.title || decodedName.replace(/\.[^.]+$/, '');
+  const strategy = req.body.strategy || 'auto';
+  const result   = ingestDocument(title, decodedName, content, strategy);
+
+  console.log(`[Admin] Knowledge uploaded title="${title}" strategy="${result.strategy}" chunks=${result.chunks}`);
+  res.json({ message: '上传成功', docId: result.docId, chunks: result.chunks, strategy: result.strategy });
 });
 
 router.post('/knowledge/text', (req, res) => {
-  const { title, content } = req.body;
+  const { title, content, strategy } = req.body;
   if (!title || !content) {
     return res.status(400).json({ error: '请提供 title 和 content' });
   }
@@ -575,9 +581,9 @@ router.post('/knowledge/text', (req, res) => {
     return res.status(400).json({ error: '内容不能为空' });
   }
 
-  const result = ingestDocument(title, `${title}.txt`, content);
-  console.log(`[Admin] Knowledge text added title="${title}" chunks=${result.chunks}`);
-  res.json({ message: '添加成功', docId: result.docId, chunks: result.chunks });
+  const result = ingestDocument(title, `${title}.txt`, content, strategy || 'auto');
+  console.log(`[Admin] Knowledge text added title="${title}" strategy="${result.strategy}" chunks=${result.chunks}`);
+  res.json({ message: '添加成功', docId: result.docId, chunks: result.chunks, strategy: result.strategy });
 });
 
 router.delete('/knowledge/:id', (req, res) => {

@@ -169,18 +169,19 @@ export async function adminListDocs() {
   return data.docs;
 }
 
-export async function adminUploadDoc(file: File, title?: string) {
+export async function adminUploadDoc(file: File, title?: string, strategy?: string) {
   const form = new FormData();
   form.append('file', file);
   if (title) form.append('title', title);
+  if (strategy) form.append('strategy', strategy);
   const { data } = await api.post('/admin/knowledge/upload', form, {
     headers: { ...adminHeaders(), 'Content-Type': 'multipart/form-data' },
   });
   return data;
 }
 
-export async function adminAddTextDoc(title: string, content: string) {
-  const { data } = await api.post('/admin/knowledge/text', { title, content }, { headers: adminHeaders() });
+export async function adminAddTextDoc(title: string, content: string, strategy?: string) {
+  const { data } = await api.post('/admin/knowledge/text', { title, content, strategy }, { headers: adminHeaders() });
   return data;
 }
 

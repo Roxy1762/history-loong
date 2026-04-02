@@ -482,7 +482,8 @@ module.exports = function setupSocket(io) {
         const polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
           ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)
           : '';
-        const kbCheck = validateFromKnowledge(input, game.topic);
+        const pipeline = ai.getPipelineConfig();
+        const kbCheck = pipeline.kbLocalValidate ? validateFromKnowledge(input, game.topic) : { confident: false };
         let result;
         let aiTrace = null;
         let validationMethod = 'ai';
@@ -691,10 +692,12 @@ module.exports = function setupSocket(io) {
         // ── Relay/turn-order advancement ──────────────────────────────────
         _advanceTurnState(io, currentGameId, game, room, currentPlayer.id);
 
-        try {
-          ingestAIConfirmedConcept({ ...concept, id: conceptId }, currentGameId);
-        } catch (kbErr) {
-          console.warn(`[Socket] AI KB ingest failed (non-fatal): ${kbErr.message}`);
+        if (pipeline.kbAutoIngest) {
+          try {
+            ingestAIConfirmedConcept({ ...concept, id: conceptId }, currentGameId);
+          } catch (kbErr) {
+            console.warn(`[Socket] AI KB ingest failed (non-fatal): ${kbErr.message}`);
+          }
         }
 
       } catch (err) {
@@ -797,7 +800,10 @@ module.exports = function setupSocket(io) {
               broadcastScores(io, currentGameId);
               broadcastPlayers(io, currentGameId);
             }
-            try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
+            const pipelineSettle = ai.getPipelineConfig();
+            if (pipelineSettle.kbAutoIngest) {
+              try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
+            }
           } else {
             db.rejectConcept.run(r.reason || '不符合主题', r.id);
             auditSvc.logDecision(r.id, currentGameId, r?._trace?.ragUsed ? 'rag+ai' : 'ai', {
@@ -873,7 +879,8 @@ module.exports = function setupSocket(io) {
         const existing = db.getConceptsByGame.all(currentGameId)
           .filter(c => c.validated)
           .map(c => ({ name: c.name, period: c.period }));
-        const kbCheck = validateFromKnowledge(row.raw_input, game.topic);
+        const pipeline2 = ai.getPipelineConfig();
+        const kbCheck = pipeline2.kbLocalValidate ? validateFromKnowledge(row.raw_input, game.topic) : { confident: false };
         let result;
         let aiTrace = null;
         let ragFlow = null;
@@ -989,7 +996,9 @@ module.exports = function setupSocket(io) {
             content: ragMsg, meta: { conceptId, rag: true }, created_at: new Date().toISOString(),
           });
         }
-        try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
+        if (pipeline2.kbAutoIngest) {
+          try { ingestAIConfirmedConcept(concept, currentGameId); } catch { /* non-fatal */ }
+        }
         callback?.({ ok: true });
       } catch (err) {
         console.error(`[Socket] concept:validate_single ERROR gameId=${currentGameId}:`, err);
@@ -1087,7 +1096,7 @@ module.exports = function setupSocket(io) {
       if (!text) return callback?.({ error: '概念内容不能为空' });
 
       // Update raw_input and name (reset validation state to pending)
-      db.prepare(`UPDATE concepts SET raw_input=?, name=?, validated=0, rejected=0, reject_reason=NULL,
+      db.db.prepare(`UPDATE concepts SET raw_input=?, name=?, validated=0, rejected=0, reject_reason=NULL,
         year=NULL, dynasty=NULL, period=NULL, description=NULL, tags='[]', extra='{}'
         WHERE id=?`).run(text, text, conceptId);
 
@@ -1121,7 +1130,7 @@ module.exports = function setupSocket(io) {
       if (!isAdmin && row.player_id !== effectivePlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
       if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法删除，请联系管理员' });
 
-      db.prepare('DELETE FROM concepts WHERE id=?').run(conceptId);
+      db.deleteConceptById.run(conceptId);
       io.to(currentGameId).emit('concept:deleted', { conceptId });
       sysMessage(io, currentGameId, `🗑️ 「${row.name || row.raw_input}」已被删除`);
       callback?.({ ok: true });

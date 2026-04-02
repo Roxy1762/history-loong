@@ -1453,6 +1453,149 @@ function writeAuxExtra(
   return merged;
 }
 
+// ── Pipeline config helpers ───────────────────────────────────────────────────
+
+function readPipelineExtra(extra: Record<string, unknown> | null | undefined) {
+  return {
+    cacheEnabled:    extra?.pipeline_cache_enabled    !== false,
+    kbLocalValidate: extra?.pipeline_kb_local_validate !== false,
+    kbAutoIngest:    extra?.pipeline_kb_auto_ingest   !== false,
+  };
+}
+
+function writePipelineExtra(existingExtra: Record<string, unknown>, next: {
+  cacheEnabled: boolean;
+  kbLocalValidate: boolean;
+  kbAutoIngest: boolean;
+}) {
+  const merged = { ...existingExtra };
+  merged.pipeline_cache_enabled     = Boolean(next.cacheEnabled);
+  merged.pipeline_kb_local_validate = Boolean(next.kbLocalValidate);
+  merged.pipeline_kb_auto_ingest    = Boolean(next.kbAutoIngest);
+  return merged;
+}
+
+// ── Pipeline visual configurator component ───────────────────────────────────
+
+interface PipelineStep {
+  id: string;
+  label: string;
+  desc: string;
+  icon: string;
+  alwaysOn?: boolean;
+  requires?: string; // 'aux' means needs auxiliary LLM enabled
+  color: string;
+}
+
+const PIPELINE_STEPS: PipelineStep[] = [
+  { id: 'cache',         label: '缓存检查',       icon: '⚡', desc: '直接返回相同输入的历史验证结果，跳过 AI 调用', color: 'bg-amber-50 border-amber-200 text-amber-800' },
+  { id: 'kbLocal',       label: 'KB精确匹配',     icon: '🔍', desc: '在已验证概念库中精确查找，命中则免去 AI 验证', color: 'bg-teal-50 border-teal-200 text-teal-800' },
+  { id: 'ragPlan',       label: 'RAG规划',        icon: '🧭', desc: '辅助LLM决定是否需要检索知识库及改写查询词', requires: 'aux', color: 'bg-purple-50 border-purple-200 text-purple-800' },
+  { id: 'kbSearch',      label: '知识库检索',      icon: '📚', desc: '从上传的教材/资料中语义检索相关段落', color: 'bg-sky-50 border-sky-200 text-sky-800' },
+  { id: 'ctxGuard',      label: '上下文守卫',      icon: '🛡️', desc: '辅助LLM过滤与概念无关的检索噪声', requires: 'aux', color: 'bg-purple-50 border-purple-200 text-purple-800' },
+  { id: 'aiValidate',    label: 'AI验证',          icon: '🤖', desc: '主模型验证概念合法性并提取元数据', alwaysOn: true, color: 'bg-indigo-50 border-indigo-200 text-indigo-800' },
+  { id: 'jsonRepair',    label: 'JSON修复',        icon: '🔧', desc: '辅助LLM修复主模型返回的格式异常', requires: 'aux', color: 'bg-purple-50 border-purple-200 text-purple-800' },
+  { id: 'reasonPolish',  label: '原因润色',        icon: '✨', desc: '辅助LLM将驳回原因改写为简洁中文', requires: 'aux', color: 'bg-purple-50 border-purple-200 text-purple-800' },
+  { id: 'kbIngest',      label: 'KB摄取',          icon: '💾', desc: '将通过验证的概念自动录入知识库供后续检索', color: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
+];
+
+function PipelineConfigurator({
+  pipeline, setPipeline, aux,
+}: {
+  pipeline: { cacheEnabled: boolean; kbLocalValidate: boolean; kbAutoIngest: boolean };
+  setPipeline: React.Dispatch<React.SetStateAction<{ cacheEnabled: boolean; kbLocalValidate: boolean; kbAutoIngest: boolean }>>;
+  aux: { enabled: boolean; sceneRagGate: boolean; sceneQueryRewrite: boolean; sceneContextGuard: boolean; sceneJsonRepair: boolean; sceneReasonRewrite: boolean };
+}) {
+  // Derive step-level enabled state from the various flags
+  function isEnabled(step: PipelineStep): boolean {
+    if (step.alwaysOn) return true;
+    switch (step.id) {
+      case 'cache':        return pipeline.cacheEnabled;
+      case 'kbLocal':      return pipeline.kbLocalValidate;
+      case 'ragPlan':      return aux.enabled && (aux.sceneRagGate || aux.sceneQueryRewrite);
+      case 'kbSearch':     return true; // controlled by kb_enabled at RAG level
+      case 'ctxGuard':     return aux.enabled && aux.sceneContextGuard;
+      case 'jsonRepair':   return aux.enabled && aux.sceneJsonRepair;
+      case 'reasonPolish': return aux.enabled && aux.sceneReasonRewrite;
+      case 'kbIngest':     return pipeline.kbAutoIngest;
+      default:             return true;
+    }
+  }
+
+  function isToggleable(step: PipelineStep): boolean {
+    if (step.alwaysOn) return false;
+    if (step.requires === 'aux') return false; // controlled from aux LLM section
+    if (step.id === 'kbSearch') return false; // controlled from KB section
+    return true;
+  }
+
+  function toggle(step: PipelineStep) {
+    if (!isToggleable(step)) return;
+    switch (step.id) {
+      case 'cache':     setPipeline(v => ({ ...v, cacheEnabled: !v.cacheEnabled })); break;
+      case 'kbLocal':   setPipeline(v => ({ ...v, kbLocalValidate: !v.kbLocalValidate })); break;
+      case 'kbIngest':  setPipeline(v => ({ ...v, kbAutoIngest: !v.kbAutoIngest })); break;
+    }
+  }
+
+  return (
+    <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="text-sm font-semibold text-slate-700">⚙️ 概念处理流程</div>
+        <p className="text-xs text-slate-500 mt-0.5">每个概念提交后依次经过以下步骤。点击可切换开启/关闭（灰色步骤由对应模块控制）。</p>
+      </div>
+      <div className="p-4 bg-white">
+        {/* Flow visualization */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {PIPELINE_STEPS.map((step, idx) => {
+            const enabled = isEnabled(step);
+            const toggleable = isToggleable(step);
+            return (
+              <div key={step.id} className="flex items-center gap-1.5">
+                <div
+                  className={`relative flex flex-col items-center px-3 py-2 rounded-xl border text-xs font-medium transition-all duration-200 ${
+                    enabled
+                      ? `${step.color} shadow-sm`
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
+                  } ${toggleable ? 'cursor-pointer hover:shadow-md' : 'cursor-default'}`}
+                  style={{ minWidth: 72 }}
+                  onClick={() => toggle(step)}
+                  title={step.desc}
+                >
+                  <div className="text-base mb-0.5">{step.icon}</div>
+                  <div className="text-center leading-tight">{step.label}</div>
+                  {step.alwaysOn && (
+                    <div className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-indigo-500 border-2 border-white" title="始终开启" />
+                  )}
+                  {step.requires === 'aux' && (
+                    <div className={`absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full border-2 border-white ${aux.enabled ? 'bg-purple-400' : 'bg-slate-300'}`} title="由辅助LLM控制" />
+                  )}
+                  {!enabled && !step.alwaysOn && (
+                    <div className="absolute inset-0 flex items-center justify-center rounded-xl">
+                      <div className="absolute inset-0 rounded-xl opacity-40" style={{ background: 'repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(0,0,0,0.04) 4px, rgba(0,0,0,0.04) 8px)' }} />
+                    </div>
+                  )}
+                </div>
+                {idx < PIPELINE_STEPS.length - 1 && (
+                  <svg className={`w-4 h-4 flex-shrink-0 ${enabled && isEnabled(PIPELINE_STEPS[idx + 1]) ? 'text-slate-400' : 'text-slate-200'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {/* Legend */}
+        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block" />始终开启</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-400 inline-block" />由辅助LLM模块控制</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-teal-400 inline-block" />可在此处切换</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AIConfigPanel() {
   const [configs, setConfigs] = useState<AIConfig[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -1633,6 +1776,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     : '/chat/completions';
   const initialKnowledge = readKnowledgeExtra(initial?.extra);
   const initialAux = readAuxExtra(initial?.extra);
+  const initialPipeline = readPipelineExtra(initial?.extra);
 
   const [form, setForm] = useState({
     name:          initial?.name          ?? '',
@@ -1680,6 +1824,11 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     sceneContextGuard: initialAux.sceneContextGuard,
     sceneJsonRepair: initialAux.sceneJsonRepair,
     sceneReasonRewrite: initialAux.sceneReasonRewrite,
+  });
+  const [pipeline, setPipeline] = useState({
+    cacheEnabled:    initialPipeline.cacheEnabled,
+    kbLocalValidate: initialPipeline.kbLocalValidate,
+    kbAutoIngest:    initialPipeline.kbAutoIngest,
   });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
@@ -1729,7 +1878,8 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       const normalizedKnowledge = normalizeKnowledgeNumericInputs(knowledge);
       setKnowledge(normalizedKnowledge);
       const mergedKnowledgeExtra = writeKnowledgeExtra(initial?.extra || {}, normalizedKnowledge, initialKnowledge.apiKey);
-      const mergedExtra = writeAuxExtra(mergedKnowledgeExtra, aux, initialAux.apiKey);
+      const mergedAuxExtra = writeAuxExtra(mergedKnowledgeExtra, aux, initialAux.apiKey);
+      const mergedExtra = writePipelineExtra(mergedAuxExtra, pipeline);
 
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
@@ -2242,6 +2392,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </div>
         </div>
 
+        {/* Pipeline configurator */}
+        <PipelineConfigurator pipeline={pipeline} setPipeline={setPipeline} aux={aux} />
+
         {/* System Prompt (advanced) */}
         <div className="border border-slate-100 rounded-xl overflow-hidden">
           <button
@@ -2293,6 +2446,7 @@ function KnowledgePanel() {
   const [vectorizingDocId, setVectorizingDocId] = useState<string | null>(null);
   const [showTextForm, setShowTextForm] = useState(false);
   const [msg, setMsg] = useState('');
+  const [uploadStrategy, setUploadStrategy] = useState<string>('auto');
 
   const reload = useCallback(() => adminListDocs().then(setDocs).catch(() => {}), []);
   useEffect(() => { reload(); }, [reload]);
@@ -2302,8 +2456,9 @@ function KnowledgePanel() {
     if (!file) return;
     setUploading(true); setMsg('');
     try {
-      const res = await adminUploadDoc(file) as { chunks: number };
-      setMsg(`✅ 上传成功，切分为 ${res.chunks} 个片段`);
+      const res = await adminUploadDoc(file, undefined, uploadStrategy) as { chunks: number; strategy?: string };
+      const stratLabel = res.strategy === 'textbook' ? '教材模式' : '普通模式';
+      setMsg(`✅ 上传成功（${stratLabel}），切分为 ${res.chunks} 个片段`);
       reload();
     } catch (err: unknown) {
       setMsg(`❌ ${err instanceof Error ? err.message : '上传失败'}`);
@@ -2343,7 +2498,26 @@ function KnowledgePanel() {
       <div className="bg-white rounded-2xl border-2 border-dashed border-slate-200 p-6 text-center hover:border-indigo-300 transition-colors">
         <div className="text-4xl mb-2">📂</div>
         <p className="text-slate-600 font-medium mb-1">拖拽或点击上传文档</p>
-        <p className="text-xs text-slate-400 mb-4">支持 .txt / .md 格式，最大 5MB</p>
+        <p className="text-xs text-slate-400 mb-3">支持 .txt / .md 格式，最大 5MB</p>
+        {/* Chunk strategy selector */}
+        <div className="inline-flex items-center gap-2 mb-4 text-sm">
+          <span className="text-slate-500">切块策略：</span>
+          {(['auto', 'textbook', 'plain'] as const).map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setUploadStrategy(s)}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${uploadStrategy === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
+            >
+              {s === 'auto' ? '🔍 自动检测' : s === 'textbook' ? '📚 教材模式' : '📄 普通文本'}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-slate-400 mb-4">
+          {uploadStrategy === 'textbook' && '教材模式：识别章节标题，按结构切块，每块保留标题作上下文。'}
+          {uploadStrategy === 'plain' && '普通文本：按段落切块，相邻块有重叠以保持上下文连贯。'}
+          {uploadStrategy === 'auto' && '自动检测文档结构，有章节标题则用教材模式，否则用普通模式。'}
+        </div>
         <label className="btn-primary cursor-pointer">
           {uploading ? '上传中...' : '选择文件'}
           <input type="file" accept=".txt,.md,.markdown" onChange={handleFileUpload} disabled={uploading} className="hidden" />
@@ -2416,6 +2590,7 @@ function KnowledgePanel() {
 function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: () => void }) {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [strategy, setStrategy] = useState('auto');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
@@ -2423,7 +2598,7 @@ function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: ()
     e.preventDefault();
     setSaving(true); setErr('');
     try {
-      await adminAddTextDoc(title, content);
+      await adminAddTextDoc(title, content, strategy);
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : '添加失败');
@@ -2438,6 +2613,19 @@ function TextUploadForm({ onSaved, onClose }: { onSaved: () => void; onClose: ()
       <form onSubmit={submit} className="space-y-4">
         <FormField label="文档标题">
           <input className="input" placeholder="例如：人教版高中历史必修一第三章" value={title} onChange={e => setTitle(e.target.value)} required />
+        </FormField>
+        <FormField label="切块策略">
+          <div className="flex gap-2 flex-wrap">
+            {([['auto', '🔍 自动检测'], ['textbook', '📚 教材模式'], ['plain', '📄 普通文本']] as const).map(([val, label]) => (
+              <button key={val} type="button" onClick={() => setStrategy(val)}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${strategy === val ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            {strategy === 'textbook' ? '识别章节标题，按结构切块，每块保留标题作上下文。' : strategy === 'plain' ? '按段落切块，相邻块有重叠以保持上下文连贯。' : '自动检测：有章节标题则用教材模式，否则用普通模式。'}
+          </p>
         </FormField>
         <FormField label="文本内容">
           <textarea

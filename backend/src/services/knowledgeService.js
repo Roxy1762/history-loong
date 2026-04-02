@@ -9,6 +9,11 @@ const crypto = require('crypto');
 const db = require('../db');
 
 const CHUNK_SIZE = 400; // characters per chunk
+const CHUNK_OVERLAP = 80; // overlap between adjacent chunks (characters)
+
+// Matches typical Chinese textbook heading lines:
+//   第X章/节/课/单元  |  一、二、三、  |  (一)(二)  |  【标题】
+const TEXTBOOK_HEADING_RE = /^(?:第[零一二三四五六七八九十百千万\d]+[章节课单元]\s|[（(]?[一二三四五六七八九十]+[）)]?[、．.]\s?|【[^】]+】|\d+\.\s)/;
 const DEFAULT_SILICONFLOW_BASE_URL = 'https://api.siliconflow.cn/v1';
 const EMBEDDING_CACHE_MAX = Math.max(100, parseInt(process.env.KB_EMBED_CACHE_MAX || '2000', 10) || 2000);
 const embeddingCache = new Map();
@@ -17,18 +22,20 @@ const embeddingCache = new Map();
 
 /**
  * Ingest a text document into the knowledge base.
- * @param {string} title    Display name
- * @param {string} filename Original filename
- * @param {string} content  Full text content
- * @returns {{ docId, chunks }}
+ * @param {string} title      Display name
+ * @param {string} filename   Original filename
+ * @param {string} content    Full text content
+ * @param {string} [strategy] Chunking strategy: 'auto' | 'textbook' | 'plain' (default: 'auto')
+ * @returns {{ docId, chunks, strategy }}
  */
-function ingestDocument(title, filename, content) {
+function ingestDocument(title, filename, content, strategy = 'auto') {
   const docId = uuidv4();
-  const chunks = splitIntoChunks(content, CHUNK_SIZE);
+  const effectiveStrategy = strategy === 'auto' ? detectChunkStrategy(content) : strategy;
+  const chunks = splitIntoChunks(content, CHUNK_SIZE, effectiveStrategy);
 
   // Transaction for atomicity
   const insertAll = db.db.transaction(() => {
-    db.insertDoc.run(docId, title, filename, chunks.length);
+    db.insertDocWithStrategy.run(docId, title, filename, chunks.length, effectiveStrategy);
 
     for (let i = 0; i < chunks.length; i++) {
       const chunkId = uuidv4();
@@ -38,7 +45,7 @@ function ingestDocument(title, filename, content) {
   });
 
   insertAll();
-  return { docId, chunks: chunks.length };
+  return { docId, chunks: chunks.length, strategy: effectiveStrategy };
 }
 
 /**
@@ -231,16 +238,33 @@ function searchChunksByFTS(query, limit = 20) {
     .map((r, idx) => {
       const chunk = db.getChunkById.get(r.chunk_id);
       if (!chunk || !chunk.content) return null;
-      return { chunk_id: r.chunk_id, content: chunk.content, ftsRank: idx };
+
+      // Metadata enrichment: look up document title and prepend as context header
+      let content = chunk.content;
+      try {
+        const doc = db.db.prepare(
+          `SELECT title FROM knowledge_docs WHERE id = ?`
+        ).get(chunk.doc_id);
+        if (doc && doc.title && !content.startsWith(`【${doc.title}】`)) {
+          content = `【${doc.title}】\n${content}`;
+        }
+      } catch { /* non-fatal */ }
+
+      return { chunk_id: r.chunk_id, content, ftsRank: idx };
     })
     .filter(Boolean);
 }
 
 function normalizeSearchInput(query) {
   return String(query || '')
-    .replace(/[「」『』【】《》〈〉（）()［］\[\]{}]/g, ' ')
-    .replace(/[→\-–—]/g, ' ')
+    // Remove book/quote brackets, preserving the content inside
+    .replace(/[「」『』《》〈〉]/g, ' ')
+    // Remove general brackets
+    .replace(/[【】（）()［］\[\]{}]/g, ' ')
+    // Replace separators with space
+    .replace(/[→·•\-–—·～~]/g, ' ')
     .replace(/['"*]/g, ' ')
+    // Collapse multiple spaces
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -253,6 +277,7 @@ function getActiveKnowledgeOverrides() {
     return {
       provider: typeof extra.kb_provider === 'string' ? extra.kb_provider.trim() : '',
       enabled: typeof extra.kb_enabled === 'boolean' ? extra.kb_enabled : null,
+      minRelevanceScore: Number.isFinite(Number(extra.kb_min_relevance_score)) ? Number(extra.kb_min_relevance_score) : null,
       embeddingEnabled: typeof extra.kb_embedding_enabled === 'boolean' ? extra.kb_embedding_enabled : null,
       rerankEnabled: typeof extra.kb_rerank_enabled === 'boolean' ? extra.kb_rerank_enabled : null,
       apiKey: typeof extra.kb_api_key === 'string' ? extra.kb_api_key.trim() : '',
@@ -331,6 +356,7 @@ function normalizeRagRuntimeOverrides(input = {}) {
     joinSeparator: src.ragJoinSeparator ?? src.joinSeparator,
     polishEnabled: src.ragPolishEnabled ?? src.polishEnabled,
     polishMaxChars: src.ragPolishMaxChars ?? src.polishMaxChars,
+    minRelevanceScore: src.ragMinRelevanceScore ?? src.minRelevanceScore,
   };
 }
 
@@ -354,6 +380,8 @@ function getRagRuntimeConfig(overridesInput = {}) {
     ftsMinCandidates: clampInt(o.ftsMinCandidates, 12, 1, 200),
     showPolishedInChat: Boolean(o.showPolishedInChat),
     joinSeparator: o.joinSeparator === 'double_newline' ? '\n\n' : '\n---\n',
+    // Minimum final score to include a chunk in results (0 = no threshold = keep all)
+    minRelevanceScore: clampNum(o.minRelevanceScore, 0, 0, 1),
   };
 }
 
@@ -387,6 +415,7 @@ function normalizeKnowledgeOverrides(input = {}) {
       ? Boolean(source.showPolishedInChat ?? source.kb_show_polished_in_chat)
       : null,
     joinSeparator: toTrimmed(source.joinSeparator || source.kb_join_separator),
+    minRelevanceScore: source.minRelevanceScore ?? source.kb_min_relevance_score,
   };
 }
 
@@ -457,7 +486,7 @@ async function rankChunks(query, candidates, topN, runtimeOverrides = {}) {
       console.warn(`[KB] Rerank failed, keep embedding/FTS order: ${err.message}`);
     }
   }
-  return pool.slice(0, topN).map((item, idx) => {
+  let finalPool = pool.slice(0, topN).map((item, idx) => {
     const rerank = Number(item.rerankScore ?? 0);
     const hybrid = Number(item.hybridScore ?? 0);
     const finalScore = Number.isFinite(item.rerankScore)
@@ -469,6 +498,15 @@ async function rankChunks(query, candidates, topN, runtimeOverrides = {}) {
       rank: idx + 1,
     };
   });
+
+  // Apply minimum relevance threshold (only when embedding scoring is active)
+  if (runtime.minRelevanceScore > 0 && config.enableEmbedding) {
+    const filtered = finalPool.filter(item => Number(item.finalScore) >= runtime.minRelevanceScore);
+    // Always keep at least 1 result even if nothing passes threshold
+    if (filtered.length > 0) finalPool = filtered;
+  }
+
+  return finalPool;
 }
 
 async function embedTexts(config, texts) {
@@ -765,30 +803,131 @@ function listDocuments() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function splitIntoChunks(text, maxChars) {
-  // Split on double newlines (paragraphs), then re-combine respecting maxChars
-  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+/**
+ * Auto-detect the best chunking strategy for a given text.
+ * Returns 'textbook' if heading patterns are found, 'plain' otherwise.
+ */
+function detectChunkStrategy(text) {
+  const sample = String(text || '').slice(0, 6000);
+  // Count textbook-style heading lines
+  const lines = sample.split('\n');
+  let headingCount = 0;
+  for (const line of lines) {
+    if (TEXTBOOK_HEADING_RE.test(line.trim())) headingCount++;
+  }
+  return headingCount >= 2 ? 'textbook' : 'plain';
+}
+
+/**
+ * Top-level chunker. Dispatches to textbook or plain strategy.
+ * @param {string} text
+ * @param {number} maxChars
+ * @param {string} strategy  'textbook' | 'plain'
+ * @param {number} [overlapChars]
+ */
+function splitIntoChunks(text, maxChars, strategy = 'plain', overlapChars = CHUNK_OVERLAP) {
+  if (strategy === 'textbook') {
+    return splitIntoChunksTextbook(text, maxChars, overlapChars);
+  }
+  return splitWithOverlap(text, maxChars, overlapChars);
+}
+
+/**
+ * Plain chunker: split on paragraph breaks, re-combine respecting maxChars,
+ * with trailing overlap between adjacent chunks.
+ */
+function splitWithOverlap(text, maxChars, overlapChars = CHUNK_OVERLAP) {
+  const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
   const chunks = [];
   let current = '';
 
   for (const p of paragraphs) {
     if (current && (current.length + p.length + 2) > maxChars) {
       chunks.push(current.trim());
-      current = p;
+      // Overlap: seed next chunk with tail of the current one
+      const tail = current.slice(-overlapChars).trimStart();
+      current = tail ? `${tail}\n\n${p}` : p;
     } else {
       current = current ? `${current}\n\n${p}` : p;
     }
   }
   if (current.trim()) chunks.push(current.trim());
 
-  // If no paragraph breaks, fall back to sliding window
+  // Fallback: sliding window with overlap when no paragraph breaks
   if (chunks.length === 0 && text.trim()) {
-    for (let i = 0; i < text.length; i += maxChars) {
+    const step = Math.max(50, maxChars - overlapChars);
+    for (let i = 0; i < text.length; i += step) {
       chunks.push(text.slice(i, i + maxChars));
     }
   }
 
   return chunks;
+}
+
+/**
+ * Parse text into sections delimited by textbook-style heading lines.
+ * Returns [{ heading, body }] where heading may be '' for pre-heading content.
+ */
+function splitOnHeadings(text) {
+  const lines = text.split('\n');
+  const sections = [];
+  let currentHeading = '';
+  let currentLines = [];
+
+  for (const line of lines) {
+    if (TEXTBOOK_HEADING_RE.test(line.trim()) && line.trim()) {
+      // Flush previous section
+      const body = currentLines.join('\n').trim();
+      if (currentHeading || body) {
+        sections.push({ heading: currentHeading, body });
+      }
+      currentHeading = line.trim();
+      currentLines = [];
+    } else {
+      currentLines.push(line);
+    }
+  }
+  // Flush last section
+  const body = currentLines.join('\n').trim();
+  if (currentHeading || body) sections.push({ heading: currentHeading, body });
+
+  return sections.filter(s => s.heading || s.body);
+}
+
+/**
+ * Textbook-aware chunker.
+ * Splits on heading lines; each chunk starts with its section heading for context.
+ * Long sections are sub-split with paragraph overlap, heading repeated as prefix.
+ */
+function splitIntoChunksTextbook(text, maxChars, overlapChars = CHUNK_OVERLAP) {
+  const sections = splitOnHeadings(text);
+
+  // Fewer than 2 sections means headings weren't found — fall back
+  if (sections.length < 2) {
+    return splitWithOverlap(text, maxChars, overlapChars);
+  }
+
+  const chunks = [];
+
+  for (const { heading, body } of sections) {
+    const prefix = heading ? `${heading}\n` : '';
+    const sectionText = (prefix + body).trim();
+
+    if (!sectionText) continue;
+
+    if (sectionText.length <= maxChars) {
+      chunks.push(sectionText);
+    } else {
+      // Section too long: sub-split the body, repeating the heading as context prefix
+      const bodyBudget = maxChars - prefix.length;
+      const subChunks = splitWithOverlap(body, Math.max(100, bodyBudget), overlapChars);
+      for (const sub of subChunks) {
+        chunks.push((prefix + sub).trim());
+      }
+    }
+  }
+
+  return chunks.filter(Boolean);
 }
 
 module.exports = {
@@ -809,4 +948,5 @@ module.exports = {
   listAIConfirmedDocs,
   validateFromKnowledge,
   parseKBContent,
+  detectChunkStrategy,
 };

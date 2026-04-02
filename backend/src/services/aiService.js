@@ -311,6 +311,20 @@ async function completeWithFailover(prompt, maxTokens = 300) {
   throw lastError || new Error('All AI providers failed');
 }
 
+/**
+ * Read the concept-processing pipeline flags from the active AI config.
+ * These govern which optional steps run for each submitted concept.
+ */
+function getPipelineConfig() {
+  const active = resolveConfig();
+  const extra = active?.extra || {};
+  return {
+    cacheEnabled:      extra.pipeline_cache_enabled       !== false, // default true
+    kbLocalValidate:   extra.pipeline_kb_local_validate   !== false, // default true
+    kbAutoIngest:      extra.pipeline_kb_auto_ingest      !== false, // default true
+  };
+}
+
 function getAuxiliaryConfig() {
   const active = resolveConfig();
   if (!active) return { enabled: false };
@@ -528,19 +542,22 @@ async function validateConcept(concept, topic, existing = [], gameMode = {}, kno
 }
 
 async function validateConceptWithTrace(concept, topic, existing = [], gameMode = {}, knowledgeContext = '') {
-  const cached = cacheService.get(concept, topic);
-  if (cached) {
-    console.log(`[AI] Cache HIT for concept="${concept}" topic="${topic}"`);
-    return {
-      result: cached,
-      trace: {
-        source: 'cache',
-        ragUsed: false,
-        knowledgeContext: '',
-        prompt: null,
-        rawOutput: JSON.stringify(cached),
-      },
-    };
+  const pipeline = getPipelineConfig();
+  if (pipeline.cacheEnabled) {
+    const cached = cacheService.get(concept, topic);
+    if (cached) {
+      console.log(`[AI] Cache HIT for concept="${concept}" topic="${topic}"`);
+      return {
+        result: cached,
+        trace: {
+          source: 'cache',
+          ragUsed: false,
+          knowledgeContext: '',
+          prompt: null,
+          rawOutput: JSON.stringify(cached),
+        },
+      };
+    }
   }
 
   const recentNames = existing.slice(-5).map(c => c.name).join('、') || '无';
@@ -786,4 +803,5 @@ module.exports = {
   resolveConfigs,
   registerProviderHandler,
   PROVIDER_HANDLERS,
+  getPipelineConfig,
 };
