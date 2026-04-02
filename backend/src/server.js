@@ -7,6 +7,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const { resolveAvatarsDir } = require('./utils/avatarStorage');
 
 const gamesRouter = require('./routes/games');
 const exportRouter = require('./routes/export');
@@ -48,9 +49,10 @@ app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
 // Serve user-uploaded avatars
-const AVATARS_DIR = process.env.AVATARS_DIR || path.join(__dirname, '../../data/avatars');
-require('fs').mkdirSync(AVATARS_DIR, { recursive: true });
-app.use('/avatars', require('express').static(AVATARS_DIR));
+const AVATARS_DIR = resolveAvatarsDir(path.join(__dirname, '../../data/avatars'));
+if (AVATARS_DIR) {
+  app.use('/avatars', express.static(AVATARS_DIR));
+}
 
 // Request logging
 app.use((req, _res, next) => {

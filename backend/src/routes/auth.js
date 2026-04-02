@@ -5,11 +5,11 @@ const fs = require('fs');
 const router = express.Router();
 const authSvc = require('../services/authService');
 const db = require('../db');
+const { resolveAvatarsDir } = require('../utils/avatarStorage');
 
 // ── Avatar upload setup ───────────────────────────────────────────────────────
 
-const AVATARS_DIR = process.env.AVATARS_DIR || path.join(__dirname, '../../../data/avatars');
-fs.mkdirSync(AVATARS_DIR, { recursive: true });
+const AVATARS_DIR = resolveAvatarsDir(path.join(__dirname, '../../../data/avatars'));
 
 const avatarUpload = multer({
   storage: multer.memoryStorage(),
@@ -111,6 +111,10 @@ router.post('/avatar', authSvc.requireAuth, (req, res, next) => {
 }, (req, res) => {
   if (!req.file) return res.status(400).json({ error: '请上传图片文件（JPG/PNG/GIF/WebP）' });
 
+  if (!AVATARS_DIR) {
+    return res.status(503).json({ error: '头像存储不可用，请联系管理员' });
+  }
+
   const mimeExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' };
   const ext = mimeExt[req.file.mimetype] || 'jpg';
   const filename = `${req.userId}.${ext}`;
@@ -133,6 +137,10 @@ router.post('/avatar', authSvc.requireAuth, (req, res, next) => {
 // ── Authenticated: Remove avatar image (revert to text/emoji) ─────────────────
 
 router.delete('/avatar', authSvc.requireAuth, (req, res) => {
+  if (!AVATARS_DIR) {
+    return res.status(503).json({ error: '头像存储不可用，请联系管理员' });
+  }
+
   const user = db.getUserById.get(req.userId);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
