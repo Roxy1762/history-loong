@@ -13,6 +13,8 @@ const {
   deleteDocument,
   listAIConfirmedDocs,
   vectorizeDocument,
+  rechunkDocument,
+  getChunkConfig,
   testEmbeddingConnection,
   testRerankConnection,
   getActiveRagMode,
@@ -645,6 +647,28 @@ router.post('/knowledge/revectorize/all', async (req, res) => {
 
   console.log(`[Admin] Bulk re-vectorize: ${results.success}/${results.total} succeeded`);
   res.json({ message: `批量重新向量化完成：${results.success} 成功，${results.failed} 失败`, ...results });
+});
+
+// Re-chunk a document with new settings
+router.post('/knowledge/:id/rechunk', (req, res) => {
+  const doc = db.getDoc.get(req.params.id);
+  if (!doc) return res.status(404).json({ error: '文档不存在' });
+
+  try {
+    const { strategy, chunkSize, chunkOverlap } = req.body || {};
+    const result = rechunkDocument(req.params.id, { strategy, chunkSize, chunkOverlap });
+    console.log(`[Admin] Knowledge rechunked id=${req.params.id} title="${doc.title}" ${result.oldChunks}→${result.newChunks} chunks (size=${result.chunkSize}, overlap=${result.chunkOverlap})`);
+    res.json({ message: '重新切片完成', ...result });
+  } catch (err) {
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Knowledge rechunk FAILED id=${req.params.id}: ${detail}`);
+    res.status(400).json({ error: err.message || '重新切片失败', detail });
+  }
+});
+
+// Get current chunk config
+router.get('/knowledge/chunk-config', (_req, res) => {
+  res.json(getChunkConfig());
 });
 
 // RAG mode info

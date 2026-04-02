@@ -14,7 +14,7 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminRevectorizeDoc, adminRevectorizeAll, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminRevectorizeDoc, adminRevectorizeAll, adminRechunkDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives, adminDeleteGameConcept, adminUpdateGameConcept,
   adminGetLogs, getGameModes,
@@ -1225,6 +1225,9 @@ function normalizeKnowledgeNumericInputs<T extends {
   roomDefaultContextMaxChars: number;
   roomDefaultFtsMultiplier: number;
   roomDefaultFtsMinCandidates: number;
+  chunkSize: number;
+  chunkOverlap: number;
+  embedBatchSize: number;
 }>(knowledge: T): T {
   return {
     ...knowledge,
@@ -1241,6 +1244,9 @@ function normalizeKnowledgeNumericInputs<T extends {
     roomDefaultContextMaxChars: clampInt(knowledge.roomDefaultContextMaxChars, 200, 4000, 800),
     roomDefaultFtsMultiplier: clampInt(knowledge.roomDefaultFtsMultiplier, 1, 20, 4),
     roomDefaultFtsMinCandidates: clampInt(knowledge.roomDefaultFtsMinCandidates, 1, 200, 12),
+    chunkSize: clampInt(knowledge.chunkSize, 100, 2000, 400),
+    chunkOverlap: clampInt(knowledge.chunkOverlap, 0, 500, 80),
+    embedBatchSize: clampInt(knowledge.embedBatchSize, 1, 256, 64),
   };
 }
 
@@ -1282,6 +1288,9 @@ function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
     roomDefaultShowPolishedInChat: typeof extra?.kb_room_default_show_polished_in_chat === 'boolean' ? extra.kb_room_default_show_polished_in_chat : false,
     roomDefaultJoinSeparator: extra?.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
     ragMode: typeof extra?.kb_rag_mode === 'string' && ['fts', 'hybrid', 'vector', 'timeline'].includes(extra.kb_rag_mode as string) ? (extra.kb_rag_mode as string) : 'hybrid',
+    chunkSize: typeof extra?.kb_chunk_size === 'number' ? extra.kb_chunk_size : 400,
+    chunkOverlap: typeof extra?.kb_chunk_overlap === 'number' ? extra.kb_chunk_overlap : 80,
+    embedBatchSize: typeof extra?.kb_embed_batch_size === 'number' ? extra.kb_embed_batch_size : 64,
   };
 }
 
@@ -1313,6 +1322,9 @@ function writeKnowledgeExtra(
     roomDefaultShowPolishedInChat: boolean;
     roomDefaultJoinSeparator: string;
     ragMode: string;
+    chunkSize: number;
+    chunkOverlap: number;
+    embedBatchSize: number;
   },
   preservedApiKey = ''
 ) {
@@ -1344,6 +1356,9 @@ function writeKnowledgeExtra(
   delete merged.kb_room_default_show_polished_in_chat;
   delete merged.kb_room_default_join_separator;
   delete merged.kb_rag_mode;
+  delete merged.kb_chunk_size;
+  delete merged.kb_chunk_overlap;
+  delete merged.kb_embed_batch_size;
 
   const apiKey = next.apiKey === SECRET_MASK ? preservedApiKey : next.apiKey.trim();
   const baseUrl = next.baseUrl.trim().replace(/\/$/, '');
@@ -1388,6 +1403,9 @@ function writeKnowledgeExtra(
   if (next.ragMode && ['fts', 'hybrid', 'vector', 'timeline'].includes(next.ragMode)) {
     merged.kb_rag_mode = next.ragMode;
   }
+  merged.kb_chunk_size = Number(next.chunkSize) || 400;
+  merged.kb_chunk_overlap = Number(next.chunkOverlap) || 80;
+  merged.kb_embed_batch_size = Number(next.embedBatchSize) || 64;
 
   return merged;
 }
@@ -1826,6 +1844,9 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     roomDefaultShowPolishedInChat: initialKnowledge.roomDefaultShowPolishedInChat,
     roomDefaultJoinSeparator: initialKnowledge.roomDefaultJoinSeparator,
     ragMode: initialKnowledge.ragMode,
+    chunkSize: initialKnowledge.chunkSize,
+    chunkOverlap: initialKnowledge.chunkOverlap,
+    embedBatchSize: initialKnowledge.embedBatchSize,
   });
   const [aux, setAux] = useState({
     enabled: initialAux.enabled,
@@ -2254,6 +2275,28 @@ function AIConfigForm({ initial, onClose, onSaved }: {
             </div>
 
             <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50">
+              <div className="text-xs font-semibold text-slate-700">切片与向量化配置</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <FormField label="切片大小（字符）">
+                  <input className="input font-mono text-sm" type="number" min={100} max={2000} step={50} value={knowledge.chunkSize}
+                    onChange={e => updateKnowledge('chunkSize', Number(e.target.value))} />
+                  <span className="text-[10px] text-slate-500">默认 400</span>
+                </FormField>
+                <FormField label="切片重叠（字符）">
+                  <input className="input font-mono text-sm" type="number" min={0} max={500} step={10} value={knowledge.chunkOverlap}
+                    onChange={e => updateKnowledge('chunkOverlap', Number(e.target.value))} />
+                  <span className="text-[10px] text-slate-500">默认 80</span>
+                </FormField>
+                <FormField label="向量化批大小">
+                  <input className="input font-mono text-sm" type="number" min={1} max={256} value={knowledge.embedBatchSize}
+                    onChange={e => updateKnowledge('embedBatchSize', Number(e.target.value))} />
+                  <span className="text-[10px] text-slate-500">默认 64</span>
+                </FormField>
+              </div>
+              <p className="text-[10px] text-slate-500">切片大小影响新文档入库时的分块粒度。已有文档需通过「重新切片」按钮生效。向量化批大小影响 Embedding API 每次请求的文本数量。</p>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl p-3 space-y-3 bg-slate-50">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-slate-700">建房页 RAG 高级设置默认值</div>
                 <button
@@ -2502,6 +2545,7 @@ function KnowledgePanel() {
   const [vectorizingDocId, setVectorizingDocId] = useState<string | null>(null);
   const [revectorizingDocId, setRevectorizingDocId] = useState<string | null>(null);
   const [bulkRevectorizing, setBulkRevectorizing] = useState(false);
+  const [rechunkingDocId, setRechunkingDocId] = useState<string | null>(null);
   const [showTextForm, setShowTextForm] = useState(false);
   const [msg, setMsg] = useState('');
   const [uploadStrategy, setUploadStrategy] = useState<string>('auto');
@@ -2574,6 +2618,21 @@ function KnowledgePanel() {
     }
   }
 
+  async function handleRechunk(id: string, title: string) {
+    if (!confirm(`确认对「${title}」重新切片？将使用当前配置的切片大小和重叠参数。向量化状态将被清除。`)) return;
+    setRechunkingDocId(id);
+    setMsg('');
+    try {
+      const res = await adminRechunkDoc(id);
+      setMsg(`✅ 「${title}」重新切片完成：${res.oldChunks} → ${res.newChunks} 个片段（大小=${res.chunkSize}，重叠=${res.chunkOverlap}）`);
+      reload();
+    } catch (err: unknown) {
+      setMsg(`❌ ${formatApiError(err, '重新切片失败')}`);
+    } finally {
+      setRechunkingDocId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -2642,7 +2701,9 @@ function KnowledgePanel() {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium text-slate-800 truncate">{doc.title}</div>
                   <div className="text-xs text-slate-400 mt-0.5">
-                    {doc.filename} · {doc.total_chunks} 个片段 · {doc.created_at.slice(0, 10)}
+                    {doc.filename} · {doc.total_chunks} 个片段
+                    {doc.chunk_strategy ? ` · ${doc.chunk_strategy === 'textbook' ? '教材模式' : '普通模式'}` : ''}
+                    {' · '}{doc.created_at.slice(0, 10)}
                   </div>
                   <div className="mt-1">
                     {doc.vectorized_at ? (
@@ -2675,6 +2736,14 @@ function KnowledgePanel() {
                       {revectorizingDocId === doc.id ? '重新向量化中...' : '↺ 重向量化'}
                     </button>
                   )}
+                  <button
+                    onClick={() => handleRechunk(doc.id, doc.title)}
+                    disabled={rechunkingDocId === doc.id}
+                    className="text-xs text-violet-500 hover:text-violet-700 transition-colors px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="使用当前配置重新切片"
+                  >
+                    {rechunkingDocId === doc.id ? '切片中...' : '✂ 重切片'}
+                  </button>
                   <button onClick={() => handleDelete(doc.id, doc.title)} className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">
                     删除
                   </button>
