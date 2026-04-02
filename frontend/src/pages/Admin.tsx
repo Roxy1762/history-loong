@@ -24,8 +24,10 @@ import {
   adminEditConcept, adminMergeConcepts,
   adminListCategories, adminCreateCategory, adminDeleteCategory, adminCategorizeConcept, adminCategorizeConceptsBatch,
   adminGetAIDecisions, adminGetAIDecision,
+  adminListUsers, adminGetUser, adminUpdateUser, adminResetUserPassword, adminDeleteUser,
+  adminGetUserGames, adminGetUserConcepts,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
-  type CurationConcept, type Category, type AIDecision,
+  type CurationConcept, type Category, type AIDecision, type AdminUserDetail,
 } from '../services/api';
 import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
@@ -75,11 +77,12 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
+type Tab = 'overview' | 'games' | 'users' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
 
 const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: 'overview',      label: '概览' },
   { id: 'games',         label: '游戏管理' },
+  { id: 'users',         label: '玩家管理' },
   { id: 'ai-config',     label: 'AI 配置' },
   { id: 'knowledge',     label: '知识库' },
   { id: 'ai-confirmed',  label: 'AI 确认知识库' },
@@ -173,6 +176,7 @@ export default function Admin() {
         <div className="max-w-5xl mx-auto p-4 md:p-6">
           {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
           {tab === 'games'        && <GamesPanel />}
+          {tab === 'users'        && <UsersPanel />}
           {tab === 'ai-config'    && <AIConfigPanel />}
           {tab === 'knowledge'    && <KnowledgePanel />}
           {tab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => setTab('curation')} />}
@@ -181,6 +185,393 @@ export default function Admin() {
           {tab === 'logs'          && <LogsPanel />}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ── Panel: Users ─────────────────────────────────────────────────────────────
+
+function UserAvatarBadge({ user }: { user: AdminUserDetail }) {
+  const label = (user.nickname || user.username || '?')[0].toUpperCase();
+  const style: React.CSSProperties = {
+    width: 36, height: 36, borderRadius: 10,
+    background: user.avatar_color || '#6366f1',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: user.avatar_type === 'image' ? 0 : user.avatar_type === 'emoji' ? 18 : 15,
+    fontWeight: 700, color: '#fff', flexShrink: 0, overflow: 'hidden',
+  };
+  if (user.avatar_type === 'image' && user.avatar_url) {
+    return <div style={style}><img src={user.avatar_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>;
+  }
+  if (user.avatar_type === 'emoji') return <div style={style}>{user.avatar_emoji}</div>;
+  return <div style={{ ...style, fontFamily: 'var(--font-heading,serif)' }}>{label}</div>;
+}
+
+function UsersPanel() {
+  const [users, setUsers] = useState<AdminUserDetail[]>([]);
+  const [search, setSearch] = useState('');
+  const dSearch = useDebounce(search, 300);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<AdminUserDetail | null>(null);
+  const [editMode, setEditMode] = useState(false);
+
+  const load = useCallback(async (q?: string) => {
+    setLoading(true);
+    try { setUsers(await adminListUsers(q || undefined)); } catch { /* ignore */ }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(dSearch); }, [dSearch, load]);
+
+  async function handleResetPwd(u: AdminUserDetail) {
+    if (!confirm(`将 @${u.username} 的密码重置为 000000？`)) return;
+    await adminResetUserPassword(u.id);
+    alert('密码已重置为 000000');
+  }
+
+  async function handleDelete(u: AdminUserDetail) {
+    if (!confirm(`确认删除账号 @${u.username}？此操作不可撤销。`)) return;
+    await adminDeleteUser(u.id);
+    setUsers(prev => prev.filter(x => x.id !== u.id));
+    if (selected?.id === u.id) setSelected(null);
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="玩家管理" subtitle={`共 ${users.length} 个账号`} />
+
+      {/* Search */}
+      <div className="flex gap-2">
+        <input
+          className="input flex-1"
+          placeholder="搜索用户名、昵称或 UID…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <button className="btn-secondary px-4" onClick={() => load(dSearch)}>刷新</button>
+      </div>
+
+      {loading && <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>加载中…</p>}
+
+      {/* Table */}
+      <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--bg-muted)', borderBottom: '1px solid var(--border)' }}>
+                <th className="text-left px-3 py-2.5 font-semibold text-xs" style={{ color: 'var(--text-muted)' }}>UID</th>
+                <th className="text-left px-3 py-2.5 font-semibold text-xs" style={{ color: 'var(--text-muted)' }}>玩家</th>
+                <th className="text-left px-3 py-2.5 font-semibold text-xs hidden sm:table-cell" style={{ color: 'var(--text-muted)' }}>注册时间</th>
+                <th className="text-left px-3 py-2.5 font-semibold text-xs hidden md:table-cell" style={{ color: 'var(--text-muted)' }}>最后登录</th>
+                <th className="text-center px-3 py-2.5 font-semibold text-xs" style={{ color: 'var(--text-muted)' }}>游戏/概念</th>
+                <th className="px-3 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u, i) => (
+                <tr
+                  key={u.id}
+                  className="cursor-pointer transition-colors"
+                  style={{
+                    background: selected?.id === u.id ? 'color-mix(in srgb, var(--brand) 8%, var(--bg-card))' : i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-muted2, var(--bg-muted))',
+                    borderBottom: '1px solid var(--border-subtle, var(--border))',
+                  }}
+                  onClick={() => { setSelected(u); setEditMode(false); }}
+                >
+                  <td className="px-3 py-2.5 font-mono text-xs" style={{ color: 'var(--text-muted)' }}>{u.uid ?? '—'}</td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <UserAvatarBadge user={u} />
+                      <div>
+                        <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{u.nickname || u.username}</div>
+                        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>@{u.username}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5 text-xs hidden sm:table-cell" style={{ color: 'var(--text-muted)' }}>
+                    {new Date(u.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs hidden md:table-cell" style={{ color: 'var(--text-muted)' }}>
+                    {u.last_login_at
+                      ? new Date(u.last_login_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                      : '—'
+                    }
+                    {u.login_count > 0 && <span className="ml-1 opacity-60">({u.login_count}次)</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {u.gameCount}/{u.acceptedCount}✓
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex gap-1 justify-end">
+                      <button
+                        className="text-xs px-2 py-1 rounded-lg transition-colors"
+                        style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}
+                        onClick={e => { e.stopPropagation(); setSelected(u); setEditMode(true); }}
+                      >编辑</button>
+                      <button
+                        className="text-xs px-2 py-1 rounded-lg transition-colors"
+                        style={{ background: 'color-mix(in srgb, #ea580c 10%, transparent)', color: '#ea580c' }}
+                        onClick={e => { e.stopPropagation(); handleResetPwd(u); }}
+                      >重置密码</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && users.length === 0 && (
+                <tr><td colSpan={6} className="text-center py-8 text-sm" style={{ color: 'var(--text-muted)' }}>暂无账号</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Detail / Edit panel */}
+      {selected && (
+        <UserDetailPanel
+          user={selected}
+          editMode={editMode}
+          onClose={() => setSelected(null)}
+          onDelete={handleDelete}
+          onSaved={updated => {
+            setUsers(prev => prev.map(u => u.id === updated.id ? { ...u, ...updated } : u));
+            setSelected({ ...selected, ...updated });
+            setEditMode(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── User Detail / Edit Panel ──────────────────────────────────────────────────
+
+function UserDetailPanel({
+  user,
+  editMode,
+  onClose,
+  onDelete,
+  onSaved,
+}: {
+  user: AdminUserDetail;
+  editMode: boolean;
+  onClose: () => void;
+  onDelete: (u: AdminUserDetail) => void;
+  onSaved: (u: AdminUserDetail) => void;
+}) {
+  const [tab, setTab] = useState<'info' | 'games' | 'concepts'>('info');
+  const [editing, setEditing] = useState(editMode);
+  const [editUsername, setEditUsername] = useState(user.username);
+  const [editNickname, setEditNickname] = useState(user.nickname || '');
+  const [editUid, setEditUid] = useState(String(user.uid ?? ''));
+  const [editErr, setEditErr] = useState('');
+  const [editOk, setEditOk] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+
+  const [games, setGames] = useState<Array<{ id: string; topic: string; mode: string; status: string; created_at: string; user_concepts: number; user_accepted: number }>>([]);
+  const [concepts, setConcepts] = useState<Array<{ id: string; name: string; raw_input: string; validated: number; rejected: number; created_at: string; game_topic?: string; dynasty?: string; year?: number | null }>>([]);
+  const [conceptFilter, setConceptFilter] = useState<string>('');
+  const [loadingGames, setLoadingGames] = useState(false);
+  const [loadingConcepts, setLoadingConcepts] = useState(false);
+
+  useEffect(() => { setEditing(editMode); }, [editMode]);
+
+  useEffect(() => {
+    if (tab === 'games' && games.length === 0) {
+      setLoadingGames(true);
+      adminGetUserGames(user.id).then(g => { setGames(g); setLoadingGames(false); }).catch(() => setLoadingGames(false));
+    }
+  }, [tab, user.id]);
+
+  useEffect(() => {
+    setLoadingConcepts(true);
+    adminGetUserConcepts(user.id, conceptFilter || undefined).then(c => {
+      setConcepts(c as typeof concepts);
+      setLoadingConcepts(false);
+    }).catch(() => setLoadingConcepts(false));
+  }, [tab === 'concepts' ? tab : null, conceptFilter, user.id]);
+
+  async function handleSave() {
+    setEditErr(''); setEditOk(false); setEditLoading(true);
+    const uid = editUid.trim() ? Number(editUid) : undefined;
+    try {
+      const res = await adminUpdateUser(user.id, {
+        username: editUsername.trim() !== user.username ? editUsername.trim() : undefined,
+        nickname: editNickname.trim() !== (user.nickname || '') ? editNickname.trim() : undefined,
+        uid: uid !== user.uid ? uid : undefined,
+      });
+      if ('error' in res) { setEditErr((res as { error: string }).error); setEditLoading(false); return; }
+      setEditOk(true);
+      onSaved({ ...user, ...res.user } as AdminUserDetail);
+      setTimeout(() => setEditOk(false), 2000);
+    } catch (e: unknown) {
+      setEditErr((e as { response?: { data?: { error?: string } } })?.response?.data?.error || '保存失败');
+    }
+    setEditLoading(false);
+  }
+
+  return (
+    <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--brand)', boxShadow: '0 0 0 3px color-mix(in srgb, var(--brand) 15%, transparent)' }}>
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <UserAvatarBadge user={user} />
+        <div className="flex-1 min-w-0">
+          <div className="font-heading font-bold" style={{ color: 'var(--text-primary)' }}>{user.nickname || user.username}</div>
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>@{user.username} · UID {user.uid ?? '—'} · {user.gameCount} 局 · {user.acceptedCount} 概念</div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setEditing(e => !e)}
+            className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+            style={{ background: editing ? 'var(--brand)' : 'var(--bg-muted)', color: editing ? '#fff' : 'var(--text-secondary)' }}
+          >{editing ? '取消编辑' : '编辑'}</button>
+          <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--text-muted)' }}>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b" style={{ borderColor: 'var(--border)' }}>
+        {(['info', 'games', 'concepts'] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="px-4 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              borderBottom: tab === t ? `2px solid var(--brand)` : '2px solid transparent',
+              color: tab === t ? 'var(--brand)' : 'var(--text-muted)',
+            }}
+          >{t === 'info' ? '账号信息' : t === 'games' ? `参与游戏` : '提交概念'}</button>
+        ))}
+      </div>
+
+      <div className="p-5">
+        {/* Info / Edit tab */}
+        {tab === 'info' && (
+          <div className="space-y-4">
+            {editing ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>UID</label>
+                  <input className="input w-full font-mono" value={editUid} onChange={e => setEditUid(e.target.value)} placeholder="正整数" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>用户名</label>
+                  <input className="input w-full" value={editUsername} onChange={e => setEditUsername(e.target.value)} maxLength={30} />
+                </div>
+                <div>
+                  <label className="text-xs font-medium block mb-1" style={{ color: 'var(--text-muted)' }}>昵称</label>
+                  <input className="input w-full" value={editNickname} onChange={e => setEditNickname(e.target.value)} maxLength={20} placeholder="同用户名" />
+                </div>
+                {editErr && <p className="text-xs py-1.5 px-3 rounded-lg" style={{ color: 'var(--seal-red)', background: 'color-mix(in srgb, var(--seal-red) 10%, transparent)' }}>{editErr}</p>}
+                {editOk && <p className="text-xs py-1.5 px-3 rounded-lg" style={{ color: '#16a34a', background: 'color-mix(in srgb, #16a34a 10%, transparent)' }}>保存成功！</p>}
+                <button onClick={handleSave} disabled={editLoading} className="btn-primary w-full py-2 font-heading disabled:opacity-60">
+                  {editLoading ? '保存中…' : '保存修改'}
+                </button>
+              </div>
+            ) : (
+              <dl className="space-y-2 text-sm">
+                {[
+                  ['UID', user.uid ?? '—'],
+                  ['用户名', `@${user.username}`],
+                  ['昵称', user.nickname || '（未设置）'],
+                  ['注册时间', new Date(user.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })],
+                  ['上次登录', user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '—'],
+                  ['累计登录', `${user.login_count ?? 0} 次`],
+                  ['用户名修改', user.username_changed_at ? new Date(user.username_changed_at).toLocaleDateString('zh-CN') : '从未修改'],
+                  ['参与游戏', `${user.gameCount} 局`],
+                  ['提交概念', `${user.conceptCount} 个（通过 ${user.acceptedCount} 个）`],
+                ].map(([k, v]) => (
+                  <div key={k as string} className="flex gap-2">
+                    <dt className="w-24 flex-shrink-0 font-medium" style={{ color: 'var(--text-muted)' }}>{k}</dt>
+                    <dd style={{ color: 'var(--text-primary)' }}>{v as string}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+
+            {/* Danger zone */}
+            {!editing && (
+              <div className="pt-3 border-t flex gap-2 flex-wrap" style={{ borderColor: 'var(--border)' }}>
+                <button
+                  onClick={async () => { await adminResetUserPassword(user.id); alert('密码已重置为 000000'); }}
+                  className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
+                  style={{ background: 'color-mix(in srgb, #ea580c 10%, transparent)', color: '#ea580c' }}
+                >重置密码为 000000</button>
+                <button
+                  onClick={() => onDelete(user)}
+                  className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
+                  style={{ background: 'color-mix(in srgb, var(--seal-red) 10%, transparent)', color: 'var(--seal-red)' }}
+                >删除账号</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Games tab */}
+        {tab === 'games' && (
+          <div className="space-y-2">
+            {loadingGames && <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>加载中…</p>}
+            {!loadingGames && games.length === 0 && <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>未参与任何游戏</p>}
+            {games.map(g => (
+              <div key={g.id} className="rounded-xl px-3 py-2.5 flex items-center gap-3" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-subtle, var(--border))' }}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>{g.topic}</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {g.id} · {g.mode} · {new Date(g.created_at).toLocaleDateString('zh-CN')}
+                  </div>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <div className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{g.user_accepted}/{g.user_concepts} 概念</div>
+                  <div className="text-xs mt-0.5" style={{ color: g.status === 'playing' ? '#16a34a' : 'var(--text-muted)' }}>{g.status}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Concepts tab */}
+        {tab === 'concepts' && (
+          <div className="space-y-3">
+            {/* Filter */}
+            <div className="flex gap-1.5 flex-wrap">
+              {[['', '全部'], ['accepted', '已通过'], ['rejected', '已拒绝'], ['pending', '待验证']].map(([v, l]) => (
+                <button
+                  key={v}
+                  onClick={() => setConceptFilter(v)}
+                  className="text-xs px-3 py-1 rounded-full transition-colors"
+                  style={{
+                    background: conceptFilter === v ? 'var(--brand)' : 'var(--bg-muted)',
+                    color: conceptFilter === v ? '#fff' : 'var(--text-muted)',
+                  }}
+                >{l}</button>
+              ))}
+            </div>
+            {loadingConcepts && <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>加载中…</p>}
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {concepts.map(c => (
+                <div key={c.id} className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ background: 'var(--bg-muted)' }}>
+                  <div
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ background: c.validated ? '#16a34a' : c.rejected ? 'var(--seal-red)' : '#ca8a04' }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{c.name || c.raw_input}</span>
+                    {c.dynasty && <span className="text-xs ml-1.5" style={{ color: 'var(--text-muted)' }}>{c.dynasty}{c.year != null ? ` ${c.year > 0 ? c.year + ' 年' : Math.abs(c.year) + ' BC'}` : ''}</span>}
+                  </div>
+                  <div className="text-xs flex-shrink-0 text-right" style={{ color: 'var(--text-muted)' }}>
+                    <div>{c.game_topic || ''}</div>
+                    <div>{new Date(c.created_at).toLocaleDateString('zh-CN')}</div>
+                  </div>
+                </div>
+              ))}
+              {!loadingConcepts && concepts.length === 0 && (
+                <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>暂无概念记录</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

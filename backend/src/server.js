@@ -47,6 +47,11 @@ const io = new Server(server, {
 app.use(cors({ origin: corsOrigins }));
 app.use(express.json());
 
+// Serve user-uploaded avatars
+const AVATARS_DIR = process.env.AVATARS_DIR || path.join(__dirname, '../../data/avatars');
+require('fs').mkdirSync(AVATARS_DIR, { recursive: true });
+app.use('/avatars', require('express').static(AVATARS_DIR));
+
 // Request logging
 app.use((req, _res, next) => {
   if (req.path.startsWith('/api/')) {

@@ -520,12 +520,24 @@ export async function adminGetLogs(limit = 200, level?: string) {
 
 export interface UserAccount {
   id: string;
+  uid: number | null;
   username: string;
   nickname: string | null;
   avatar_color: string;
   avatar_emoji: string;
+  avatar_type: 'text' | 'emoji' | 'image';
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  last_login_at: string | null;
+  login_count: number;
+  username_changed_at: string | null;
+}
+
+export interface AdminUserDetail extends UserAccount {
+  gameCount: number;
+  conceptCount: number;
+  acceptedCount: number;
 }
 
 function authHeaders(token: string) {
@@ -561,7 +573,7 @@ export async function authGetMe(token: string) {
   }
 }
 
-export async function authUpdateMe(token: string, patches: Partial<Pick<UserAccount, 'nickname' | 'avatar_color' | 'avatar_emoji'>>) {
+export async function authUpdateMe(token: string, patches: Partial<Pick<UserAccount, 'nickname' | 'avatar_color' | 'avatar_emoji' | 'avatar_type'>>) {
   try {
     const { data } = await api.patch<{ user: UserAccount }>('/auth/me', patches, { headers: authHeaders(token) });
     return data;
@@ -581,13 +593,60 @@ export async function authChangePassword(token: string, currentPassword: string,
   }
 }
 
-export async function adminListUsers() {
-  const { data } = await api.get<{ users: UserAccount[] }>('/admin/users', { headers: adminHeaders() });
+export async function authUploadAvatar(token: string, file: File) {
+  try {
+    const form = new FormData();
+    form.append('avatar', file);
+    const { data } = await api.post<{ user: UserAccount }>('/auth/avatar', form, {
+      headers: { ...authHeaders(token), 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '上传失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function authDeleteAvatar(token: string) {
+  try {
+    const { data } = await api.delete<{ user: UserAccount }>('/auth/avatar', { headers: authHeaders(token) });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '删除失败';
+    return { error: msg } as { error: string };
+  }
+}
+
+export async function adminListUsers(search?: string) {
+  const params = search ? { search } : {};
+  const { data } = await api.get<{ users: AdminUserDetail[] }>('/admin/users', { headers: adminHeaders(), params });
   return data.users;
 }
 
-export async function adminResetUserPassword(userId: string, newPassword: string) {
-  const { data } = await api.post(`/admin/users/${userId}/reset-password`, { newPassword }, { headers: adminHeaders() });
+export async function adminGetUser(userId: string) {
+  const { data } = await api.get<{ user: AdminUserDetail }>(`/admin/users/${userId}`, { headers: adminHeaders() });
+  return data.user;
+}
+
+export async function adminUpdateUser(userId: string, payload: { username?: string; nickname?: string; uid?: number }) {
+  const { data } = await api.put<{ user: UserAccount }>(`/admin/users/${userId}`, payload, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminGetUserGames(userId: string) {
+  const { data } = await api.get<{ games: Array<{ id: string; topic: string; mode: string; status: string; created_at: string; user_concepts: number; user_accepted: number }> }>(`/admin/users/${userId}/games`, { headers: adminHeaders() });
+  return data.games;
+}
+
+export async function adminGetUserConcepts(userId: string, status?: string) {
+  const params = status ? { status } : {};
+  const { data } = await api.get<{ concepts: Array<Concept & { game_topic?: string }> }>(`/admin/users/${userId}/concepts`, { headers: adminHeaders(), params });
+  return data.concepts;
+}
+
+export async function adminResetUserPassword(userId: string, newPassword?: string) {
+  const body = newPassword ? { newPassword } : {};
+  const { data } = await api.post(`/admin/users/${userId}/reset-password`, body, { headers: adminHeaders() });
   return data as { ok: boolean };
 }
 
