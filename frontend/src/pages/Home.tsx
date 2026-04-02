@@ -3,7 +3,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { createGame, getGameModes } from '../services/api';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import type { GameModeConfig } from '../types';
-import { SHI_JI_QUOTES } from '../constants/shijiQuotes';
 
 const RAG_LIMITS = {
   topicTopN: { min: 1, max: 10, fallback: 1 },
