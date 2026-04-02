@@ -1015,12 +1015,12 @@ router.put('/ai-configs/:id/priority', (req, res) => {
 
 const authSvc = require('../services/authService');
 
-router.get('/users', requireAdmin, (_req, res) => {
+router.get('/users', (_req, res) => {
   const users = authSvc.listUsers();
   res.json({ users });
 });
 
-router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
+router.post('/users/:id/reset-password', async (req, res) => {
   const { newPassword } = req.body || {};
   const result = await authSvc.adminResetPassword(req.params.id, newPassword);
   if (result.error) return res.status(400).json({ error: result.error });
@@ -1028,7 +1028,7 @@ router.post('/users/:id/reset-password', requireAdmin, async (req, res) => {
   res.json(result);
 });
 
-router.delete('/users/:id', requireAdmin, (req, res) => {
+router.delete('/users/:id', (req, res) => {
   const result = authSvc.adminDeleteUser(req.params.id);
   if (result.error) return res.status(404).json({ error: result.error });
   logAdminAction('delete_user', 'user', req.params.id, {});
