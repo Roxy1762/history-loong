@@ -292,6 +292,35 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_users_username ON users(username COLLATE NOCASE);
 `);
 
+// v2.1.0: uid (sequential), avatar_type/url, login tracking, username change cooldown
+try { db.exec(`ALTER TABLE users ADD COLUMN uid INTEGER`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN avatar_type TEXT NOT NULL DEFAULT 'emoji'`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN avatar_url TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN last_login_at TEXT`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN login_count INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN username_changed_at TEXT`); } catch { /* already exists */ }
+
+// Backfill uid for existing users ordered by created_at
+db.exec(`
+  UPDATE users SET uid = (
+    SELECT COUNT(*) FROM users u2
+    WHERE u2.created_at < users.created_at
+       OR (u2.created_at = users.created_at AND u2.rowid <= users.rowid)
+  )
+  WHERE uid IS NULL
+`);
+try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uid ON users(uid)`); } catch { /* already exists */ }
+
+// v2.1.1: system settings key-value store
+db.exec(`
+  CREATE TABLE IF NOT EXISTS system_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO system_settings (key, value) VALUES ('username_change_cooldown_days', '30');
+`);
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const stmt = (sql) => db.prepare(sql);
@@ -486,11 +515,23 @@ module.exports = {
   updateGameChallengeState: stmt(`UPDATE games SET challenge_state=?, updated_at=datetime('now') WHERE id=?`),
 
   // User accounts
-  insertUser:       stmt(`INSERT INTO users (id, username, password_hash, nickname, avatar_color, avatar_emoji) VALUES (?, ?, ?, ?, ?, ?)`),
+  insertUser:       stmt(`INSERT INTO users (id, username, password_hash, nickname, avatar_color, avatar_emoji, avatar_type, uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
   getUserById:      stmt(`SELECT * FROM users WHERE id = ?`),
   getUserByUsername:stmt(`SELECT * FROM users WHERE username = ? COLLATE NOCASE`),
-  updateUser:       stmt(`UPDATE users SET nickname=?, avatar_color=?, avatar_emoji=?, updated_at=datetime('now') WHERE id=?`),
+  getUserByUid:     stmt(`SELECT * FROM users WHERE uid = ?`),
+  getMaxUid:        stmt(`SELECT COALESCE(MAX(uid), 0) as max FROM users`),
+  updateUser:       stmt(`UPDATE users SET nickname=?, avatar_color=?, avatar_emoji=?, avatar_type=?, updated_at=datetime('now') WHERE id=?`),
   updateUserPassword: stmt(`UPDATE users SET password_hash=?, updated_at=datetime('now') WHERE id=?`),
-  listUsers:        stmt(`SELECT id, username, nickname, avatar_color, avatar_emoji, created_at, updated_at FROM users ORDER BY created_at DESC`),
+  updateUserUsername: stmt(`UPDATE users SET username=?, username_changed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`),
+  updateUserUid:    stmt(`UPDATE users SET uid=?, updated_at=datetime('now') WHERE id=?`),
+  updateUserAvatarUrl: stmt(`UPDATE users SET avatar_url=?, avatar_type='image', updated_at=datetime('now') WHERE id=?`),
+  recordUserLogin:  stmt(`UPDATE users SET last_login_at=datetime('now'), login_count=login_count+1, updated_at=datetime('now') WHERE id=?`),
+  clearUsernameCooldown: stmt(`UPDATE users SET username_changed_at=NULL, updated_at=datetime('now') WHERE id=?`),
+  listUsers:        stmt(`SELECT id, uid, username, nickname, avatar_color, avatar_emoji, avatar_type, avatar_url, created_at, updated_at, last_login_at, login_count, username_changed_at FROM users ORDER BY uid ASC`),
   deleteUser:       stmt(`DELETE FROM users WHERE id = ?`),
+
+  // System settings
+  getSetting:   stmt(`SELECT value FROM system_settings WHERE key = ?`),
+  setSetting:   stmt(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))`),
+  listSettings: stmt(`SELECT key, value, updated_at FROM system_settings ORDER BY key ASC`),
 };

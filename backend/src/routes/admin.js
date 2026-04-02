@@ -1015,17 +1015,123 @@ router.put('/ai-configs/:id/priority', (req, res) => {
 
 const authSvc = require('../services/authService');
 
-router.get('/users', (_req, res) => {
+// List all users with enriched stats
+router.get('/users', (req, res) => {
   const users = authSvc.listUsers();
-  res.json({ users });
+  const { search } = req.query;
+  let list = users;
+  if (search) {
+    const q = String(search).toLowerCase();
+    list = users.filter(u =>
+      (u.username || '').toLowerCase().includes(q) ||
+      (u.nickname || '').toLowerCase().includes(q) ||
+      String(u.uid || '').includes(q)
+    );
+  }
+  // Enrich with game/concept counts
+  const enriched = list.map(u => {
+    const gameCount = db.db.prepare(`SELECT COUNT(DISTINCT game_id) as c FROM players WHERE id = ?`).get(u.id)?.c || 0;
+    const conceptCount = db.db.prepare(`SELECT COUNT(*) as c FROM concepts WHERE player_id = ?`).get(u.id)?.c || 0;
+    const acceptedCount = db.db.prepare(`SELECT COUNT(*) as c FROM concepts WHERE player_id = ? AND validated=1 AND rejected=0`).get(u.id)?.c || 0;
+    return { ...u, gameCount, conceptCount, acceptedCount };
+  });
+  res.json({ users: enriched });
+});
+
+// Get single user detail
+router.get('/users/:id', (req, res) => {
+  const user = db.getUserById.get(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const { password_hash: _, ...safe } = user;
+  const gameCount = db.db.prepare(`SELECT COUNT(DISTINCT game_id) as c FROM players WHERE id = ?`).get(req.params.id)?.c || 0;
+  const conceptCount = db.db.prepare(`SELECT COUNT(*) as c FROM concepts WHERE player_id = ?`).get(req.params.id)?.c || 0;
+  const acceptedCount = db.db.prepare(`SELECT COUNT(*) as c FROM concepts WHERE player_id = ? AND validated=1 AND rejected=0`).get(req.params.id)?.c || 0;
+  res.json({ user: { ...safe, gameCount, conceptCount, acceptedCount } });
+});
+
+// Update user (username, nickname, uid)
+router.put('/users/:id', async (req, res) => {
+  const { username, nickname, uid } = req.body || {};
+  const result = await authSvc.adminUpdateUser(req.params.id, { username, nickname, uid });
+  if (result.error) return res.status(400).json({ error: result.error });
+  logAdminAction('update_user', 'user', req.params.id, { username, nickname, uid });
+  res.json(result);
+});
+
+// Get games a user participated in
+router.get('/users/:id/games', (req, res) => {
+  const userId = req.params.id;
+  const user = db.getUserById.get(userId);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const games = db.db.prepare(`
+    SELECT g.id, g.topic, g.mode, g.status, g.created_at,
+           (SELECT COUNT(*) FROM concepts c WHERE c.game_id = g.id AND c.player_id = ?) as user_concepts,
+           (SELECT COUNT(*) FROM concepts c WHERE c.game_id = g.id AND c.player_id = ? AND c.validated=1 AND c.rejected=0) as user_accepted
+    FROM games g
+    JOIN players p ON p.game_id = g.id AND p.id = ?
+    ORDER BY g.created_at DESC LIMIT 50
+  `).all(userId, userId, userId);
+  res.json({ games });
+});
+
+// Get concepts submitted by a user (with optional status filter)
+router.get('/users/:id/concepts', (req, res) => {
+  const userId = req.params.id;
+  const user = db.getUserById.get(userId);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const { status } = req.query;
+  let query = `SELECT c.*, g.topic as game_topic FROM concepts c LEFT JOIN games g ON g.id = c.game_id WHERE c.player_id = ?`;
+  if (status === 'accepted') query += ` AND c.validated=1 AND c.rejected=0`;
+  else if (status === 'rejected') query += ` AND c.rejected=1`;
+  else if (status === 'pending') query += ` AND c.validated=0 AND c.rejected=0`;
+  query += ` ORDER BY c.created_at DESC LIMIT 200`;
+  const concepts = db.db.prepare(query).all(userId);
+  res.json({ concepts: concepts.map(c => ({ ...c, tags: parseArray(c.tags, []), extra: parseObject(c.extra, {}) })) });
 });
 
 router.post('/users/:id/reset-password', async (req, res) => {
   const { newPassword } = req.body || {};
-  const result = await authSvc.adminResetPassword(req.params.id, newPassword);
+  // Default reset target is '000000' if not provided
+  const result = await authSvc.adminResetPassword(req.params.id, newPassword || '000000');
   if (result.error) return res.status(400).json({ error: result.error });
   logAdminAction('reset_user_password', 'user', req.params.id, {});
   res.json(result);
+});
+
+// Clear username change cooldown for a specific user
+router.post('/users/:id/clear-username-cooldown', (req, res) => {
+  const user = db.getUserById.get(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  db.clearUsernameCooldown.run(req.params.id);
+  logAdminAction('clear_username_cooldown', 'user', req.params.id, {});
+  const { password_hash: _, ...safe } = db.getUserById.get(req.params.id);
+  res.json({ ok: true, user: safe });
+});
+
+// ── System Settings ───────────────────────────────────────────────────────────
+
+router.get('/settings', (_req, res) => {
+  const rows = db.listSettings.all();
+  const settings = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json({ settings });
+});
+
+router.put('/settings/:key', (req, res) => {
+  const { key } = req.params;
+  const { value } = req.body || {};
+  if (value == null) return res.status(400).json({ error: '缺少 value 字段' });
+
+  // Validate known keys
+  if (key === 'username_change_cooldown_days') {
+    const n = parseInt(value, 10);
+    if (!Number.isFinite(n) || n < 0) return res.status(400).json({ error: '冷却天数须为非负整数（0 表示关闭）' });
+    db.setSetting.run(key, String(n));
+  } else {
+    db.setSetting.run(key, String(value));
+  }
+
+  logAdminAction('update_setting', 'setting', key, { value });
+  res.json({ ok: true, key, value: db.getSetting.get(key)?.value });
 });
 
 router.delete('/users/:id', (req, res) => {

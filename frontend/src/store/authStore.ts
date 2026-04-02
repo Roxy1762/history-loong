@@ -14,7 +14,7 @@ interface AuthState {
   login: (username: string, password: string) => Promise<{ error?: string }>;
   register: (username: string, password: string) => Promise<{ error?: string }>;
   logout: () => void;
-  updateProfile: (patches: Partial<Pick<UserAccount, 'nickname' | 'avatar_color' | 'avatar_emoji'>>) => Promise<{ error?: string }>;
+  updateProfile: (patches: Partial<Pick<UserAccount, 'nickname' | 'avatar_color' | 'avatar_emoji' | 'avatar_type'>>) => Promise<{ error?: string }>;
   changePassword: (current: string, next: string) => Promise<{ error?: string }>;
   setUser: (user: UserAccount | null) => void;
 }
