@@ -757,7 +757,7 @@ async function polishRagContext(context, maxChars = 1200) {
   const raw = String(context || '').trim();
   if (!raw) return '';
   const safeMax = Math.max(200, Math.min(4000, parseInt(String(maxChars), 10) || 1200));
-  const prompt = `请将以下教材检索片段做“轻度润色与去冗余”：
+  const prompt = `请将以下教材检索片段做”轻度润色与去冗余”：
 1) 尽量完整保留事实与原文信息，不要新增任何事实；
 2) 只删除重复、噪音、无关句；
 3) 保持中文自然可读；
@@ -767,6 +767,9 @@ async function polishRagContext(context, maxChars = 1200) {
 原文：
 ${raw}`;
   try {
+    // Prefer auxiliary LLM for polishing (cheaper, faster); fallback to main LLM
+    const auxResult = await completeWithAuxiliary(prompt, 1024);
+    if (auxResult) return String(auxResult).trim().slice(0, safeMax) || raw.slice(0, safeMax);
     const text = await completeWithFailover(prompt, 1024);
     return String(text || '').trim().slice(0, safeMax) || raw.slice(0, safeMax);
   } catch {

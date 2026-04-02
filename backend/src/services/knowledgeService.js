@@ -8,8 +8,9 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const db = require('../db');
 
-const CHUNK_SIZE = 400; // characters per chunk
-const CHUNK_OVERLAP = 80; // overlap between adjacent chunks (characters)
+const DEFAULT_CHUNK_SIZE = 400; // characters per chunk
+const DEFAULT_CHUNK_OVERLAP = 80; // overlap between adjacent chunks (characters)
+const DEFAULT_EMBED_BATCH_SIZE = 64;
 
 // Matches typical Chinese textbook heading lines:
 //   第X章/节/课/单元  |  一、二、三、  |  (一)(二)  |  【标题】
@@ -28,10 +29,13 @@ const embeddingCache = new Map();
  * @param {string} [strategy] Chunking strategy: 'auto' | 'textbook' | 'plain' (default: 'auto')
  * @returns {{ docId, chunks, strategy }}
  */
-function ingestDocument(title, filename, content, strategy = 'auto') {
+function ingestDocument(title, filename, content, strategy = 'auto', options = {}) {
   const docId = uuidv4();
+  const cfg = getChunkConfig();
+  const chunkSize = options.chunkSize || cfg.chunkSize;
+  const chunkOverlap = options.chunkOverlap || cfg.chunkOverlap;
   const effectiveStrategy = strategy === 'auto' ? detectChunkStrategy(content) : strategy;
-  const chunks = splitIntoChunks(content, CHUNK_SIZE, effectiveStrategy);
+  const chunks = splitIntoChunks(content, chunkSize, effectiveStrategy, chunkOverlap);
 
   // Transaction for atomicity
   const insertAll = db.db.transaction(() => {
@@ -45,7 +49,7 @@ function ingestDocument(title, filename, content, strategy = 'auto') {
   });
 
   insertAll();
-  return { docId, chunks: chunks.length, strategy: effectiveStrategy };
+  return { docId, chunks: chunks.length, strategy: effectiveStrategy, chunkSize, chunkOverlap };
 }
 
 /**
@@ -82,7 +86,8 @@ async function vectorizeDocument(docId) {
   ).all(docId);
   if (chunks.length === 0) return { docId, chunks: 0, vectorized: 0 };
 
-  const batchSize = 64;
+  const cfg = getChunkConfig();
+  const batchSize = cfg.embedBatchSize;
   for (let i = 0; i < chunks.length; i += batchSize) {
     const texts = chunks.slice(i, i + batchSize).map(c => c.content || '');
     await embedTexts(config, texts);
@@ -466,7 +471,12 @@ const RAG_MODES = ['fts', 'hybrid', 'vector', 'timeline'];
 
 function getActiveKnowledgeOverrides() {
   try {
-    const row = db.getActiveAIConfig.get();
+    // Use the same resolution order as aiService.resolveConfig():
+    // listAIConfigsSorted orders by is_active DESC, priority ASC, created_at DESC
+    // so it picks the same config the AI service actually uses.
+    // Previously this used getActiveAIConfig (WHERE is_active=1) which could diverge.
+    const rows = db.listAIConfigsSorted.all();
+    const row = rows.length > 0 ? rows[0] : null;
     if (!row) return {};
     const extra = JSON.parse(row.extra || '{}');
     return {
@@ -493,6 +503,9 @@ function getActiveKnowledgeOverrides() {
       showPolishedInChat: typeof extra.kb_show_polished_in_chat === 'boolean' ? extra.kb_show_polished_in_chat : null,
       joinSeparator: typeof extra.kb_join_separator === 'string' ? extra.kb_join_separator : '',
       ragMode: typeof extra.kb_rag_mode === 'string' && RAG_MODES.includes(extra.kb_rag_mode) ? extra.kb_rag_mode : null,
+      chunkSize: Number.isFinite(Number(extra.kb_chunk_size)) ? Number(extra.kb_chunk_size) : null,
+      chunkOverlap: Number.isFinite(Number(extra.kb_chunk_overlap)) ? Number(extra.kb_chunk_overlap) : null,
+      embedBatchSize: Number.isFinite(Number(extra.kb_embed_batch_size)) ? Number(extra.kb_embed_batch_size) : null,
     };
   } catch {
     return {};
@@ -508,6 +521,18 @@ function getActiveRagMode() {
   if (overrides.ragMode) return overrides.ragMode;
   const config = buildSiliconFlowConfig(overrides);
   return config.enableEmbedding ? 'hybrid' : 'fts';
+}
+
+/**
+ * Get effective chunking config from AI config or defaults.
+ */
+function getChunkConfig() {
+  const o = getActiveKnowledgeOverrides();
+  return {
+    chunkSize: clampInt(o.chunkSize, DEFAULT_CHUNK_SIZE, 100, 2000),
+    chunkOverlap: clampInt(o.chunkOverlap, DEFAULT_CHUNK_OVERLAP, 0, 500),
+    embedBatchSize: clampInt(o.embedBatchSize, DEFAULT_EMBED_BATCH_SIZE, 1, 256),
+  };
 }
 
 function buildSiliconFlowConfig(overrides = {}) {
@@ -1008,6 +1033,65 @@ function listDocuments() {
   return db.listDocs.all();
 }
 
+/**
+ * Re-chunk an existing document with new settings.
+ * Deletes old chunks and FTS entries, re-splits the original content.
+ * @param {string} docId
+ * @param {object} [options]  { strategy, chunkSize, chunkOverlap }
+ */
+function rechunkDocument(docId, options = {}) {
+  const doc = db.getDoc.get(docId);
+  if (!doc) throw new Error('文档不存在');
+
+  // Reconstruct original content from existing chunks (ordered by chunk_idx)
+  const existingChunks = db.db.prepare(
+    `SELECT content FROM knowledge_chunks WHERE doc_id = ? ORDER BY chunk_idx ASC`
+  ).all(docId);
+  if (!existingChunks.length) throw new Error('文档没有现有切片');
+
+  // Best-effort content reconstruction: join with double newline
+  const reconstructed = existingChunks.map(c => c.content).join('\n\n');
+
+  const cfg = getChunkConfig();
+  const chunkSize = options.chunkSize || cfg.chunkSize;
+  const chunkOverlap = options.chunkOverlap || cfg.chunkOverlap;
+  const strategy = options.strategy || doc.chunk_strategy || 'auto';
+  const effectiveStrategy = strategy === 'auto' ? detectChunkStrategy(reconstructed) : strategy;
+  const newChunks = splitIntoChunks(reconstructed, chunkSize, effectiveStrategy, chunkOverlap);
+
+  const doRechunk = db.db.transaction(() => {
+    // Delete old FTS entries
+    const oldChunks = db.db.prepare(`SELECT id FROM knowledge_chunks WHERE doc_id = ?`).all(docId);
+    for (const c of oldChunks) {
+      db.db.prepare(`DELETE FROM knowledge_fts WHERE chunk_id = ?`).run(c.id);
+    }
+    // Delete old chunks
+    db.deleteChunksByDoc.run(docId);
+
+    // Insert new chunks
+    for (let i = 0; i < newChunks.length; i++) {
+      const chunkId = uuidv4();
+      db.insertChunk.run(chunkId, docId, i, newChunks[i]);
+      db.insertFTS.run(newChunks[i], chunkId);
+    }
+
+    // Update doc metadata
+    db.db.prepare(
+      `UPDATE knowledge_docs SET total_chunks = ?, chunk_strategy = ?, vectorized_at = NULL WHERE id = ?`
+    ).run(newChunks.length, effectiveStrategy, docId);
+  });
+
+  doRechunk();
+  return {
+    docId,
+    oldChunks: existingChunks.length,
+    newChunks: newChunks.length,
+    strategy: effectiveStrategy,
+    chunkSize,
+    chunkOverlap,
+  };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -1161,5 +1245,7 @@ module.exports = {
   validateFromKnowledge,
   parseKBContent,
   detectChunkStrategy,
+  rechunkDocument,
+  getChunkConfig,
   RAG_MODES,
 };

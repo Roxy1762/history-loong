@@ -162,6 +162,7 @@ export interface KnowledgeDoc {
   total_chunks: number;
   created_at: string;
   vectorized_at?: string | null;
+  chunk_strategy?: string;
 }
 
 export async function adminListDocs() {
@@ -203,6 +204,16 @@ export async function adminRevectorizeDoc(id: string) {
 export async function adminRevectorizeAll() {
   const { data } = await api.post('/admin/knowledge/revectorize/all', {}, { headers: adminHeaders() });
   return data as { message: string; total: number; success: number; failed: number; errors: Array<{ id: string; title: string; error: string }> };
+}
+
+export async function adminRechunkDoc(id: string, options?: { strategy?: string; chunkSize?: number; chunkOverlap?: number }) {
+  const { data } = await api.post(`/admin/knowledge/${id}/rechunk`, options || {}, { headers: adminHeaders() });
+  return data as { message: string; docId: string; oldChunks: number; newChunks: number; strategy: string; chunkSize: number; chunkOverlap: number };
+}
+
+export async function adminGetChunkConfig() {
+  const { data } = await api.get('/admin/knowledge/chunk-config', { headers: adminHeaders() });
+  return data as { chunkSize: number; chunkOverlap: number; embedBatchSize: number };
 }
 
 export async function adminGetRagModes() {

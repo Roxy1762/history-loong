@@ -343,7 +343,7 @@ module.exports = {
   deleteAIConfig:  stmt(`DELETE FROM ai_configs WHERE id = ?`),
 
   // Knowledge docs
-  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at, source, vectorized_at FROM knowledge_docs WHERE source = 'manual' ORDER BY created_at DESC`),
+  listDocs:       stmt(`SELECT id, title, filename, total_chunks, created_at, source, vectorized_at, chunk_strategy FROM knowledge_docs WHERE source = 'manual' ORDER BY created_at DESC`),
   listAllDocs:    stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id, vectorized_at FROM knowledge_docs ORDER BY created_at DESC`),
   listAIConfirmedDocs: stmt(`SELECT id, title, filename, total_chunks, created_at, source, game_id, vectorized_at FROM knowledge_docs WHERE source = 'ai_confirmed' ORDER BY created_at DESC`),
   getDoc:         stmt(`SELECT * FROM knowledge_docs WHERE id = ?`),
