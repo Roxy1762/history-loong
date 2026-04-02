@@ -113,6 +113,7 @@ export default function Home() {
   const [ragShowPolishedInChat, setRagShowPolishedInChat] = useState(false);
   const [ragJoinSeparator, setRagJoinSeparator] = useState<'rule' | 'double_newline'>('rule');
   const [showRagHelp, setShowRagHelp] = useState(false);
+  const [showRagSettings, setShowRagSettings] = useState(false);
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
@@ -375,11 +376,11 @@ export default function Home() {
                     {/* Primary mode */}
                     <div>
                       <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>游戏模式</label>
-                      <div className="space-y-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
                         {Object.entries(modes).map(([key, cfg]) => (
                           <label
                             key={key}
-                            className={`option-card flex items-start gap-3 p-3 ${mode === key ? 'selected' : ''}`}
+                            className={`option-card flex items-center gap-2 p-2.5 cursor-pointer ${mode === key ? 'selected' : ''}`}
                           >
                             <input
                               type="radio"
@@ -390,16 +391,18 @@ export default function Home() {
                                 setMode(key);
                                 setExtraModes(prev => prev.filter(m => m !== key));
                               }}
-                              className="mt-0.5"
+                              className="flex-shrink-0"
                               style={{ accentColor: 'var(--brand)' }}
                             />
-                            <div>
-                              <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
-                              <div className="text-xs mt-0.5 leading-relaxed" style={{ color: 'var(--text-muted)' }}>{cfg.description}</div>
-                            </div>
+                            <div className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>{cfg.label}</div>
                           </label>
                         ))}
                       </div>
+                      {modes[mode] && (
+                        <div className="mt-1.5 text-xs leading-relaxed px-1" style={{ color: 'var(--text-muted)' }}>
+                          {modes[mode].description}
+                        </div>
+                      )}
                     </div>
 
                     {/* Extra combinable modes */}
@@ -560,60 +563,75 @@ export default function Home() {
                           </div>
 
                           <div className="pt-2.5 border-t" style={{ borderColor: 'var(--border)' }}>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>RAG 检索参数</div>
-                              <button
-                                type="button"
-                                onClick={() => setShowRagHelp(true)}
-                                className="text-xs px-2 py-0.5 rounded border transition-colors"
-                                style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'var(--bg-card)' }}
-                              >
-                                参数说明
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>主题 TopN</label>
-                                <input className="input text-sm" type="number" min={1} max={10} value={ragTopicTopNInput}
-                                  onChange={e => setRagTopicTopNInput(e.target.value)} />
+                            <button
+                              type="button"
+                              onClick={() => setShowRagSettings(v => !v)}
+                              className="flex items-center gap-1.5 text-xs font-semibold transition-colors"
+                              style={{ color: showRagSettings ? 'var(--brand)' : 'var(--text-primary)' }}
+                            >
+                              <svg className={`w-3 h-3 transition-transform ${showRagSettings ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                              </svg>
+                              RAG 检索参数
+                              <span className="font-normal" style={{ color: 'var(--text-muted)' }}>（通常无需调整）</span>
+                            </button>
+                            {showRagSettings && (
+                              <div className="mt-2 animate-slide-down">
+                                <div className="mb-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowRagHelp(true)}
+                                    className="text-xs px-2 py-0.5 rounded border transition-colors"
+                                    style={{ color: 'var(--text-secondary)', borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+                                  >
+                                    参数说明
+                                  </button>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>主题 TopN</label>
+                                    <input className="input text-sm" type="number" min={1} max={10} value={ragTopicTopNInput}
+                                      onChange={e => setRagTopicTopNInput(e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>概念 TopN</label>
+                                    <input className="input text-sm" type="number" min={1} max={12} value={ragConceptTopNInput}
+                                      onChange={e => setRagConceptTopNInput(e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>上下文最大字数</label>
+                                    <input className="input text-sm" type="number" min={200} max={4000} value={ragContextMaxCharsInput}
+                                      onChange={e => setRagContextMaxCharsInput(e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 候选倍率</label>
+                                    <input className="input text-sm" type="number" min={1} max={20} value={ragFtsCandidateMultiplierInput}
+                                      onChange={e => setRagFtsCandidateMultiplierInput(e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 最少候选数</label>
+                                    <input className="input text-sm" type="number" min={1} max={200} value={ragFtsMinCandidatesInput}
+                                      onChange={e => setRagFtsMinCandidatesInput(e.target.value)} />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>拼接分隔</label>
+                                    <select className="input text-sm" value={ragJoinSeparator} onChange={e => setRagJoinSeparator(e.target.value as 'rule' | 'double_newline')}>
+                                      <option value="rule">分隔线（---）</option>
+                                      <option value="double_newline">空行</option>
+                                    </select>
+                                  </div>
+                                </div>
+                                <label className="mt-2 inline-flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={ragShowPolishedInChat}
+                                    onChange={e => setRagShowPolishedInChat(e.target.checked)}
+                                    style={{ accentColor: 'var(--brand)' }}
+                                  />
+                                  在聊天区显示 AI 教材摘录
+                                </label>
                               </div>
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>概念 TopN</label>
-                                <input className="input text-sm" type="number" min={1} max={12} value={ragConceptTopNInput}
-                                  onChange={e => setRagConceptTopNInput(e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>上下文最大字数</label>
-                                <input className="input text-sm" type="number" min={200} max={4000} value={ragContextMaxCharsInput}
-                                  onChange={e => setRagContextMaxCharsInput(e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 候选倍率</label>
-                                <input className="input text-sm" type="number" min={1} max={20} value={ragFtsCandidateMultiplierInput}
-                                  onChange={e => setRagFtsCandidateMultiplierInput(e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>FTS 最少候选数</label>
-                                <input className="input text-sm" type="number" min={1} max={200} value={ragFtsMinCandidatesInput}
-                                  onChange={e => setRagFtsMinCandidatesInput(e.target.value)} />
-                              </div>
-                              <div>
-                                <label className="block text-xs mb-1" style={{ color: 'var(--text-muted)' }}>拼接分隔</label>
-                                <select className="input text-sm" value={ragJoinSeparator} onChange={e => setRagJoinSeparator(e.target.value as 'rule' | 'double_newline')}>
-                                  <option value="rule">分隔线（---）</option>
-                                  <option value="double_newline">空行</option>
-                                </select>
-                              </div>
-                            </div>
-                            <label className="mt-2 inline-flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-secondary)' }}>
-                              <input
-                                type="checkbox"
-                                checked={ragShowPolishedInChat}
-                                onChange={e => setRagShowPolishedInChat(e.target.checked)}
-                                style={{ accentColor: 'var(--brand)' }}
-                              />
-                              在聊天区显示 AI 教材摘录
-                            </label>
+                            )}
                           </div>
                         </div>
                       )}
