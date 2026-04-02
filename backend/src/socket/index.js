@@ -237,7 +237,8 @@ function ensureChallengeState(io, gameId, game, settings, room) {
 
   if (room.topicCards) return;
 
-  ai.generateChallengeCards(game.topic).then(cards => {
+  const existingConcepts = db.getConceptsByGame.all(gameId).filter(c => c.validated);
+  ai.generateChallengeCards(game.topic, 10, existingConcepts).then(cards => {
     if (cards && cards.length > 0) {
       room.topicCards = cards;
       pickNextChallenge(room);
@@ -615,7 +616,9 @@ module.exports = function setupSocket(io) {
         io.to(currentGameId).emit('concept:new', { concept });
         room.lastSubmitAt.set(currentPlayer.id, Date.now());
 
-        if (hasMode(game, settings, 'survival')) {
+        const hasScoreMode = hasMode(game, settings, 'score-race') || hasMode(game, settings, 'challenge');
+        if (hasMode(game, settings, 'survival') && !hasScoreMode) {
+          // Survival-only: simple +1 scoring (skip if score-race/challenge handles scoring below)
           const prev = room.scores.get(currentPlayer.id) || 0;
           room.scores.set(currentPlayer.id, prev + 1);
           broadcastScores(io, currentGameId);
@@ -625,7 +628,7 @@ module.exports = function setupSocket(io) {
         pluginEvents.emit('concept:accepted', { game, concept, player: currentPlayer });
 
         // ── Score-race / challenge scoring ────────────────────────────────
-        if (hasMode(game, settings, 'score-race') || hasMode(game, settings, 'challenge')) {
+        if (hasScoreMode) {
           let points = difficulty * 10;
           let bonus = 0;
 
@@ -801,7 +804,15 @@ module.exports = function setupSocket(io) {
             };
             io.to(currentGameId).emit('concept:settled', { conceptId: r.id, accepted: true, concept });
             accepted++;
-            if (hasMode(game, settleSettings, 'survival')) {
+            // Score: score-race/challenge uses difficulty-based scoring; survival-only uses +1
+            const settleHasScoreMode = hasMode(game, settleSettings, 'score-race') || hasMode(game, settleSettings, 'challenge');
+            if (settleHasScoreMode) {
+              const points = difficulty * 10;
+              const prev = room.scores.get(row.player_id) || 0;
+              room.scores.set(row.player_id, prev + points);
+              broadcastScores(io, currentGameId);
+              broadcastPlayers(io, currentGameId);
+            } else if (hasMode(game, settleSettings, 'survival')) {
               const prev = room.scores.get(row.player_id) || 0;
               room.scores.set(row.player_id, prev + 1);
               broadcastScores(io, currentGameId);
@@ -983,7 +994,56 @@ module.exports = function setupSocket(io) {
           provider: aiTrace?.provider || null,
           model: aiTrace?.model || null,
         });
-        if (hasMode(game, settings, 'survival')) {
+        // ── Score-race / challenge scoring (same logic as realtime) ──────
+        const singleHasScoreMode = hasMode(game, settings, 'score-race') || hasMode(game, settings, 'challenge');
+        if (singleHasScoreMode) {
+          let points = difficulty * 10;
+          let bonus = 0;
+
+          if (hasMode(game, settings, 'challenge') && room.challengeCard) {
+            const cardTag = room.challengeCard.tag;
+            const cardPeriodHint = room.challengeCard.periodHint || '';
+            const matchesTags = (result.tags || []).some(t => t.includes(cardTag) || cardTag.includes(t));
+            const matchesDesc = (result.description || '').includes(cardTag) || (result.name || '').includes(cardTag);
+            const matchesDynasty = (result.dynasty || '').includes(cardTag) || (result.period || '').includes(cardTag);
+            const challengeCompleted = matchesTags || matchesDesc || matchesDynasty;
+
+            if (challengeCompleted) {
+              room.challengeStreak++;
+              const streakBonus = Math.min(room.challengeStreak - 1, 5) * 10;
+              const roundProgress = room.challengeRound;
+              const earlyBonus = Math.max(0, (2 - roundProgress) * 15);
+              let coherenceBonus = 0;
+              if (cardPeriodHint) {
+                const matchesPeriodHint = (result.dynasty || '').includes(cardPeriodHint) ||
+                  (result.period || '').includes(cardPeriodHint) ||
+                  cardPeriodHint.includes(result.dynasty || '') ||
+                  (result.tags || []).some(t => cardPeriodHint.includes(t));
+                if (matchesPeriodHint) coherenceBonus = 20;
+              }
+              bonus = 50 + streakBonus + earlyBonus + coherenceBonus;
+              const streakLabel = room.challengeStreak > 1 ? ` (连续${room.challengeStreak}次🔥)` : '';
+              sysMessage(io, currentGameId, `🎯 ${row.player_name} 完成了挑战「${room.challengeCard.text}」+${bonus}分${streakLabel}！`, { type: 'challenge_complete', bonus, streak: room.challengeStreak });
+              room.lastChallengeCompleted = true;
+            } else {
+              if (room.lastChallengeCompleted === false && room.challengeRound > 0) room.challengeStreak = 0;
+              room.lastChallengeCompleted = false;
+            }
+
+            const threshold = typeof settings.challengeThreshold === 'number' ? settings.challengeThreshold : 2;
+            room.challengeRound++;
+            if (room.challengeRound >= threshold) {
+              const newCard = pickNextChallenge(room);
+              sysMessage(io, currentGameId, `🃏 新挑战：${newCard.text}`);
+              broadcastChallenge(io, currentGameId);
+            }
+          }
+
+          const prevScore = room.scores.get(row.player_id) || 0;
+          room.scores.set(row.player_id, prevScore + points + bonus);
+          broadcastScores(io, currentGameId);
+          broadcastPlayers(io, currentGameId);
+        } else if (hasMode(game, settings, 'survival')) {
           const prev = room.scores.get(row.player_id) || 0;
           room.scores.set(row.player_id, prev + 1);
           broadcastScores(io, currentGameId);

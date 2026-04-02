@@ -715,18 +715,22 @@ ${list}
  * Generate topic-specific challenge cards.
  * Cards include period hints so they can actually appear on the timeline.
  */
-async function generateChallengeCards(topic, count = 10) {
+async function generateChallengeCards(topic, count = 10, existingConcepts = []) {
   const eraHint = inferThemeEraHint(topic);
-  const prompt = `你是历史接龙游戏的出题人。当前游戏主题是「${topic}」。${eraHint}
-请针对该主题生成${count}个挑战卡，每个挑战卡是一个具体的子类别或角度，要求与主题及其时代紧密相关。
+  const existingHint = existingConcepts.length > 0
+    ? `\n已出现过的概念：${existingConcepts.slice(-12).map(c => c.name || c.raw_input).join('、')}。请生成与这些不重叠的挑战角度。`
+    : '';
+  const prompt = `你是历史接龙游戏的出题人。当前游戏主题是「${topic}」。${eraHint}${existingHint}
+请针对该主题生成${count}个挑战卡，每个挑战卡是一个具体的、紧扣「${topic}」的子类别或角度。
 返回JSON数组（禁止markdown）：
 [{"id":"card1","text":"提交一个[具体描述]相关概念","tag":"[简短标签]","periodHint":"[时代提示，如\"19世纪\"或\"明朝\"]"},...]
 要求：
-1. 每张卡的text必须和主题「${topic}」直接相关，且涉及主题所处的历史时代
-2. tag是1-4个字的简短分类词
-3. 覆盖多种角度（人物、事件、制度、地区等），避免重复
-4. text格式统一：以"提交一个"或"提交一位"开头
-5. 卡片内容必须是可以在时间轴上体现的历史概念`;
+1. 每张卡的text必须和主题「${topic}」直接相关，切忌泛泛的通用挑战（如"提交一个军事概念"），应具体到主题所涉时代与领域（如主题为"唐朝"则"提交一位唐代诗人"）
+2. tag是1-4个字的简短分类词，应体现主题特色
+3. periodHint应精确到主题涉及的时代（如"唐代""公元前5世纪""1840-1912年"）
+4. 覆盖多种角度（人物、事件、制度、地区、文化、经济等），避免重复
+5. text格式统一：以"提交一个"或"提交一位"开头
+6. 卡片内容必须是可以在时间轴上体现的历史概念`;
 
   try {
     const text = await completeWithFailover(prompt, 1024);
