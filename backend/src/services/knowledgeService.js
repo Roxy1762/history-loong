@@ -181,6 +181,193 @@ async function searchContextAdvancedWithTrace(query, topN = 4, runtimeOverrides 
   }
 }
 
+// ── RAG Mode Routing ──────────────────────────────────────────────────────────
+
+/**
+ * Route a single-query search through the configured RAG mode.
+ * @param {string} query
+ * @param {number} topN
+ * @param {object} runtimeOverrides
+ * @param {string|null} ragMode  Override mode (or null = use config)
+ * @param {Array}  timelineCtx  [{name,dynasty,year}] last validated concepts
+ */
+async function searchContextWithMode(query, topN = 4, runtimeOverrides = {}, ragMode = null, timelineCtx = []) {
+  const mode = ragMode || getActiveRagMode();
+  switch (mode) {
+    case 'fts':
+      return searchContextFTSWithTrace(query, topN, runtimeOverrides);
+    case 'vector':
+      return searchContextVectorWithTrace(query, topN, runtimeOverrides);
+    case 'timeline':
+      return timelineAwareSearchWithTrace(query, topN, runtimeOverrides, timelineCtx);
+    case 'hybrid':
+    default:
+      return searchContextAdvancedWithTrace(query, topN, runtimeOverrides);
+  }
+}
+
+/** Pure FTS — no embedding */
+function searchContextFTSWithTrace(query, topN = 4, _runtimeOverrides = {}) {
+  if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
+  const runtime = getRagRuntimeConfig(_runtimeOverrides);
+  try {
+    const candidates = searchChunksByFTS(query, Math.max(runtime.ftsMinCandidates, topN * runtime.candidateMultiplier));
+    if (!candidates.length) return { context: '', trace: { query, stage: 'fts_only', candidates: 0, ranked: [] } };
+    const texts = candidates.slice(0, topN).map(r => r.content).filter(Boolean);
+    return {
+      context: texts.join(runtime.joinSeparator),
+      trace: { query, stage: 'fts_only', candidates: candidates.length, ranked: candidates.slice(0, topN).map((r, i) => ({ rank: i + 1, preview: String(r.content || '').slice(0, 80) })) },
+    };
+  } catch {
+    return { context: '', trace: { query, stage: 'fts_error', candidates: 0, ranked: [] } };
+  }
+}
+
+/** Pure vector — embedding only, no FTS pre-filter.
+ *  Embeds ALL visible chunks on first call (respects the LRU cache).
+ *  Falls back to FTS if embedding unavailable.
+ */
+async function searchContextVectorWithTrace(query, topN = 4, runtimeOverrides = {}) {
+  const config = getSiliconFlowConfig();
+  if (!config.enableEmbedding) {
+    // Graceful fallback
+    return searchContextFTSWithTrace(query, topN, runtimeOverrides);
+  }
+  const runtime = getRagRuntimeConfig(runtimeOverrides);
+  if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
+  try {
+    // Load all visible chunks (expensive on first call; subsequent calls use cache)
+    const allChunks = db.db.prepare(`
+      SELECT kc.id, kc.content, kd.title
+        FROM knowledge_chunks kc
+        JOIN knowledge_docs kd ON kd.id = kc.doc_id
+       WHERE kd.status != 'archived'
+         AND NOT (kd.source = 'ai_confirmed' AND kd.status = 'draft')
+    `).all();
+    if (!allChunks.length) return { context: '', trace: { query, stage: 'vector', candidates: 0, ranked: [] } };
+
+    const [queryVec] = await embedTexts(config, [query]);
+    const chunkTexts = allChunks.map(c => c.content || '');
+    const docVecs = await embedTexts(config, chunkTexts);
+
+    const scored = allChunks
+      .map((c, idx) => {
+        let content = c.content;
+        if (c.title && !content.startsWith(`【${c.title}】`)) content = `【${c.title}】\n${content}`;
+        return { chunk_id: c.id, content, embedScore: cosineSimilarity(queryVec, docVecs[idx]), ftsRank: idx };
+      })
+      .sort((a, b) => b.embedScore - a.embedScore);
+
+    const ranked = await rankChunks(query, scored, topN, runtimeOverrides);
+    const texts = ranked.map(r => r.content).filter(Boolean);
+    return {
+      context: texts.join(runtime.joinSeparator),
+      trace: { query, stage: 'vector', candidates: allChunks.length, ranked: ranked.map((r, i) => ({ rank: i + 1, score: r.finalScore, preview: String(r.content || '').slice(0, 80) })) },
+    };
+  } catch (err) {
+    console.warn(`[KB] Vector search failed, fallback to FTS: ${err.message}`);
+    return searchContextFTSWithTrace(query, topN, runtimeOverrides);
+  }
+}
+
+/**
+ * Timeline-Aware RAG — 接龙智识模式
+ *
+ * Augments the query with the current game timeline for temporal grounding:
+ *   enrichedQuery = "{concept}。[接龙语境：{last5concepts}]"
+ *
+ * Then does RRF fusion of:
+ *   - FTS results (keyword matching)
+ *   - Embedding results on the enriched query (semantic + temporal)
+ *   - Dynasty-boosted candidates (exact dynasty name match)
+ *
+ * This helps surface historically adjacent knowledge even when the query
+ * alone doesn't have strong keyword overlap.
+ */
+async function timelineAwareSearchWithTrace(query, topN = 4, runtimeOverrides = {}, timelineCtx = []) {
+  const config = getSiliconFlowConfig();
+  const runtime = getRagRuntimeConfig(runtimeOverrides);
+  if (!query) return { context: '', trace: { query: '', stage: 'empty', candidates: 0, ranked: [] } };
+
+  // Build enriched query with timeline grounding
+  const last5 = timelineCtx.slice(-5);
+  const timelineSnippet = last5.map(c => {
+    const parts = [c.name];
+    if (c.dynasty) parts.push(`(${c.dynasty})`);
+    return parts.join('');
+  }).join('→');
+  const enrichedQuery = timelineSnippet
+    ? `${query}。[接龙语境：${timelineSnippet}]`
+    : query;
+
+  try {
+    // 1. FTS candidates (keyword)
+    const ftsCandidates = searchChunksByFTS(
+      query,
+      Math.max(runtime.ftsMinCandidates, topN * runtime.candidateMultiplier),
+    );
+
+    // 2. Dynasty-boosted candidates — extra FTS queries for dynasty names
+    const dynastyCandidates = [];
+    for (const c of last5) {
+      if (c.dynasty) {
+        const extra = searchChunksByFTS(c.dynasty, Math.ceil(topN / 2));
+        dynastyCandidates.push(...extra);
+      }
+    }
+
+    // 3. Merge with RRF if embedding available; otherwise fallback to FTS + dynasty boost
+    let merged = deduplicateCandidates([...ftsCandidates, ...dynastyCandidates]);
+
+    if (config.enableEmbedding) {
+      try {
+        // Embed with enriched query for temporal semantic search
+        const [enrichedVec, queryVec] = await embedTexts(config, [enrichedQuery, query]);
+        merged = merged.map((c, idx) => {
+          const enrichedSim = cosineSimilarity(enrichedVec, embeddingCache.get(`${config.embeddingModel}:${hashText(c.content.slice(0, 300))}`) || []);
+          const ftsPrior = 1 / (1 + (c.ftsRank ?? idx));
+          // RRF: combine enriched embedding sim + FTS prior
+          const rrfScore = (enrichedSim > 0 ? enrichedSim * 0.7 : 0) + ftsPrior * 0.3;
+          return { ...c, hybridScore: rrfScore, embedScore: enrichedSim };
+        }).sort((a, b) => b.hybridScore - a.hybridScore);
+      } catch (embedErr) {
+        console.warn(`[KB] Timeline embed failed, using FTS+dynasty order: ${embedErr.message}`);
+      }
+    }
+
+    if (!merged.length) return { context: '', trace: { query, stage: 'timeline', candidates: 0, ranked: [] } };
+
+    // Rerank with original query (not enriched — cleaner signal for cross-encoder)
+    const rerankPoolSize = Math.max(topN * runtime.candidateMultiplier, topN);
+    let pool = merged.slice(0, rerankPoolSize);
+    if (config.enableRerank && pool.length > 1) {
+      try {
+        const reranked = await rerankWithSiliconFlow(config, query, pool, topN);
+        if (reranked.length > 0) pool = reranked;
+      } catch (rerankErr) {
+        console.warn(`[KB] Timeline rerank failed: ${rerankErr.message}`);
+      }
+    }
+
+    const final = pool.slice(0, topN);
+    const texts = final.map(r => r.content).filter(Boolean);
+    return {
+      context: texts.join(runtime.joinSeparator),
+      trace: {
+        query,
+        enrichedQuery,
+        timelineCtx: last5.map(c => c.name),
+        stage: 'timeline',
+        candidates: merged.length,
+        ranked: final.map((r, i) => ({ rank: i + 1, score: r.hybridScore ?? r.finalScore, preview: String(r.content || '').slice(0, 80) })),
+      },
+    };
+  } catch (err) {
+    console.warn(`[KB] Timeline-aware search failed, fallback to FTS: ${err.message}`);
+    return searchContextFTSWithTrace(query, topN, runtimeOverrides);
+  }
+}
+
 /**
  * Advanced combined context for a concept submission.
  */
@@ -194,8 +381,12 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
   const conceptQuery = runtimeOverrides?.conceptQuery || concept;
   const topicQuery = runtimeOverrides?.topicQuery || topic;
   const useTopicSearch = runtimeOverrides?.useTopicSearch !== false;
+  // Timeline context passed from socket for timeline-aware mode
+  const timelineCtx = Array.isArray(runtimeOverrides?.timelineCtx) ? runtimeOverrides.timelineCtx : [];
+  const ragMode = typeof runtimeOverrides?.ragMode === 'string' ? runtimeOverrides.ragMode : null;
+
   const byTopicPromise = useTopicSearch
-    ? searchContextAdvancedWithTrace(topicQuery, runtime.topicTopN, runtime)
+    ? searchContextWithMode(topicQuery, runtime.topicTopN, runtime, ragMode, timelineCtx)
     : Promise.resolve({
       context: '',
       trace: {
@@ -207,7 +398,7 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
     });
   const [byTopic, byConcept] = await Promise.all([
     byTopicPromise,
-    searchContextAdvancedWithTrace(conceptQuery, runtime.conceptTopN, runtime),
+    searchContextWithMode(conceptQuery, runtime.conceptTopN, runtime, ragMode, timelineCtx),
   ]);
   const combined = [byTopic.context, byConcept.context].filter(Boolean).join(runtime.joinSeparator);
   return {
@@ -218,6 +409,7 @@ async function getContextForConceptAdvancedWithTrace(concept, topic, runtimeOver
       topicQuery,
       conceptQuery,
       useTopicSearch,
+      ragMode: ragMode || getActiveRagMode(),
       runtime,
     },
   };
@@ -269,6 +461,9 @@ function normalizeSearchInput(query) {
     .trim();
 }
 
+// Valid RAG modes
+const RAG_MODES = ['fts', 'hybrid', 'vector', 'timeline'];
+
 function getActiveKnowledgeOverrides() {
   try {
     const row = db.getActiveAIConfig.get();
@@ -297,10 +492,22 @@ function getActiveKnowledgeOverrides() {
       ftsMinCandidates: Number.isFinite(Number(extra.kb_fts_min_candidates)) ? Number(extra.kb_fts_min_candidates) : null,
       showPolishedInChat: typeof extra.kb_show_polished_in_chat === 'boolean' ? extra.kb_show_polished_in_chat : null,
       joinSeparator: typeof extra.kb_join_separator === 'string' ? extra.kb_join_separator : '',
+      ragMode: typeof extra.kb_rag_mode === 'string' && RAG_MODES.includes(extra.kb_rag_mode) ? extra.kb_rag_mode : null,
     };
   } catch {
     return {};
   }
+}
+
+/**
+ * Returns the active RAG mode from config. Falls back to 'hybrid' when embedding
+ * is available, 'fts' otherwise.
+ */
+function getActiveRagMode() {
+  const overrides = getActiveKnowledgeOverrides();
+  if (overrides.ragMode) return overrides.ragMode;
+  const config = buildSiliconFlowConfig(overrides);
+  return config.enableEmbedding ? 'hybrid' : 'fts';
 }
 
 function buildSiliconFlowConfig(overrides = {}) {
@@ -937,9 +1144,14 @@ module.exports = {
   getContextForConcept,
   searchContextAdvanced,
   searchContextAdvancedWithTrace,
+  searchContextWithMode,
+  searchContextFTSWithTrace,
+  searchContextVectorWithTrace,
+  timelineAwareSearchWithTrace,
   getContextForConceptAdvanced,
   getContextForConceptAdvancedWithTrace,
   getRagRuntimeConfig,
+  getActiveRagMode,
   listDocuments,
   vectorizeDocument,
   testEmbeddingConnection,
@@ -949,4 +1161,5 @@ module.exports = {
   validateFromKnowledge,
   parseKBContent,
   detectChunkStrategy,
+  RAG_MODES,
 };

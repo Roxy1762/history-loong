@@ -3,7 +3,11 @@
     "allow": [
       "Read(//c/Users/Admin/AppData/src/ui-ux-pro-max/**)",
       "Read(//c/Users/Admin/src/ui-ux-pro-max/**)",
-      "Read(//c/Users/Admin/**)"
+      "Read(//c/Users/Admin/**)",
+      "Bash(node --check src/services/knowledgeService.js)",
+      "Bash(node --check src/routes/admin.js)",
+      "Bash(node --check src/socket/index.js)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

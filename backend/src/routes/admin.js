@@ -15,6 +15,8 @@ const {
   vectorizeDocument,
   testEmbeddingConnection,
   testRerankConnection,
+  getActiveRagMode,
+  RAG_MODES,
 } = require('../services/knowledgeService');
 const auditSvc = require('../services/auditService');
 const cacheSvc = require('../services/cacheService');
@@ -608,6 +610,46 @@ router.post('/knowledge/:id/vectorize', async (req, res) => {
     console.error(`[Admin] Knowledge vectorize FAILED id=${req.params.id} title="${doc.title}": ${detail}`);
     res.status(400).json({ error: err.message || '向量化失败', detail });
   }
+});
+
+// Re-vectorize a document (invalidates cache, re-embeds all chunks)
+router.post('/knowledge/:id/revectorize', async (req, res) => {
+  const doc = db.getDoc.get(req.params.id);
+  if (!doc) return res.status(404).json({ error: '文档不存在' });
+
+  try {
+    const result = await vectorizeDocument(req.params.id);
+    console.log(`[Admin] Knowledge re-vectorized id=${req.params.id} title="${doc.title}" chunks=${result.chunks}`);
+    res.json({ message: '重新向量化完成', ...result });
+  } catch (err) {
+    const detail = err?.stack || err?.message || 'unknown error';
+    console.error(`[Admin] Knowledge re-vectorize FAILED id=${req.params.id}: ${detail}`);
+    res.status(400).json({ error: err.message || '重新向量化失败', detail });
+  }
+});
+
+// Bulk re-vectorize all active manual docs
+router.post('/knowledge/revectorize/all', async (req, res) => {
+  const docs = db.listDocs.all();
+  const results = { total: docs.length, success: 0, failed: 0, errors: [] };
+
+  for (const doc of docs) {
+    try {
+      await vectorizeDocument(doc.id);
+      results.success++;
+    } catch (err) {
+      results.failed++;
+      results.errors.push({ id: doc.id, title: doc.title, error: err.message });
+    }
+  }
+
+  console.log(`[Admin] Bulk re-vectorize: ${results.success}/${results.total} succeeded`);
+  res.json({ message: `批量重新向量化完成：${results.success} 成功，${results.failed} 失败`, ...results });
+});
+
+// RAG mode info
+router.get('/knowledge/rag/modes', (_req, res) => {
+  res.json({ modes: RAG_MODES, active: getActiveRagMode() });
 });
 
 router.post('/knowledge/check/embedding', async (_req, res) => {

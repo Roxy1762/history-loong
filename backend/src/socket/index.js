@@ -28,6 +28,7 @@ const {
   getContextForConceptAdvancedWithTrace,
   searchContextAdvancedWithTrace,
   getRagRuntimeConfig,
+  getActiveRagMode,
   ingestAIConfirmedConcept,
   validateFromKnowledge,
 } = require('../services/knowledgeService');
@@ -463,9 +464,13 @@ module.exports = function setupSocket(io) {
 
       try {
         const ragRuntime = getRagRuntimeConfig(settings);
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const activeRagMode = getActiveRagMode();
+        const validatedConcepts = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
+        const existing = validatedConcepts.map(c => ({ name: c.name, period: c.period }));
+        // For timeline-aware mode, pass last-8 concepts with dynasty info
+        const timelineCtx = activeRagMode === 'timeline'
+          ? validatedConcepts.slice(-8).map(c => ({ name: c.name, dynasty: c.dynasty, year: c.year }))
+          : [];
 
         const auxPlan = await ai.planValidationAssist(input, game.topic, existing);
         const ragFlow = auxPlan.useRag
@@ -474,6 +479,8 @@ module.exports = function setupSocket(io) {
             topicQuery: auxPlan.topicQuery || game.topic,
             conceptQuery: auxPlan.conceptQuery || input,
             useTopicSearch: auxPlan.useTopicSearch !== false,
+            ragMode: activeRagMode,
+            timelineCtx,
           })
           : { context: '', trace: { stage: 'aux_skip', note: auxPlan.note || 'skip rag' } };
         const knowledgeContextRaw = ragFlow.context;
@@ -876,9 +883,12 @@ module.exports = function setupSocket(io) {
       try {
         const settings = JSON.parse(game.settings || '{}');
         const ragRuntime = getRagRuntimeConfig(settings);
-        const existing = db.getConceptsByGame.all(currentGameId)
-          .filter(c => c.validated)
-          .map(c => ({ name: c.name, period: c.period }));
+        const activeRagMode2 = getActiveRagMode();
+        const validatedConcepts2 = db.getConceptsByGame.all(currentGameId).filter(c => c.validated);
+        const existing = validatedConcepts2.map(c => ({ name: c.name, period: c.period }));
+        const timelineCtx2 = activeRagMode2 === 'timeline'
+          ? validatedConcepts2.slice(-8).map(c => ({ name: c.name, dynasty: c.dynasty, year: c.year }))
+          : [];
         const pipeline2 = ai.getPipelineConfig();
         const kbCheck = pipeline2.kbLocalValidate ? validateFromKnowledge(row.raw_input, game.topic) : { confident: false };
         let result;
@@ -888,7 +898,7 @@ module.exports = function setupSocket(io) {
         if (kbCheck.confident) {
           result = kbCheck.result;
         } else {
-          ragFlow = await getContextForConceptAdvancedWithTrace(row.raw_input, game.topic, settings);
+          ragFlow = await getContextForConceptAdvancedWithTrace(row.raw_input, game.topic, { ...settings, ragMode: activeRagMode2, timelineCtx: timelineCtx2 });
           const knowledgeContext = ragFlow.context;
           polishedRag = (knowledgeContext && ragRuntime.polishEnabled)
             ? await ai.polishRagContext(knowledgeContext, ragRuntime.polishMaxChars)

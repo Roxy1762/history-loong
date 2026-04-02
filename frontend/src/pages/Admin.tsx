@@ -14,7 +14,7 @@ import {
   setAdminKey, getAdminKey,
   adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
-  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
+  adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminRevectorizeDoc, adminRevectorizeAll, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
   adminUpdateGameNotes, adminUpdateGameSettings, adminUpdateGameModes, adminRestoreGame, adminSetPlayerLives, adminDeleteGameConcept, adminUpdateGameConcept,
   adminGetLogs, getGameModes,
@@ -1281,6 +1281,7 @@ function readKnowledgeExtra(extra: Record<string, unknown> | null | undefined) {
     roomDefaultFtsMinCandidates: typeof extra?.kb_room_default_fts_min_candidates === 'number' ? extra.kb_room_default_fts_min_candidates : 12,
     roomDefaultShowPolishedInChat: typeof extra?.kb_room_default_show_polished_in_chat === 'boolean' ? extra.kb_room_default_show_polished_in_chat : false,
     roomDefaultJoinSeparator: extra?.kb_room_default_join_separator === 'double_newline' ? 'double_newline' : 'rule',
+    ragMode: typeof extra?.kb_rag_mode === 'string' && ['fts', 'hybrid', 'vector', 'timeline'].includes(extra.kb_rag_mode as string) ? (extra.kb_rag_mode as string) : 'hybrid',
   };
 }
 
@@ -1311,6 +1312,7 @@ function writeKnowledgeExtra(
     roomDefaultFtsMinCandidates: number;
     roomDefaultShowPolishedInChat: boolean;
     roomDefaultJoinSeparator: string;
+    ragMode: string;
   },
   preservedApiKey = ''
 ) {
@@ -1341,6 +1343,7 @@ function writeKnowledgeExtra(
   delete merged.kb_room_default_fts_min_candidates;
   delete merged.kb_room_default_show_polished_in_chat;
   delete merged.kb_room_default_join_separator;
+  delete merged.kb_rag_mode;
 
   const apiKey = next.apiKey === SECRET_MASK ? preservedApiKey : next.apiKey.trim();
   const baseUrl = next.baseUrl.trim().replace(/\/$/, '');
@@ -1382,6 +1385,9 @@ function writeKnowledgeExtra(
   merged.kb_room_default_fts_min_candidates = Number(next.roomDefaultFtsMinCandidates) || 12;
   merged.kb_room_default_show_polished_in_chat = Boolean(next.roomDefaultShowPolishedInChat);
   merged.kb_room_default_join_separator = next.roomDefaultJoinSeparator === 'double_newline' ? 'double_newline' : 'rule';
+  if (next.ragMode && ['fts', 'hybrid', 'vector', 'timeline'].includes(next.ragMode)) {
+    merged.kb_rag_mode = next.ragMode;
+  }
 
   return merged;
 }
@@ -1719,6 +1725,14 @@ function AIConfigPanel() {
                         Rerank{knowledge.rerankEnabled ? '已启用' : '已配置'}: <span className="font-mono">{knowledge.rerankModel}</span>
                       </span>
                     )}
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${
+                      knowledge.ragMode === 'timeline' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                      knowledge.ragMode === 'vector' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                      knowledge.ragMode === 'fts' ? 'bg-slate-50 text-slate-600 border-slate-200' :
+                      'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    }`}>
+                      {{fts: '🔍 FTS关键词', hybrid: '⚡ 混合检索', vector: '🧠 纯向量', timeline: '🐉 接龙智识'}[knowledge.ragMode] || '⚡ 混合检索'}
+                    </span>
                   </div>
                 )}
 
@@ -1811,6 +1825,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     roomDefaultFtsMinCandidates: initialKnowledge.roomDefaultFtsMinCandidates,
     roomDefaultShowPolishedInChat: initialKnowledge.roomDefaultShowPolishedInChat,
     roomDefaultJoinSeparator: initialKnowledge.roomDefaultJoinSeparator,
+    ragMode: initialKnowledge.ragMode,
   });
   const [aux, setAux] = useState({
     enabled: initialAux.enabled,
@@ -2319,6 +2334,47 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               </div>
             )}
 
+            {/* RAG Mode Selector */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm text-slate-800">RAG 检索模式</span>
+                <span className="text-xs text-slate-400">全局生效，覆盖所有游戏房间</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([
+                  { id: 'fts', icon: '🔍', name: 'FTS关键词', desc: '快速关键字全文检索，无需向量化，适合低配置环境' },
+                  { id: 'hybrid', icon: '⚡', name: '混合检索', desc: 'FTS + Embedding + Rerank 三阶段，精度最高，需 SiliconFlow 配置' },
+                  { id: 'vector', icon: '🧠', name: '纯向量', desc: '仅用语义向量相似度，跨语义匹配更强，需预先向量化' },
+                  { id: 'timeline', icon: '🐉', name: '接龙智识', desc: '接龙专属：以最近已验证概念为时代背景，检索历史相邻知识，最适合历史接龙' },
+                ] as const).map(mode => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => updateKnowledge('ragMode', mode.id)}
+                    className={`text-left px-3 py-2.5 rounded-lg border text-xs transition-all ${
+                      knowledge.ragMode === mode.id
+                        ? 'border-indigo-400 bg-indigo-50 text-indigo-800 shadow-sm ring-1 ring-indigo-200'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="text-base mb-0.5">{mode.icon}</div>
+                    <div className="font-semibold">{mode.name}</div>
+                    <div className="opacity-70 mt-0.5 leading-tight">{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {knowledge.ragMode === 'timeline' && (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  🐉 <strong>接龙智识模式</strong>：在验证每条历史概念时，系统会自动将最近 8 条已验证概念（含朝代信息）注入检索向量，使知识库检索聚焦于当前接龙所在时代。建议同时启用 Embedding 和 Rerank 以获得最佳效果。
+                </div>
+              )}
+              {knowledge.ragMode === 'vector' && (
+                <div className="text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-3 py-2">
+                  🧠 <strong>纯向量模式</strong>：需要在「知识库」面板对文档进行向量化（或重新向量化），否则未缓存的文档片段无法参与语义检索。
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary text-xs py-1.5" onClick={handleCheckEmbedding} disabled={checkingEmbedding}>
                 {checkingEmbedding ? 'Embedding 检测中...' : '检测 Embedding'}
@@ -2444,6 +2500,8 @@ function KnowledgePanel() {
   const [docs, setDocs] = useState<KnowledgeDoc[]>([]);
   const [uploading, setUploading] = useState(false);
   const [vectorizingDocId, setVectorizingDocId] = useState<string | null>(null);
+  const [revectorizingDocId, setRevectorizingDocId] = useState<string | null>(null);
+  const [bulkRevectorizing, setBulkRevectorizing] = useState(false);
   const [showTextForm, setShowTextForm] = useState(false);
   const [msg, setMsg] = useState('');
   const [uploadStrategy, setUploadStrategy] = useState<string>('auto');
@@ -2484,6 +2542,35 @@ function KnowledgePanel() {
       setMsg(`❌ ${formatApiError(err, '向量化失败')}`);
     } finally {
       setVectorizingDocId(null);
+    }
+  }
+
+  async function handleRevectorize(id: string, title: string) {
+    setRevectorizingDocId(id);
+    setMsg('');
+    try {
+      const res = await adminRevectorizeDoc(id);
+      setMsg(`✅ 「${title}」重新向量化完成，共处理 ${res.vectorized} 个片段`);
+      reload();
+    } catch (err: unknown) {
+      setMsg(`❌ ${formatApiError(err, '重新向量化失败')}`);
+    } finally {
+      setRevectorizingDocId(null);
+    }
+  }
+
+  async function handleBulkRevectorize() {
+    if (!confirm(`确认重新向量化全部 ${docs.length} 个文档？这可能需要一些时间并消耗 API 额度。`)) return;
+    setBulkRevectorizing(true);
+    setMsg('');
+    try {
+      const res = await adminRevectorizeAll();
+      setMsg(`✅ ${res.message}`);
+      reload();
+    } catch (err: unknown) {
+      setMsg(`❌ ${formatApiError(err, '批量向量化失败')}`);
+    } finally {
+      setBulkRevectorizing(false);
     }
   }
 
@@ -2538,8 +2625,15 @@ function KnowledgePanel() {
         <EmptyState icon="📚" title="知识库为空" desc="上传教材或参考资料后，AI 会在验证历史概念时自动参考相关内容" />
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
             <h3 className="font-semibold text-slate-800">文档列表 <span className="text-slate-400 font-normal text-sm">({docs.length})</span></h3>
+            <button
+              onClick={handleBulkRevectorize}
+              disabled={bulkRevectorizing || docs.length === 0}
+              className="text-xs px-3 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkRevectorizing ? '批量向量化中...' : '🔄 全部重新向量化'}
+            </button>
           </div>
           <div className="divide-y divide-slate-50">
             {docs.map(doc => (
@@ -2562,14 +2656,25 @@ function KnowledgePanel() {
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleVectorize(doc.id, doc.title)}
-                    disabled={vectorizingDocId === doc.id}
-                    className="text-xs text-indigo-500 hover:text-indigo-700 transition-colors px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {vectorizingDocId === doc.id ? '向量化中...' : '手动向量化'}
-                  </button>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {!doc.vectorized_at ? (
+                    <button
+                      onClick={() => handleVectorize(doc.id, doc.title)}
+                      disabled={vectorizingDocId === doc.id}
+                      className="text-xs text-indigo-500 hover:text-indigo-700 transition-colors px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {vectorizingDocId === doc.id ? '向量化中...' : '向量化'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleRevectorize(doc.id, doc.title)}
+                      disabled={revectorizingDocId === doc.id}
+                      className="text-xs text-amber-600 hover:text-amber-800 transition-colors px-2 py-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="重新向量化（更新嵌入缓存）"
+                    >
+                      {revectorizingDocId === doc.id ? '重新向量化中...' : '↺ 重向量化'}
+                    </button>
+                  )}
                   <button onClick={() => handleDelete(doc.id, doc.title)} className="text-xs text-red-400 hover:text-red-600 transition-colors px-2 py-1">
                     删除
                   </button>

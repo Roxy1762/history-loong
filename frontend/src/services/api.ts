@@ -195,6 +195,21 @@ export async function adminVectorizeDoc(id: string) {
   return data as { message: string; docId: string; chunks: number; vectorized: number };
 }
 
+export async function adminRevectorizeDoc(id: string) {
+  const { data } = await api.post(`/admin/knowledge/${id}/revectorize`, {}, { headers: adminHeaders() });
+  return data as { message: string; docId: string; chunks: number; vectorized: number };
+}
+
+export async function adminRevectorizeAll() {
+  const { data } = await api.post('/admin/knowledge/revectorize/all', {}, { headers: adminHeaders() });
+  return data as { message: string; total: number; success: number; failed: number; errors: Array<{ id: string; title: string; error: string }> };
+}
+
+export async function adminGetRagModes() {
+  const { data } = await api.get('/admin/knowledge/rag/modes', { headers: adminHeaders() });
+  return data as { modes: string[]; active: string };
+}
+
 export interface KnowledgeCheckPayload {
   enabled?: boolean;
   embeddingEnabled?: boolean;
