@@ -302,7 +302,9 @@ const Timeline = memo(function Timeline({
                   expanded={expandedId === c.id}
                   onToggle={setExpandedId}
                   isAdmin={isAdmin}
+                  me={me}
                   onDelete={onDeleteConcept}
+                  onStartEdit={onStartEdit}
                 />
               ))}
             </div>
@@ -324,10 +326,13 @@ interface CardProps {
   expanded: boolean;
   onToggle: (id: string | null) => void;
   isAdmin?: boolean;
+  me?: { id: string } | null;
   onDelete?: (id: string, name: string) => void;
+  onStartEdit?: (id: string, current: string) => void;
 }
 
-const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle, isAdmin, onDelete }: CardProps) {
+const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expanded, onToggle, isAdmin, me, onDelete, onStartEdit }: CardProps) {
+  const isOwn = me?.id === c.player_id;
   const ragPolished = String((c.extra as Record<string, unknown>)?.ragPolished || '').trim();
   const handleToggle = useCallback(
     () => onToggle(expanded ? null : c.id),
@@ -379,11 +384,19 @@ const ConceptCard = memo(function ConceptCard({ concept: c, color, isNew, expand
               <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: 'var(--text-muted)', background: 'var(--bg-muted)', border: '1px solid var(--border-subtle)' }}>
                 {c.player_name}
               </span>
-              {isAdmin && onDelete && (
+              {(isAdmin || isOwn) && onStartEdit && (
                 <button
-                  onClick={e => { e.stopPropagation(); onDelete(c.id, c.name); }}
+                  onClick={e => { e.stopPropagation(); onStartEdit(c.id, c.raw_input); }}
+                  className="text-xs px-1.5 py-0.5 hover:bg-blue-50 rounded-lg transition-colors"
+                  style={{ color: 'var(--brand)' }}
+                  title={isAdmin ? '管理员编辑' : '编辑我的概念'}
+                >✏️</button>
+              )}
+              {(isAdmin || isOwn) && onDelete && (
+                <button
+                  onClick={e => { e.stopPropagation(); onDelete(c.id, c.name || c.raw_input); }}
                   className="text-xs px-1.5 py-0.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  title="管理员删除"
+                  title={isAdmin ? '管理员删除' : '删除我的概念'}
                 >🗑️</button>
               )}
               <svg className={`w-4 h-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}

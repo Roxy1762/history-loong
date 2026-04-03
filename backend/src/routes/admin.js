@@ -21,6 +21,7 @@ const {
   RAG_MODES,
 } = require('../services/knowledgeService');
 const auditSvc = require('../services/auditService');
+const authSvc = require('../services/authService');
 const cacheSvc = require('../services/cacheService');
 const profileSvc = require('../services/profileService');
 const messageSvc = require('../services/messageService');
@@ -41,17 +42,29 @@ const upload = multer({
   },
 });
 
-// ── Auth middleware ───────────────────────────────────────────────────────────
-
-const ADMIN_KEY = process.env.ADMIN_KEY || 'admin';
+// ── Auth middleware (key OR admin-role user token) ────────────────────────────
 
 router.use((req, res, next) => {
   const key = req.headers['x-admin-key'] || req.query.key;
-  if (key !== ADMIN_KEY) {
-    console.warn(`[Admin] Unauthorized request to ${req.method} ${req.path}`);
-    return res.status(401).json({ error: '未授权，请提供正确的管理员密钥' });
+  const adminKey = authSvc.getAdminKey();
+  if (key && key === adminKey) return next();
+
+  // Try Bearer token for admin-role users
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) {
+    const payload = authSvc.verifyToken(token);
+    if (payload) {
+      const user = db.getUserById.get(payload.sub);
+      if (user && (user.role === 'admin' || user.role === 'super_admin')) {
+        req.adminUser = authSvc.sanitize(user);
+        return next();
+      }
+    }
   }
-  next();
+
+  console.warn(`[Admin] Unauthorized request to ${req.method} ${req.path}`);
+  return res.status(401).json({ error: '未授权，请提供管理员密钥或使用管理员账号登录' });
 });
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -1013,8 +1026,6 @@ router.put('/ai-configs/:id/priority', (req, res) => {
 
 // ── User Account Management ───────────────────────────────────────────────────
 
-const authSvc = require('../services/authService');
-
 // List all users with enriched stats
 router.get('/users', (req, res) => {
   const users = authSvc.listUsers();
@@ -1143,6 +1154,61 @@ router.delete('/users/:id', (req, res) => {
   if (result.error) return res.status(404).json({ error: result.error });
   logAdminAction('delete_user', 'user', req.params.id, {});
   res.json(result);
+});
+
+// ── User role management ──────────────────────────────────────────────────────
+
+router.put('/users/:id/role', (req, res) => {
+  const { role } = req.body;
+  if (!role) return res.status(400).json({ error: '缺少 role 参数' });
+  const result = authSvc.setUserRole(req.params.id, role);
+  if (result.error) return res.status(400).json({ error: result.error });
+  logAdminAction('set_user_role', 'user', req.params.id, { role });
+  res.json(result);
+});
+
+router.get('/users/admins', (_req, res) => {
+  const admins = db.listAdminUsers.all();
+  res.json({ admins });
+});
+
+// ── Security configuration ────────────────────────────────────────────────────
+
+// Get current security config status (keys masked)
+router.get('/security', (_req, res) => {
+  const jwtRow = db.getSetting.get('jwt_secret');
+  const adminRow = db.getSetting.get('admin_key');
+  const envAdminKey = process.env.ADMIN_KEY || '';
+  const envJwtSecret = process.env.JWT_SECRET || '';
+
+  res.json({
+    adminKeySource: (adminRow?.value && adminRow.value.trim()) ? 'db' : (envAdminKey ? 'env' : 'default'),
+    adminKeyMasked: maskKey(authSvc.getAdminKey()),
+    jwtSecretSource: (jwtRow?.value && jwtRow.value.trim()) ? 'db' : (envJwtSecret ? 'env' : 'default'),
+    jwtSecretMasked: maskKey(authSvc.getJwtSecret()),
+  });
+});
+
+// Update admin key (requires existing admin key or super_admin role)
+router.post('/security/admin-key', (req, res) => {
+  const { newKey } = req.body;
+  if (!newKey || newKey.trim().length < 8) {
+    return res.status(400).json({ error: '管理员密钥至少 8 位' });
+  }
+  db.setSetting.run('admin_key', newKey.trim());
+  logAdminAction('update_admin_key', 'system', 'admin_key', { masked: maskKey(newKey.trim()) });
+  res.json({ ok: true, masked: maskKey(newKey.trim()) });
+});
+
+// Update JWT secret (requires existing admin key or super_admin role)
+router.post('/security/jwt-secret', (req, res) => {
+  const { newSecret } = req.body;
+  if (!newSecret || newSecret.trim().length < 16) {
+    return res.status(400).json({ error: 'JWT 密钥至少 16 位' });
+  }
+  db.setSetting.run('jwt_secret', newSecret.trim());
+  logAdminAction('update_jwt_secret', 'system', 'jwt_secret', { masked: maskKey(newSecret.trim()) });
+  res.json({ ok: true, note: 'JWT 密钥已更新，现有登录 Token 将在下次验证时失效', masked: maskKey(newSecret.trim()) });
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

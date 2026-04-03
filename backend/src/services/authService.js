@@ -3,19 +3,36 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'history-loong-jwt-secret-change-in-production';
 const JWT_EXPIRES = '30d';
 const BCRYPT_ROUNDS = 10;
+
+// ── Dynamic secret loading (DB > env > fallback) ──────────────────────────────
+
+function getJwtSecret() {
+  try {
+    const row = db.getSetting.get('jwt_secret');
+    if (row && row.value && row.value.trim().length >= 16) return row.value.trim();
+  } catch { /* DB not ready */ }
+  return process.env.JWT_SECRET || 'history-loong-jwt-secret-change-in-production';
+}
+
+function getAdminKey() {
+  try {
+    const row = db.getSetting.get('admin_key');
+    if (row && row.value && row.value.trim()) return row.value.trim();
+  } catch { /* DB not ready */ }
+  return process.env.ADMIN_KEY || 'admin';
+}
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
 function generateToken(userId) {
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  return jwt.sign({ sub: userId }, getJwtSecret(), { expiresIn: JWT_EXPIRES });
 }
 
 function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, getJwtSecret());
   } catch {
     return null;
   }
@@ -155,6 +172,17 @@ function adminDeleteUser(userId) {
   return { ok: true };
 }
 
+// ── Role management ───────────────────────────────────────────────────────────
+
+function setUserRole(userId, role) {
+  const validRoles = ['user', 'admin', 'super_admin'];
+  if (!validRoles.includes(role)) return { error: '无效的角色' };
+  const user = db.getUserById.get(userId);
+  if (!user) return { error: '用户不存在' };
+  db.setUserRole.run(role, userId);
+  return { ok: true, role };
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
@@ -173,6 +201,52 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// Admin middleware: accepts either ADMIN_KEY header OR user with admin/super_admin role
+function requireAdminAccess(req, res, next) {
+  // 1. Check ADMIN_KEY header (legacy key-based access)
+  const headerKey = req.headers['x-admin-key'] || req.query.key;
+  if (headerKey && headerKey === getAdminKey()) return next();
+
+  // 2. Check Bearer token for admin-role user
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) {
+    const payload = verifyToken(token);
+    if (payload) {
+      const user = db.getUserById.get(payload.sub);
+      if (user && (user.role === 'admin' || user.role === 'super_admin')) {
+        req.user = sanitize(user);
+        req.userId = user.id;
+        return next();
+      }
+    }
+  }
+
+  return res.status(401).json({ error: '需要管理员权限' });
+}
+
+// Super admin only (for security config changes)
+function requireSuperAdmin(req, res, next) {
+  const headerKey = req.headers['x-admin-key'] || req.query.key;
+  if (headerKey && headerKey === getAdminKey()) return next();
+
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (token) {
+    const payload = verifyToken(token);
+    if (payload) {
+      const user = db.getUserById.get(payload.sub);
+      if (user && user.role === 'super_admin') {
+        req.user = sanitize(user);
+        req.userId = user.id;
+        return next();
+      }
+    }
+  }
+
+  return res.status(403).json({ error: '需要超级管理员权限' });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sanitize(user) {
@@ -185,5 +259,8 @@ module.exports = {
   register, login, getById,
   updateProfile, changePassword,
   listUsers, adminResetPassword, adminUpdateUser, adminDeleteUser,
-  requireAuth, verifyToken, sanitize,
+  setUserRole,
+  requireAuth, requireAdminAccess, requireSuperAdmin,
+  verifyToken, sanitize,
+  getAdminKey, getJwtSecret,
 };

@@ -674,3 +674,36 @@ export async function getAuthSettings() {
   const { data } = await api.get<{ cooldownDays: number }>('/auth/settings/username-cooldown');
   return data;
 }
+
+
+// ── Security configuration ────────────────────────────────────────────────────
+
+export async function adminGetSecurity() {
+  const { data } = await api.get<{
+    adminKeySource: string; adminKeyMasked: string;
+    jwtSecretSource: string; jwtSecretMasked: string;
+  }>('/admin/security', { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminSetAdminKey(newKey: string) {
+  const { data } = await api.post<{ ok: boolean; masked: string }>('/admin/security/admin-key', { newKey }, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminSetJwtSecret(newSecret: string) {
+  const { data } = await api.post<{ ok: boolean; note: string; masked: string }>('/admin/security/jwt-secret', { newSecret }, { headers: adminHeaders() });
+  return data;
+}
+
+// ── User role management ──────────────────────────────────────────────────────
+
+export async function adminSetUserRole(userId: string, role: string) {
+  const { data } = await api.put<{ ok: boolean; role: string }>(`/admin/users/${userId}/role`, { role }, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminGetAdminUsers() {
+  const { data } = await api.get<{ admins: Array<{ id: string; username: string; nickname: string | null; role: string; avatar_emoji: string; avatar_color: string }> }>('/admin/users/admins', { headers: adminHeaders() });
+  return data.admins;
+}

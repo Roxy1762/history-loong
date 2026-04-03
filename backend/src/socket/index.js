@@ -1158,8 +1158,7 @@ module.exports = function setupSocket(io) {
       const room = getRoom(currentGameId);
       const isAdmin = hasAdminPrivileges(room, currentPlayer);
 
-      // Only allow editing pending (unvalidated) concepts; admins can also edit validated ones
-      if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法修改' });
+      // Players can edit their own concepts (pending or validated); admins can edit any
       if (!isAdmin && row.player_id !== currentPlayer.id) return callback?.({ error: '只能修改自己提交的概念' });
 
       const text = (newInput || '').trim();
@@ -1197,8 +1196,8 @@ module.exports = function setupSocket(io) {
       if (!effectivePlayer) return callback?.({ error: '请先加入房间' });
       const isAdmin = hasAdminPrivileges(room, effectivePlayer);
 
+      // Players can delete their own concepts (pending or validated); admins can delete any
       if (!isAdmin && row.player_id !== effectivePlayer.id) return callback?.({ error: '只能删除自己提交的概念' });
-      if (!isAdmin && row.validated === 1) return callback?.({ error: '已验证的概念无法删除，请联系管理员' });
 
       db.deleteConceptById.run(conceptId);
       io.to(currentGameId).emit('concept:deleted', { conceptId });
