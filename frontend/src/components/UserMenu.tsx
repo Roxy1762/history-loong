@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import LoginModal from './LoginModal';
+import AvatarDisplay from './AvatarDisplay';
 
 interface Props {
   compact?: boolean; // smaller icon-only mode for game header
@@ -28,8 +29,6 @@ export default function UserMenu({ compact = false }: Props) {
   if (loading) return null;
 
   const displayName = user?.nickname || user?.username || '';
-  const emoji = user?.avatar_emoji || '🐉';
-  const color = user?.avatar_color || '#6366f1';
 
   if (!user) {
     return (
@@ -58,10 +57,15 @@ export default function UserMenu({ compact = false }: Props) {
         style={{ background: 'var(--bg-muted)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' }}
         title={displayName}
       >
-        <span
-          className="w-5 h-5 rounded-lg flex items-center justify-center text-sm leading-none flex-shrink-0"
-          style={{ background: color, fontSize: '14px' }}
-        >{emoji}</span>
+        <AvatarDisplay
+          type="user"
+          avatarType={user?.avatar_type}
+          avatarUrl={user?.avatar_url}
+          avatarEmoji={user?.avatar_emoji}
+          avatarColor={user?.avatar_color}
+          name={displayName}
+          size={20}
+        />
         {!compact && <span className="max-w-[80px] truncate">{displayName}</span>}
         <svg className={`w-3 h-3 transition-transform ${showDropdown ? 'rotate-180' : ''}`}
           fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} style={{ color: 'var(--text-muted)' }}>

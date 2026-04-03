@@ -27,6 +27,7 @@ import {
   adminListUsers, adminGetUser, adminUpdateUser, adminResetUserPassword, adminDeleteUser,
   adminGetUserGames, adminGetUserConcepts, adminClearUsernameCooldown,
   adminGetSettings, adminSetSetting,
+  adminGetSecurity, adminSetAdminKey, adminSetJwtSecret, adminSetUserRole,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail,
 } from '../services/api';
@@ -78,7 +79,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'users' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs';
+type Tab = 'overview' | 'games' | 'users' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security';
 
 const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: 'overview',      label: '概览' },
@@ -90,6 +91,7 @@ const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: 'curation',      label: '知识策展' },
   { id: 'ai-decisions',  label: 'AI 完整回复' },
   { id: 'logs',          label: '服务器日志' },
+  { id: 'security',      label: '🔐 安全设置' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -184,8 +186,146 @@ export default function Admin() {
           {tab === 'curation'      && <CurationPanel />}
           {tab === 'ai-decisions'  && <AIDecisionsPanel />}
           {tab === 'logs'          && <LogsPanel />}
+          {tab === 'security'      && <SecurityPanel />}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ── Panel: Security ───────────────────────────────────────────────────────────
+
+function SecurityPanel() {
+  const [security, setSecurity] = useState<{ adminKeySource: string; adminKeyMasked: string; jwtSecretSource: string; jwtSecretMasked: string } | null>(null);
+  const [newAdminKey, setNewAdminKey] = useState('');
+  const [newJwtSecret, setNewJwtSecret] = useState('');
+  const [roleUserId, setRoleUserId] = useState('');
+  const [roleValue, setRoleValue] = useState('admin');
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    adminGetSecurity().then(setSecurity).catch(() => {});
+  }, []);
+
+  async function handleSetAdminKey() {
+    setMsg(''); setError('');
+    try {
+      const res = await adminSetAdminKey(newAdminKey);
+      setMsg(`管理员密钥已更新：${res.masked}`);
+      setNewAdminKey('');
+      setSecurity(s => s ? { ...s, adminKeySource: 'db', adminKeyMasked: res.masked } : s);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '更新失败');
+    }
+  }
+
+  async function handleSetJwtSecret() {
+    setMsg(''); setError('');
+    try {
+      const res = await adminSetJwtSecret(newJwtSecret);
+      setMsg(`JWT 密钥已更新。${res.note}`);
+      setNewJwtSecret('');
+      setSecurity(s => s ? { ...s, jwtSecretSource: 'db', jwtSecretMasked: res.masked } : s);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '更新失败');
+    }
+  }
+
+  async function handleSetRole() {
+    setMsg(''); setError('');
+    if (!roleUserId.trim()) return setError('请填写用户 ID');
+    try {
+      await adminSetUserRole(roleUserId.trim(), roleValue);
+      setMsg(`用户 ${roleUserId.trim()} 角色已设为「${roleValue}」`);
+      setRoleUserId('');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '设置失败');
+    }
+  }
+
+  const sourceLabel = (src: string) => src === 'db' ? '数据库' : src === 'env' ? '环境变量' : '默认值';
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <h2 className="text-lg font-heading font-bold" style={{ color: 'var(--text-primary)' }}>安全设置</h2>
+
+      {msg && <div className="px-4 py-3 rounded-xl text-sm bg-emerald-50 text-emerald-700 border border-emerald-200">{msg}</div>}
+      {error && <div className="px-4 py-3 rounded-xl text-sm bg-red-50 text-red-700 border border-red-200">{error}</div>}
+
+      {/* Current status */}
+      {security && (
+        <div className="rounded-xl p-4 space-y-2 text-sm" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)' }}>
+          <div className="font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>当前配置状态</div>
+          <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>管理员密钥来源</span><span className="font-mono" style={{ color: 'var(--brand)' }}>{sourceLabel(security.adminKeySource)}</span></div>
+          <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>管理员密钥（掩码）</span><span className="font-mono text-xs">{security.adminKeyMasked}</span></div>
+          <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>JWT 密钥来源</span><span className="font-mono" style={{ color: 'var(--brand)' }}>{sourceLabel(security.jwtSecretSource)}</span></div>
+          <div className="flex justify-between"><span style={{ color: 'var(--text-muted)' }}>JWT 密钥（掩码）</span><span className="font-mono text-xs">{security.jwtSecretMasked}</span></div>
+        </div>
+      )}
+
+      {/* Admin key update */}
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>更新管理员密钥</div>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>新密钥将存储在数据库中，优先级高于环境变量。至少 8 位字符。</p>
+        <div className="flex gap-2">
+          <input
+            className="input flex-1 text-sm font-mono"
+            type="password"
+            placeholder="新管理员密钥（≥8位）"
+            value={newAdminKey}
+            onChange={e => setNewAdminKey(e.target.value)}
+            autoComplete="new-password"
+          />
+          <button className="btn-primary text-sm px-4" onClick={handleSetAdminKey} disabled={newAdminKey.length < 8}>更新</button>
+        </div>
+      </div>
+
+      {/* JWT secret update */}
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>更新 JWT 密钥</div>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>更新后，现有登录 Token 将在下次验证时失效，用户需重新登录。至少 16 位字符。</p>
+        <div className="flex gap-2">
+          <input
+            className="input flex-1 text-sm font-mono"
+            type="password"
+            placeholder="新 JWT 密钥（≥16位）"
+            value={newJwtSecret}
+            onChange={e => setNewJwtSecret(e.target.value)}
+            autoComplete="new-password"
+          />
+          <button className="btn-primary text-sm px-4" onClick={handleSetJwtSecret} disabled={newJwtSecret.length < 16}>更新</button>
+        </div>
+      </div>
+
+      {/* User role management */}
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>用户角色管理</div>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          设置用户角色。<strong>admin</strong>：可访问管理后台；<strong>super_admin</strong>：额外可修改安全配置；<strong>user</strong>：普通用户。
+        </p>
+        <div className="flex gap-2">
+          <input
+            className="input flex-1 text-sm font-mono"
+            placeholder="用户 ID（u_xxx）"
+            value={roleUserId}
+            onChange={e => setRoleUserId(e.target.value)}
+          />
+          <select
+            className="input text-sm w-36"
+            value={roleValue}
+            onChange={e => setRoleValue(e.target.value)}
+          >
+            <option value="user">user</option>
+            <option value="admin">admin</option>
+            <option value="super_admin">super_admin</option>
+          </select>
+          <button className="btn-primary text-sm px-4" onClick={handleSetRole}>设置</button>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          提示：用户 ID 可在「玩家管理」→ 用户详情页找到。
+        </p>
+      </div>
     </div>
   );
 }
@@ -358,6 +498,14 @@ function UsersPanel() {
                   </td>
                   <td className="px-3 py-2.5 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {u.gameCount}/{u.acceptedCount}✓
+                  </td>
+                  <td className="px-3 py-2.5 text-center text-xs">
+                    {(u as { role?: string }).role && (u as { role?: string }).role !== 'user' ? (
+                      <span className="px-1.5 py-0.5 rounded-full font-medium"
+                        style={{ background: 'var(--brand-light)', color: 'var(--brand)', fontSize: '10px' }}>
+                        {(u as { role?: string }).role}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex gap-1 justify-end">
@@ -532,6 +680,7 @@ function UserDetailPanel({
                 {[
                   ['UID', user.uid ?? '—'],
                   ['用户名', `@${user.username}`],
+                  ['角色', (user as { role?: string }).role || 'user'],
                   ['昵称', user.nickname || '（未设置）'],
                   ['注册时间', new Date(user.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })],
                   ['上次登录', user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '—'],

@@ -405,6 +405,20 @@ export default function Game() {
 
     rememberPlayerName(normalizedName);
     applyJoinState(res);
+
+    // Save to recent games list in localStorage
+    if (res.game) {
+      try {
+        const stored = localStorage.getItem('hl_recent_games');
+        const recent: Array<{ id: string; topic: string; playerName: string; joinedAt: string }> = stored ? JSON.parse(stored) : [];
+        const updated = [
+          { id: res.game.id, topic: res.game.topic || '', playerName: normalizedName, joinedAt: new Date().toISOString() },
+          ...recent.filter(r => r.id !== res.game!.id),
+        ].slice(0, 10);
+        localStorage.setItem('hl_recent_games', JSON.stringify(updated));
+      } catch { /* ignore */ }
+    }
+
     return res;
   }, [applyJoinState, gameId]);
 
@@ -611,6 +625,23 @@ export default function Game() {
     }
   }
 
+  async function handleShareRoom() {
+    if (!game?.id) return;
+    const url = `${window.location.origin}/game/${game.id}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: `历史接龙 — ${game.topic || game.id}`, text: `加入我的历史接龙房间（${game.id}）`, url });
+        return;
+      } catch { /* user cancelled */ }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      alert(`房间链接已复制！\n${url}`);
+    } catch {
+      alert(`房间链接：\n${url}`);
+    }
+  }
+
   // ── Validate single ───────────────────────────────────────────────────────
   async function handleValidateSingle(conceptId: string) {
     setValidatingConceptIds(prev => new Set([...prev, conceptId]));
@@ -798,6 +829,12 @@ export default function Game() {
               <button onClick={handleCopyRoomId} className="btn-secondary text-xs py-1.5 px-3 hidden sm:flex">
                 复制房号
               </button>
+              <button onClick={handleShareRoom} title="分享房间链接" className="btn-secondary text-xs py-1.5 px-2.5 hidden sm:flex items-center gap-1">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                </svg>
+                分享
+              </button>
 
               {/* Multi-select batch validate button */}
               {isDeferred && !gameFinished && selectedPendingIds.size > 0 && (
@@ -842,10 +879,22 @@ export default function Game() {
             </div>
           </div>
 
-          {/* Players strip */}
+          {/* Players strip + personal stats */}
           {players.length > 0 && (
-            <div className="px-4 pb-2.5 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+            <div className="px-4 pb-2.5 pt-2 flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--border-subtle)' }}>
               <PlayerList players={players} me={me} />
+              {me && !me.isObserver && (() => {
+                const myAccepted = timeline.filter(c => c.player_id === me.id).length;
+                const myPending = pendingConcepts.filter(c => c.player_id === me.id).length;
+                const myTotal = myAccepted + myPending;
+                if (myTotal === 0) return null;
+                return (
+                  <div className="flex items-center gap-2 shrink-0 text-xs" style={{ color: 'var(--text-muted)' }}>
+                    <span title="我通过的概念数" className="font-semibold" style={{ color: 'var(--brand)' }}>{myAccepted}✓</span>
+                    {myPending > 0 && <span title="待验证">+{myPending}⏳</span>}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </header>

@@ -122,6 +122,14 @@ export default function Home() {
 
   // Join form
   const [roomCode, setRoomCode] = useState('');
+  const [recentGames, setRecentGames] = useState<Array<{ id: string; topic: string; playerName: string; joinedAt: string }>>([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('hl_recent_games');
+      if (stored) setRecentGames(JSON.parse(stored));
+    } catch { /* ignore */ }
+  }, []);
   const [heroQuote] = useState(() => SHI_JI_QUOTES[Math.floor(Math.random() * SHI_JI_QUOTES.length)]);
 
   useEffect(() => {
@@ -198,6 +206,10 @@ export default function Home() {
     } finally {
       setCreating(false);
     }
+  }
+
+  function quickJoin(gameId: string) {
+    navigate(`/game/${gameId}`);
   }
 
   function handleJoin(e: React.FormEvent) {
@@ -694,6 +706,7 @@ export default function Home() {
                     </button>
                   </form>
                 ) : (
+                  <>
                   <form onSubmit={handleJoin} className="space-y-5">
                     <div>
                       <label className="block text-sm font-semibold mb-1.5" style={{ color: 'var(--text-primary)' }}>房间码</label>
@@ -731,6 +744,46 @@ export default function Home() {
                       </p>
                     )}
                   </form>
+
+                  {/* ── Recent games ── */}
+                  {recentGames.length > 0 && (
+                    <div className="mt-5 animate-fade-in">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>最近游戏</span>
+                        <span className="h-px flex-1" style={{ background: 'var(--border-subtle)' }} />
+                        <button
+                          className="text-xs"
+                          style={{ color: 'var(--text-muted)' }}
+                          onClick={() => {
+                            localStorage.removeItem('hl_recent_games');
+                            setRecentGames([]);
+                          }}
+                        >清除</button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {recentGames.slice(0, 5).map(g => (
+                          <button
+                            key={g.id}
+                            onClick={() => quickJoin(g.id)}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors hover-lift"
+                            style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-subtle)' }}
+                          >
+                            <span className="text-lg">🕹️</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-xs font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                                {g.topic || '无主题房间'}
+                              </div>
+                              <div className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                                {g.id} · {g.playerName && `以「${g.playerName}」加入`}
+                              </div>
+                            </div>
+                            <span className="text-xs shrink-0" style={{ color: 'var(--brand)' }}>进入 →</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             </div>
