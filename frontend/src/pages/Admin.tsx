@@ -29,8 +29,12 @@ import {
   adminGetSettings, adminSetSetting,
   adminGetSecurity, adminSetAdminKey, adminSetJwtSecret, adminSetUserRole, adminSetUserStatus,
   adminListAvatars, adminGetAvatarConfig, adminSetAvatarConfig, adminUploadUserAvatar, adminDeleteUserAvatar, adminCreateUser,
+  adminConceptRAGSearch,
+  adminListGroups, adminGetGroup, adminCreateGroup, adminUpdateGroup, adminDeleteGroup,
+  adminAddGroupMember, adminRemoveGroupMember,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail, type AvatarFileInfo, type AvatarConfig,
+  type UserGroup, type UserGroupMember,
 } from '../services/api';
 import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
@@ -80,13 +84,14 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security';
+type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security' | 'user-groups';
 
 const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: 'overview',      label: '概览' },
   { id: 'games',         label: '游戏管理' },
   { id: 'users',         label: '玩家管理' },
   { id: 'avatars',       label: '头像管理' },
+  { id: 'user-groups',   label: '用户组' },
   { id: 'ai-config',     label: 'AI 配置' },
   { id: 'knowledge',     label: '知识库' },
   { id: 'ai-confirmed',  label: 'AI 确认知识库' },
@@ -190,6 +195,7 @@ export default function Admin() {
           {tab === 'ai-decisions'  && <AIDecisionsPanel />}
           {tab === 'logs'          && <LogsPanel />}
           {tab === 'security'      && <SecurityPanel />}
+          {tab === 'user-groups'   && <UserGroupsPanel />}
         </div>
       </main>
     </div>
@@ -4055,6 +4061,7 @@ function ConceptCard({
   const yearDisplay = concept.year != null
     ? (concept.year < 0 ? `公元前 ${Math.abs(concept.year)} 年` : `公元 ${concept.year} 年`)
     : null;
+  const [showRag, setShowRag] = useState(false);
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col gap-3 hover:shadow-md transition-shadow">
@@ -4080,6 +4087,21 @@ function ConceptCard({
           {concept.tags.map(t => (
             <span key={t} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{t}</span>
           ))}
+        </div>
+      )}
+
+      {/* RAG content preview */}
+      {concept.rag_content && (
+        <div className="text-xs rounded-lg px-3 py-2 bg-indigo-50 border border-indigo-100">
+          <div className="flex items-center justify-between mb-1">
+            <span className="font-medium text-indigo-700">RAG 内容</span>
+            <button onClick={() => setShowRag(v => !v)} className="text-indigo-400 hover:text-indigo-600">
+              {showRag ? '收起' : '展开'}
+            </button>
+          </div>
+          <p className={`text-slate-600 whitespace-pre-wrap ${showRag ? '' : 'line-clamp-2'}`}>
+            {concept.rag_content}
+          </p>
         </div>
       )}
 
@@ -4114,8 +4136,11 @@ function EditConceptModal({
   const [year,        setYear]        = useState(concept.year != null ? String(concept.year) : '');
   const [description, setDescription] = useState(concept.description ?? '');
   const [tagsStr,     setTagsStr]     = useState(concept.tags.join('、'));
+  const [ragContent,  setRagContent]  = useState(concept.rag_content ?? '');
   const [saving,      setSaving]      = useState(false);
   const [err,         setErr]         = useState('');
+  const [ragSearching, setRagSearching] = useState(false);
+  const [ragSearchQuery, setRagSearchQuery] = useState('');
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -4130,11 +4155,25 @@ function EditConceptModal({
         year:        yearVal,
         description: description.trim() || null,
         tags:        tagsStr.split(/[、,，]/).map(t => t.trim()).filter(Boolean),
+        rag_content: ragContent.trim() || null,
       });
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : '保存失败');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleRAGSearch() {
+    setRagSearching(true); setErr('');
+    try {
+      const q = ragSearchQuery.trim() || title.trim();
+      const result = await adminConceptRAGSearch(concept.id, q);
+      if (result.context) setRagContent(result.context);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'RAG 搜索失败');
+    } finally {
+      setRagSearching(false);
     }
   }
 
@@ -4166,6 +4205,34 @@ function EditConceptModal({
           <FormField label="标签（逗号或顿号分隔）">
             <input className="input" placeholder="例：政治、战争、改革" value={tagsStr} onChange={e => setTagsStr(e.target.value)} />
           </FormField>
+
+          {/* RAG content */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-slate-700">RAG 内容（知识检索用）</label>
+              <div className="flex gap-1.5">
+                <input
+                  className="text-xs border border-slate-200 rounded-lg px-2 py-1 w-32 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                  placeholder="搜索词（默认名称）"
+                  value={ragSearchQuery}
+                  onChange={e => setRagSearchQuery(e.target.value)}
+                />
+                <button type="button" onClick={handleRAGSearch} disabled={ragSearching}
+                  className="text-xs px-2.5 py-1 bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-200 disabled:opacity-50 transition-colors font-medium">
+                  {ragSearching ? '搜索中...' : 'RAG 混合搜索'}
+                </button>
+              </div>
+            </div>
+            <textarea
+              className="input resize-none text-xs font-mono"
+              rows={5}
+              placeholder="可手动填写，或点击「RAG 混合搜索」自动从知识库检索填充"
+              value={ragContent}
+              onChange={e => setRagContent(e.target.value)}
+            />
+            <p className="text-xs text-slate-400">此内容会随概念卡存储，供 AI 验证时额外参考。</p>
+          </div>
+
           {err && <p className="text-sm text-red-500">{err}</p>}
           <div className="flex gap-3 justify-end pt-1">
             <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
@@ -4573,6 +4640,11 @@ function CurationPanel() {
                           {yearDisplay && <span className="text-xs text-slate-400">{yearDisplay}</span>}
                         </div>
                         {c.description && <p className="text-xs text-slate-500 mt-0.5 line-clamp-1">{c.description}</p>}
+                        {c.rag_content && (
+                          <p className="text-xs mt-0.5 line-clamp-1 text-indigo-500 italic">
+                            RAG: {c.rag_content.slice(0, 80)}{c.rag_content.length > 80 ? '…' : ''}
+                          </p>
+                        )}
                         <div className="flex flex-wrap gap-1 mt-1">
                           {c.tags.map(t => (
                             <span key={t} className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">{t}</span>
@@ -5063,6 +5135,303 @@ function LogsPanel() {
 }
 
 // ── Shared UI components ──────────────────────────────────────────────────────
+
+// ── Panel: User Groups ────────────────────────────────────────────────────────
+
+const SECTION_LABELS: Record<string, string> = {
+  'overview': '概览',
+  'games': '游戏管理',
+  'users': '玩家管理',
+  'avatars': '头像管理',
+  'user-groups': '用户组',
+  'ai-config': 'AI 配置',
+  'knowledge': '知识库',
+  'ai-confirmed': 'AI 确认知识库',
+  'curation': '知识策展',
+  'ai-decisions': 'AI 完整回复',
+  'logs': '服务器日志',
+  'security': '安全设置',
+};
+
+function UserGroupsPanel() {
+  const [groups, setGroups] = useState<UserGroup[]>([]);
+  const [sections, setSections] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [editTarget, setEditTarget] = useState<UserGroup | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const [memberInput, setMemberInput] = useState('');
+  const [memberAddMsg, setMemberAddMsg] = useState<Record<string, string>>({});
+
+  function showMsg(text: string, isErr = false) {
+    setMsg(isErr ? `❌ ${text}` : `✅ ${text}`);
+    setTimeout(() => setMsg(''), 3000);
+  }
+
+  const reload = useCallback(() => {
+    setLoading(true);
+    adminListGroups()
+      .then(d => { setGroups(d.groups); setSections(d.sections); })
+      .catch(() => showMsg('加载失败', true))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`确认删除用户组「${name}」？`)) return;
+    try { await adminDeleteGroup(id); reload(); showMsg('已删除'); }
+    catch (e: unknown) { showMsg(e instanceof Error ? e.message : '删除失败', true); }
+  }
+
+  async function handleAddMember(groupId: string) {
+    const val = memberInput.trim();
+    if (!val) return;
+    try {
+      await adminAddGroupMember(groupId, val);
+      setMemberInput('');
+      setMemberAddMsg(prev => ({ ...prev, [groupId]: '✅ 已添加' }));
+      setTimeout(() => setMemberAddMsg(prev => ({ ...prev, [groupId]: '' })), 2000);
+      // Refresh expanded group
+      const updated = await adminGetGroup(groupId);
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, members: updated.members, member_count: updated.members?.length ?? 0 } : g));
+    } catch (e: unknown) {
+      setMemberAddMsg(prev => ({ ...prev, [groupId]: `❌ ${e instanceof Error ? e.message : '添加失败'}` }));
+      setTimeout(() => setMemberAddMsg(prev => ({ ...prev, [groupId]: '' })), 3000);
+    }
+  }
+
+  async function handleRemoveMember(groupId: string, userId: string) {
+    try {
+      await adminRemoveGroupMember(groupId, userId);
+      const updated = await adminGetGroup(groupId);
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, members: updated.members, member_count: updated.members?.length ?? 0 } : g));
+    } catch (e: unknown) {
+      showMsg(e instanceof Error ? e.message : '移除失败', true);
+    }
+  }
+
+  async function handleExpand(groupId: string) {
+    if (expandedGroup === groupId) { setExpandedGroup(null); return; }
+    try {
+      const g = await adminGetGroup(groupId);
+      setGroups(prev => prev.map(gr => gr.id === groupId ? { ...gr, members: g.members } : gr));
+      setExpandedGroup(groupId);
+    } catch { setExpandedGroup(groupId); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="用户组"
+        subtitle="创建用户组，配置各后台板块的访问权限，并管理成员"
+        action={
+          <button onClick={() => setShowCreate(true)} className="btn-primary text-sm px-4 py-2">
+            + 新建用户组
+          </button>
+        }
+      />
+
+      {msg && (
+        <div className={`text-sm px-4 py-2.5 rounded-xl border animate-slide-down ${
+          msg.startsWith('❌') ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'
+        }`}>{msg}</div>
+      )}
+
+      {loading && <p className="text-sm text-slate-400">加载中...</p>}
+
+      {!loading && groups.length === 0 ? (
+        <EmptyState icon="👥" title="尚无用户组" desc="点击「新建用户组」创建第一个用户组" />
+      ) : (
+        <div className="space-y-3">
+          {groups.map(g => {
+            const isExpanded = expandedGroup === g.id;
+            return (
+              <div key={g.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                {/* Group header */}
+                <div className="flex items-center gap-3 px-5 py-4">
+                  <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: g.color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-slate-800">{g.name}</span>
+                      <span className="text-xs text-slate-400">{g.member_count ?? 0} 人</span>
+                    </div>
+                    {g.description && <p className="text-xs text-slate-500 mt-0.5">{g.description}</p>}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {g.permissions.length === 0
+                        ? <span className="text-xs text-slate-400 italic">无权限</span>
+                        : g.permissions.map(s => (
+                          <span key={s} className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded">
+                            {SECTION_LABELS[s] ?? s}
+                          </span>
+                        ))
+                      }
+                    </div>
+                  </div>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => handleExpand(g.id)}
+                      className="text-xs px-2 py-1 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+                      {isExpanded ? '收起' : '成员'}
+                    </button>
+                    <button onClick={() => setEditTarget(g)}
+                      className="text-xs px-2 py-1 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors">
+                      编辑
+                    </button>
+                    <button onClick={() => handleDelete(g.id, g.name)}
+                      className="text-xs px-2 py-1 text-red-400 hover:bg-red-50 rounded-lg transition-colors">
+                      删除
+                    </button>
+                  </div>
+                </div>
+
+                {/* Members pane */}
+                {isExpanded && (
+                  <div className="border-t border-slate-100 px-5 py-4 space-y-3 bg-slate-50">
+                    <div className="flex gap-2 items-center">
+                      <input
+                        className="text-xs border border-slate-200 rounded-lg px-3 py-1.5 flex-1 max-w-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                        placeholder="用户 ID / uid / 用户名"
+                        value={memberInput}
+                        onChange={e => setMemberInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleAddMember(g.id)}
+                      />
+                      <button onClick={() => handleAddMember(g.id)}
+                        className="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                        添加成员
+                      </button>
+                      {memberAddMsg[g.id] && (
+                        <span className={`text-xs ${memberAddMsg[g.id].startsWith('❌') ? 'text-red-500' : 'text-green-600'}`}>
+                          {memberAddMsg[g.id]}
+                        </span>
+                      )}
+                    </div>
+                    {(g.members ?? []).length === 0 ? (
+                      <p className="text-xs text-slate-400">该组暂无成员</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {(g.members ?? []).map((m: UserGroupMember) => (
+                          <div key={m.id} className="flex items-center gap-2 text-xs">
+                            <span className="font-mono text-slate-500">{m.uid}</span>
+                            <span className="font-medium text-slate-700">{m.username}</span>
+                            {m.nickname && <span className="text-slate-400">({m.nickname})</span>}
+                            <span className={`px-1.5 py-0.5 rounded text-xs ${m.role === 'admin' || m.role === 'super_admin' ? 'bg-amber-50 text-amber-600' : 'bg-slate-100 text-slate-500'}`}>
+                              {m.role}
+                            </span>
+                            <button onClick={() => handleRemoveMember(g.id, m.id)}
+                              className="ml-auto text-red-400 hover:text-red-600 transition-colors">
+                              移除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create / Edit modal */}
+      {(showCreate || editTarget) && (
+        <GroupEditModal
+          group={editTarget}
+          sections={sections}
+          onClose={() => { setShowCreate(false); setEditTarget(null); }}
+          onSaved={() => { setShowCreate(false); setEditTarget(null); reload(); showMsg(editTarget ? '已保存' : '用户组已创建'); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function GroupEditModal({
+  group, sections, onClose, onSaved,
+}: {
+  group: UserGroup | null;
+  sections: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name,        setName]        = useState(group?.name ?? '');
+  const [description, setDescription] = useState(group?.description ?? '');
+  const [color,       setColor]       = useState(group?.color ?? '#6366f1');
+  const [perms,       setPerms]       = useState<Set<string>>(new Set(group?.permissions ?? []));
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState('');
+
+  function togglePerm(section: string) {
+    setPerms(prev => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section); else next.add(section);
+      return next;
+    });
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true); setErr('');
+    try {
+      if (group) {
+        await adminUpdateGroup(group.id, { name: name.trim(), description: description.trim(), color, permissions: Array.from(perms) });
+      } else {
+        await adminCreateGroup({ name: name.trim(), description: description.trim(), color, permissions: Array.from(perms) });
+      }
+      onSaved();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : '保存失败');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-800">{group ? '编辑用户组' : '新建用户组'}</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+        </div>
+        <form onSubmit={submit} className="p-6 space-y-4">
+          <FormField label="组名称 *">
+            <input className="input" value={name} onChange={e => setName(e.target.value)} required placeholder="例：编辑组、观察员" />
+          </FormField>
+          <FormField label="描述">
+            <input className="input" value={description} onChange={e => setDescription(e.target.value)} placeholder="选填" />
+          </FormField>
+          <FormField label="颜色">
+            <div className="flex items-center gap-2">
+              <input type="color" className="w-10 h-8 rounded border border-slate-200 cursor-pointer" value={color} onChange={e => setColor(e.target.value)} />
+              <span className="text-sm text-slate-500 font-mono">{color}</span>
+            </div>
+          </FormField>
+          <div>
+            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+              后台板块权限
+            </label>
+            <p className="text-xs text-slate-400 mb-2">勾选该用户组成员可访问的后台板块（管理员密钥登录不受此限制）</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              {sections.map(s => (
+                <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition-colors text-sm
+                  ${perms.has(s) ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
+                  <input type="checkbox" checked={perms.has(s)} onChange={() => togglePerm(s)} className="accent-indigo-600" />
+                  {SECTION_LABELS[s] ?? s}
+                </label>
+              ))}
+            </div>
+          </div>
+          {err && <p className="text-sm text-red-500">{err}</p>}
+          <div className="flex gap-3 justify-end pt-1">
+            <button type="button" className="btn-secondary" onClick={onClose}>取消</button>
+            <button type="submit" className="btn-primary" disabled={saving || !name.trim()}>{saving ? '保存中...' : '保存'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
   return (

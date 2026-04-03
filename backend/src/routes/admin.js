@@ -21,6 +21,7 @@ const {
   testEmbeddingConnection,
   testRerankConnection,
   getActiveRagMode,
+  searchContextWithMode,
   RAG_MODES,
 } = require('../services/knowledgeService');
 const auditSvc = require('../services/auditService');
@@ -70,6 +71,25 @@ function buildAvatarUpload() {
       cb(new Error(`只支持 ${cfg.allowedFormats.join(' / ').toUpperCase()} 格式`));
     },
   });
+}
+
+// ── Resolve user by id / uid / username ─────────────────────────────────────
+// Accepts: u_xxx (user id), numeric uid, or username string
+function resolveUser(idParam) {
+  if (!idParam) return null;
+  const s = String(idParam).trim();
+  // Try direct id lookup (u_xxx format)
+  const byId = db.getUserById.get(s);
+  if (byId) return byId;
+  // Try numeric uid
+  const uid = parseInt(s, 10);
+  if (!isNaN(uid) && String(uid) === s) {
+    const byUid = db.db.prepare(`SELECT * FROM users WHERE uid = ?`).get(uid);
+    if (byUid) return byUid;
+  }
+  // Try username (case-insensitive)
+  const byUsername = db.db.prepare(`SELECT * FROM users WHERE username = ? COLLATE NOCASE`).get(s);
+  return byUsername || null;
 }
 
 // ── Auth middleware (key OR admin-role user token) ────────────────────────────
@@ -1021,6 +1041,20 @@ router.post('/curation/concepts/merge', (req, res) => {
   }
 });
 
+// Manually trigger hybrid RAG search for a concept and return context snippets
+router.post('/curation/concepts/:id/rag-search', async (req, res) => {
+  const doc = db.getDoc.get(req.params.id);
+  if (!doc) return res.status(404).json({ error: '概念不存在' });
+  const query = req.body?.query || doc.title;
+  const topN  = Math.min(parseInt(req.body?.topN  ?? '6', 10), 20);
+  try {
+    const result = await searchContextWithMode(query, topN);
+    res.json({ ok: true, query, context: result.context ?? result, trace: result.trace ?? null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Message Archive ───────────────────────────────────────────────────────────
 
 router.get('/games/:id/messages', (req, res) => {
@@ -1081,7 +1115,8 @@ router.get('/users', (req, res) => {
     list = users.filter(u =>
       (u.username || '').toLowerCase().includes(q) ||
       (u.nickname || '').toLowerCase().includes(q) ||
-      String(u.uid || '').includes(q)
+      String(u.uid || '').includes(q) ||
+      (u.id || '').toLowerCase().includes(q)
     );
   }
   // Enrich with game/concept counts
@@ -1102,7 +1137,7 @@ router.get('/users/admins', (_req, res) => {
 
 // Get single user detail
 router.get('/users/:id', (req, res) => {
-  const user = db.getUserById.get(req.params.id);
+  const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const { password_hash: _, ...safe } = user;
   const gameCount = db.db.prepare(`SELECT COUNT(DISTINCT game_id) as c FROM players WHERE id = ?`).get(req.params.id)?.c || 0;
@@ -1113,18 +1148,20 @@ router.get('/users/:id', (req, res) => {
 
 // Update user (username, nickname, uid)
 router.put('/users/:id', async (req, res) => {
+  const user = resolveUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
   const { username, nickname, uid } = req.body || {};
-  const result = await authSvc.adminUpdateUser(req.params.id, { username, nickname, uid });
+  const result = await authSvc.adminUpdateUser(user.id, { username, nickname, uid });
   if (result.error) return res.status(400).json({ error: result.error });
-  logAdminAction('update_user', 'user', req.params.id, { username, nickname, uid });
+  logAdminAction('update_user', 'user', user.id, { username, nickname, uid });
   res.json(result);
 });
 
 // Get games a user participated in
 router.get('/users/:id/games', (req, res) => {
-  const userId = req.params.id;
-  const user = db.getUserById.get(userId);
+  const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
+  const userId = user.id;
   const games = db.db.prepare(`
     SELECT g.id, g.topic, g.mode, g.status, g.created_at,
            (SELECT COUNT(*) FROM concepts c WHERE c.game_id = g.id AND c.player_id = ?) as user_concepts,
@@ -1138,9 +1175,9 @@ router.get('/users/:id/games', (req, res) => {
 
 // Get concepts submitted by a user (with optional status filter)
 router.get('/users/:id/concepts', (req, res) => {
-  const userId = req.params.id;
-  const user = db.getUserById.get(userId);
+  const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
+  const userId = user.id;
   const { status } = req.query;
   let query = `SELECT c.*, g.topic as game_topic FROM concepts c LEFT JOIN games g ON g.id = c.game_id WHERE c.player_id = ?`;
   if (status === 'accepted') query += ` AND c.validated=1 AND c.rejected=0`;
@@ -1152,11 +1189,12 @@ router.get('/users/:id/concepts', (req, res) => {
 });
 
 router.post('/users/:id/reset-password', async (req, res) => {
+  const user = resolveUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
   const { newPassword } = req.body || {};
-  // Default reset target is '000000' if not provided
-  const result = await authSvc.adminResetPassword(req.params.id, newPassword || '000000');
+  const result = await authSvc.adminResetPassword(user.id, newPassword || '000000');
   if (result.error) return res.status(400).json({ error: result.error });
-  logAdminAction('reset_user_password', 'user', req.params.id, {});
+  logAdminAction('reset_user_password', 'user', user.id, {});
   res.json(result);
 });
 
@@ -1201,31 +1239,37 @@ router.put('/settings/:key', (req, res) => {
 });
 
 router.delete('/users/:id', (req, res) => {
-  const result = authSvc.adminDeleteUser(req.params.id);
+  const user = resolveUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  const result = authSvc.adminDeleteUser(user.id);
   if (result.error) return res.status(404).json({ error: result.error });
-  logAdminAction('delete_user', 'user', req.params.id, {});
+  logAdminAction('delete_user', 'user', user.id, {});
   res.json(result);
 });
 
 // ── User role management ──────────────────────────────────────────────────────
 
 router.put('/users/:id/role', (req, res) => {
+  const user = resolveUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
   const { role } = req.body;
   if (!role) return res.status(400).json({ error: '缺少 role 参数' });
-  const result = authSvc.setUserRole(req.params.id, role);
+  const result = authSvc.setUserRole(user.id, role);
   if (result.error) return res.status(400).json({ error: result.error });
-  logAdminAction('set_user_role', 'user', req.params.id, { role });
+  logAdminAction('set_user_role', 'user', user.id, { role });
   res.json(result);
 });
 
 // ── User ban/unban ───────────────────────────────────────────────────────────
 
 router.put('/users/:id/status', (req, res) => {
+  const user = resolveUser(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
   const { status, reason } = req.body;
   if (!status) return res.status(400).json({ error: '缺少 status 参数' });
-  const result = authSvc.setUserStatus(req.params.id, status, reason);
+  const result = authSvc.setUserStatus(user.id, status, reason);
   if (result.error) return res.status(400).json({ error: result.error });
-  logAdminAction('set_user_status', 'user', req.params.id, { status, reason });
+  logAdminAction('set_user_status', 'user', user.id, { status, reason });
   res.json(result);
 });
 
@@ -1342,7 +1386,7 @@ router.post('/users/:id/avatar', (req, res, next) => {
   if (!AVATARS_DIR) return res.status(503).json({ error: '头像存储不可用' });
   if (!req.file) return res.status(400).json({ error: '请上传图片文件' });
 
-  const user = db.getUserById.get(req.params.id);
+  const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
   const mimeExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' };
@@ -1368,7 +1412,7 @@ router.post('/users/:id/avatar', (req, res, next) => {
 router.delete('/users/:id/avatar', (req, res) => {
   if (!AVATARS_DIR) return res.status(503).json({ error: '头像存储不可用' });
 
-  const user = db.getUserById.get(req.params.id);
+  const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
 
   ['jpg', 'jpeg', 'png', 'gif', 'webp'].forEach(e => {
@@ -1404,6 +1448,76 @@ router.post('/users', async (req, res) => {
   const user = db.getUserById.get(userId);
   const { password_hash: _, ...safe } = user;
   res.json({ ok: true, user: safe });
+});
+
+// ── User Groups ───────────────────────────────────────────────────────────────
+
+const groupSvc = require('../services/userGroupService');
+
+router.get('/groups', (_req, res) => {
+  res.json({ groups: groupSvc.listGroups(), sections: groupSvc.ALL_SECTIONS });
+});
+
+router.get('/groups/:id', (req, res) => {
+  const g = groupSvc.getGroup(req.params.id);
+  if (!g) return res.status(404).json({ error: '用户组不存在' });
+  res.json({ group: g });
+});
+
+router.post('/groups', (req, res) => {
+  try {
+    const { name, description, color, permissions } = req.body || {};
+    const g = groupSvc.createGroup(name, description, color, permissions);
+    logAdminAction('group_create', 'group', g.id, { name });
+    res.json({ group: g });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.put('/groups/:id', (req, res) => {
+  try {
+    const { name, description, color, permissions } = req.body || {};
+    const g = groupSvc.updateGroup(req.params.id, { name, description, color, permissions });
+    logAdminAction('group_update', 'group', req.params.id, { name });
+    res.json({ group: g });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/groups/:id', (req, res) => {
+  try {
+    groupSvc.deleteGroup(req.params.id);
+    logAdminAction('group_delete', 'group', req.params.id, {});
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post('/groups/:id/members', (req, res) => {
+  try {
+    const user = resolveUser(req.body?.userId);
+    if (!user) return res.status(404).json({ error: '用户不存在' });
+    groupSvc.addMember(req.params.id, user.id);
+    logAdminAction('group_add_member', 'group', req.params.id, { userId: user.id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/groups/:id/members/:userId', (req, res) => {
+  try {
+    const user = resolveUser(req.params.userId);
+    if (!user) return res.status(404).json({ error: '用户不存在' });
+    groupSvc.removeMember(req.params.id, user.id);
+    logAdminAction('group_remove_member', 'group', req.params.id, { userId: user.id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

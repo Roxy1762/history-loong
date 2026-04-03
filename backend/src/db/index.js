@@ -316,6 +316,37 @@ db.exec(`
 `);
 try { db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_uid ON users(uid)`); } catch { /* already exists */ }
 
+// v2.4.0: rag_content on knowledge_docs (manually-curated RAG context snippet)
+try {
+  db.exec(`ALTER TABLE knowledge_docs ADD COLUMN rag_content TEXT`);
+} catch { /* already exists */ }
+
+// v2.4.0: user groups
+db.exec(`
+  CREATE TABLE IF NOT EXISTS user_groups (
+    id         TEXT PRIMARY KEY,
+    name       TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    color      TEXT NOT NULL DEFAULT '#6366f1',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS user_group_members (
+    group_id TEXT NOT NULL,
+    user_id  TEXT NOT NULL,
+    added_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (group_id, user_id),
+    FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS group_permissions (
+    group_id TEXT NOT NULL,
+    section  TEXT NOT NULL,
+    PRIMARY KEY (group_id, section),
+    FOREIGN KEY (group_id) REFERENCES user_groups(id) ON DELETE CASCADE
+  );
+`);
+
 // v2.1.1: system settings key-value store
 db.exec(`
   CREATE TABLE IF NOT EXISTS system_settings (
@@ -547,4 +578,19 @@ module.exports = {
   getSetting:   stmt(`SELECT value FROM system_settings WHERE key = ?`),
   setSetting:   stmt(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))`),
   listSettings: stmt(`SELECT key, value, updated_at FROM system_settings ORDER BY key ASC`),
+
+  // User groups
+  listUserGroups:     stmt(`SELECT * FROM user_groups ORDER BY created_at DESC`),
+  getUserGroup:       stmt(`SELECT * FROM user_groups WHERE id = ?`),
+  insertUserGroup:    stmt(`INSERT INTO user_groups (id, name, description, color) VALUES (?, ?, ?, ?)`),
+  updateUserGroup:    stmt(`UPDATE user_groups SET name=?, description=?, color=?, updated_at=datetime('now') WHERE id=?`),
+  deleteUserGroup:    stmt(`DELETE FROM user_groups WHERE id=?`),
+  getGroupMembers:    stmt(`SELECT u.id, u.uid, u.username, u.nickname, u.role, u.status FROM users u JOIN user_group_members m ON m.user_id=u.id WHERE m.group_id=? ORDER BY u.uid ASC`),
+  addGroupMember:     stmt(`INSERT OR IGNORE INTO user_group_members (group_id, user_id) VALUES (?, ?)`),
+  removeGroupMember:  stmt(`DELETE FROM user_group_members WHERE group_id=? AND user_id=?`),
+  getUserGroups:      stmt(`SELECT g.* FROM user_groups g JOIN user_group_members m ON m.group_id=g.id WHERE m.user_id=? ORDER BY g.created_at DESC`),
+  listGroupPerms:     stmt(`SELECT section FROM group_permissions WHERE group_id=?`),
+  setGroupPerm:       stmt(`INSERT OR IGNORE INTO group_permissions (group_id, section) VALUES (?, ?)`),
+  deleteGroupPerm:    stmt(`DELETE FROM group_permissions WHERE group_id=? AND section=?`),
+  replaceGroupPerms:  stmt(`DELETE FROM group_permissions WHERE group_id=?`),
 };
