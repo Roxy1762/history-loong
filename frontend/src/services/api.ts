@@ -725,3 +725,55 @@ export async function adminGetAdminUsers() {
   const { data } = await api.get<{ admins: Array<{ id: string; username: string; nickname: string | null; role: string; avatar_emoji: string; avatar_color: string }> }>('/admin/users/admins', { headers: adminHeaders() });
   return data.admins;
 }
+
+// ── Admin: Avatar Management ──────────────────────────────────────────────────
+
+export interface AvatarFileInfo {
+  filename: string;
+  url: string;
+  size: number;
+  modified_at: string;
+  user_id: string;
+  username: string | null;
+  nickname: string | null;
+}
+
+export interface AvatarConfig {
+  maxSizeMb: number;
+  allowedFormats: string[];
+  enabled: boolean;
+}
+
+export async function adminListAvatars() {
+  const { data } = await api.get<{ avatars: AvatarFileInfo[]; dir: string; count: number }>('/admin/avatars', { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminGetAvatarConfig() {
+  const { data } = await api.get<AvatarConfig>('/admin/avatar-config', { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminSetAvatarConfig(config: Partial<AvatarConfig>) {
+  const { data } = await api.put<{ ok: boolean; config: AvatarConfig }>('/admin/avatar-config', config, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminUploadUserAvatar(userId: string, file: File) {
+  const form = new FormData();
+  form.append('avatar', file);
+  const { data } = await api.post<{ ok: boolean; user: AdminUserDetail }>(`/admin/users/${userId}/avatar`, form, {
+    headers: { ...adminHeaders(), 'Content-Type': 'multipart/form-data' },
+  });
+  return data;
+}
+
+export async function adminDeleteUserAvatar(userId: string) {
+  const { data } = await api.delete<{ ok: boolean; user: AdminUserDetail }>(`/admin/users/${userId}/avatar`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminCreateUser(payload: { username: string; password: string; nickname?: string; role?: string }) {
+  const { data } = await api.post<{ ok: boolean; user: AdminUserDetail }>('/admin/users', payload, { headers: adminHeaders() });
+  return data;
+}

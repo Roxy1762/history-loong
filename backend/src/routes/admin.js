@@ -5,9 +5,12 @@
 
 const express = require('express');
 const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
 const ai = require('../services/aiService');
+const { resolveAvatarsDir } = require('../utils/avatarStorage');
 const {
   ingestDocument,
   deleteDocument,
@@ -41,6 +44,33 @@ const upload = multer({
     cb(null, allowed.includes(ext));
   },
 });
+
+const AVATARS_DIR = resolveAvatarsDir(path.join(__dirname, '../../../data/avatars'));
+
+function getAvatarConfig() {
+  const maxSizeMb = parseFloat(db.getSetting.get('avatar_max_size_mb')?.value ?? '2');
+  const formatsStr = db.getSetting.get('avatar_allowed_formats')?.value ?? 'jpg,png,gif,webp';
+  const enabled = (db.getSetting.get('avatar_upload_enabled')?.value ?? '1') === '1';
+  return {
+    maxSizeMb: isFinite(maxSizeMb) && maxSizeMb > 0 ? maxSizeMb : 2,
+    allowedFormats: formatsStr.split(',').map(s => s.trim()).filter(Boolean),
+    enabled,
+  };
+}
+
+function buildAvatarUpload() {
+  const cfg = getAvatarConfig();
+  return multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: cfg.maxSizeMb * 1024 * 1024 },
+    fileFilter(_req, file, cb) {
+      const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+      const allowed = cfg.allowedFormats.map(f => mimeMap[f] || `image/${f}`);
+      if (allowed.includes(file.mimetype)) return cb(null, true);
+      cb(new Error(`只支持 ${cfg.allowedFormats.join(' / ').toUpperCase()} 格式`));
+    },
+  });
+}
 
 // ── Auth middleware (key OR admin-role user token) ────────────────────────────
 
@@ -1236,6 +1266,144 @@ router.post('/security/jwt-secret', (req, res) => {
   db.setSetting.run('jwt_secret', newSecret.trim());
   logAdminAction('update_jwt_secret', 'system', 'jwt_secret', { masked: maskKey(newSecret.trim()) });
   res.json({ ok: true, note: 'JWT 密钥已更新，现有登录 Token 将在下次验证时失效', masked: maskKey(newSecret.trim()) });
+});
+
+// ── Avatar Management (Admin) ─────────────────────────────────────────────────
+
+// List all avatar files in the avatars directory
+router.get('/avatars', (_req, res) => {
+  if (!AVATARS_DIR) return res.status(503).json({ error: '头像存储不可用' });
+
+  let files = [];
+  try {
+    const entries = fs.readdirSync(AVATARS_DIR);
+    files = entries
+      .filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f))
+      .map(f => {
+        const filePath = path.join(AVATARS_DIR, f);
+        const stat = fs.statSync(filePath);
+        const userId = f.replace(/\.[^.]+$/, '');
+        const user = db.getUserById.get(userId);
+        return {
+          filename: f,
+          url: `/avatars/${f}`,
+          size: stat.size,
+          modified_at: stat.mtime.toISOString(),
+          user_id: userId,
+          username: user?.username || null,
+          nickname: user?.nickname || null,
+        };
+      })
+      .sort((a, b) => b.modified_at.localeCompare(a.modified_at));
+  } catch (err) {
+    return res.status(500).json({ error: '读取头像目录失败: ' + err.message });
+  }
+
+  res.json({ avatars: files, dir: AVATARS_DIR, count: files.length });
+});
+
+// Get avatar upload config
+router.get('/avatar-config', (_req, res) => {
+  res.json(getAvatarConfig());
+});
+
+// Update avatar upload config
+router.put('/avatar-config', (req, res) => {
+  const { maxSizeMb, allowedFormats, enabled } = req.body || {};
+
+  if (maxSizeMb != null) {
+    const n = parseFloat(maxSizeMb);
+    if (!isFinite(n) || n <= 0 || n > 50) return res.status(400).json({ error: '文件大小限制须为 0.1–50 MB' });
+    db.setSetting.run('avatar_max_size_mb', String(n));
+  }
+  if (allowedFormats != null) {
+    const valid = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+    const formats = (Array.isArray(allowedFormats) ? allowedFormats : String(allowedFormats).split(',')).map(s => s.trim().toLowerCase()).filter(f => valid.includes(f));
+    if (formats.length === 0) return res.status(400).json({ error: '至少选择一种格式' });
+    db.setSetting.run('avatar_allowed_formats', formats.join(','));
+  }
+  if (enabled != null) {
+    db.setSetting.run('avatar_upload_enabled', enabled ? '1' : '0');
+  }
+
+  logAdminAction('update_avatar_config', 'system', 'avatar_config', { maxSizeMb, allowedFormats, enabled });
+  res.json({ ok: true, config: getAvatarConfig() });
+});
+
+// Admin upload/replace avatar for a specific user
+router.post('/users/:id/avatar', (req, res, next) => {
+  const cfg = getAvatarConfig();
+  if (!cfg.enabled) return res.status(403).json({ error: '头像上传功能已关闭' });
+  buildAvatarUpload().single('avatar')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || '上传失败' });
+    next();
+  });
+}, (req, res) => {
+  if (!AVATARS_DIR) return res.status(503).json({ error: '头像存储不可用' });
+  if (!req.file) return res.status(400).json({ error: '请上传图片文件' });
+
+  const user = db.getUserById.get(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+
+  const mimeExt = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' };
+  const ext = mimeExt[req.file.mimetype] || 'jpg';
+  const filename = `${user.id}.${ext}`;
+
+  // Remove existing avatar files for this user
+  ['jpg', 'jpeg', 'png', 'gif', 'webp'].forEach(e => {
+    try { fs.unlinkSync(path.join(AVATARS_DIR, `${user.id}.${e}`)); } catch { /* ignore */ }
+  });
+
+  fs.writeFileSync(path.join(AVATARS_DIR, filename), req.file.buffer);
+  const avatarUrl = `/avatars/${filename}`;
+  db.updateUserAvatarUrl.run(avatarUrl, user.id);
+
+  logAdminAction('admin_upload_avatar', 'user', user.id, { filename });
+  const updated = db.getUserById.get(user.id);
+  const { password_hash: _, ...safe } = updated;
+  res.json({ ok: true, user: safe });
+});
+
+// Admin delete avatar for a specific user
+router.delete('/users/:id/avatar', (req, res) => {
+  if (!AVATARS_DIR) return res.status(503).json({ error: '头像存储不可用' });
+
+  const user = db.getUserById.get(req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+
+  ['jpg', 'jpeg', 'png', 'gif', 'webp'].forEach(e => {
+    try { fs.unlinkSync(path.join(AVATARS_DIR, `${user.id}.${e}`)); } catch { /* ignore */ }
+  });
+
+  db.db.prepare(`UPDATE users SET avatar_url=NULL, avatar_type='emoji', updated_at=datetime('now') WHERE id=?`).run(user.id);
+  logAdminAction('admin_delete_avatar', 'user', user.id, {});
+
+  const updated = db.getUserById.get(user.id);
+  const { password_hash: _, ...safe } = updated;
+  res.json({ ok: true, user: safe });
+});
+
+// Admin create user account
+router.post('/users', async (req, res) => {
+  const { username, password, nickname, role } = req.body || {};
+  const authSvc = require('../services/authService');
+  const result = await authSvc.register(username, password);
+  if (result.error) return res.status(400).json({ error: result.error });
+
+  const userId = result.user.id;
+
+  // Apply optional nickname and role if provided
+  if (nickname) {
+    db.db.prepare(`UPDATE users SET nickname=?, updated_at=datetime('now') WHERE id=?`).run(String(nickname).trim(), userId);
+  }
+  if (role && ['user', 'admin', 'super_admin'].includes(role)) {
+    db.db.prepare(`UPDATE users SET role=?, updated_at=datetime('now') WHERE id=?`).run(role, userId);
+  }
+
+  logAdminAction('admin_create_user', 'user', userId, { username, role: role || 'user' });
+  const user = db.getUserById.get(userId);
+  const { password_hash: _, ...safe } = user;
+  res.json({ ok: true, user: safe });
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
