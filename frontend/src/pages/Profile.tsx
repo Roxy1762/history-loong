@@ -136,7 +136,12 @@ export default function Profile() {
     } else if (avatarType !== 'image') {
       // If switching away from image, delete the stored avatar
       if (user?.avatar_type === 'image' && user.avatar_url && token) {
-        await authDeleteAvatar(token);
+        const delRes = await authDeleteAvatar(token);
+        if ('error' in delRes) {
+          setProfileError(delRes.error);
+          setProfileLoading(false);
+          return;
+        }
       }
     }
 
@@ -168,6 +173,15 @@ export default function Profile() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setProfileError('文件大小不能超过 2MB');
+      return;
+    }
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+      setProfileError('仅支持 JPG/PNG/GIF/WebP 格式');
+      return;
+    }
+    setProfileError('');
     setSelectedFile(file);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);

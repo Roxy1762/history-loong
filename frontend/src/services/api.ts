@@ -535,6 +535,9 @@ export interface UserAccount {
 }
 
 export interface AdminUserDetail extends UserAccount {
+  role: string;
+  status: string;
+  ban_reason: string | null;
   gameCount: number;
   conceptCount: number;
   acceptedCount: number;
@@ -698,9 +701,24 @@ export async function adminSetJwtSecret(newSecret: string) {
 
 // ── User role management ──────────────────────────────────────────────────────
 
+export async function adminSetUserStatus(userId: string, status: string, reason?: string) {
+  try {
+    const { data } = await api.put<{ ok: boolean; status: string; reason: string | null }>(`/admin/users/${userId}/status`, { status, reason }, { headers: adminHeaders() });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '操作失败';
+    return { error: msg } as { error: string };
+  }
+}
+
 export async function adminSetUserRole(userId: string, role: string) {
-  const { data } = await api.put<{ ok: boolean; role: string }>(`/admin/users/${userId}/role`, { role }, { headers: adminHeaders() });
-  return data;
+  try {
+    const { data } = await api.put<{ ok: boolean; role: string }>(`/admin/users/${userId}/role`, { role }, { headers: adminHeaders() });
+    return data;
+  } catch (e: unknown) {
+    const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error || '设置角色失败';
+    return { error: msg } as { error: string };
+  }
 }
 
 export async function adminGetAdminUsers() {

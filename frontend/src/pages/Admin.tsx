@@ -27,7 +27,7 @@ import {
   adminListUsers, adminGetUser, adminUpdateUser, adminResetUserPassword, adminDeleteUser,
   adminGetUserGames, adminGetUserConcepts, adminClearUsernameCooldown,
   adminGetSettings, adminSetSetting,
-  adminGetSecurity, adminSetAdminKey, adminSetJwtSecret, adminSetUserRole,
+  adminGetSecurity, adminSetAdminKey, adminSetJwtSecret, adminSetUserRole, adminSetUserStatus,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail,
 } from '../services/api';
@@ -235,12 +235,12 @@ function SecurityPanel() {
   async function handleSetRole() {
     setMsg(''); setError('');
     if (!roleUserId.trim()) return setError('请填写用户 ID');
-    try {
-      await adminSetUserRole(roleUserId.trim(), roleValue);
+    const res = await adminSetUserRole(roleUserId.trim(), roleValue);
+    if ('error' in res) {
+      setError(res.error);
+    } else {
       setMsg(`用户 ${roleUserId.trim()} 角色已设为「${roleValue}」`);
       setRoleUserId('');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '设置失败');
     }
   }
 
@@ -500,12 +500,20 @@ function UsersPanel() {
                     {u.gameCount}/{u.acceptedCount}✓
                   </td>
                   <td className="px-3 py-2.5 text-center text-xs">
-                    {(u as { role?: string }).role && (u as { role?: string }).role !== 'user' ? (
-                      <span className="px-1.5 py-0.5 rounded-full font-medium"
-                        style={{ background: 'var(--brand-light)', color: 'var(--brand)', fontSize: '10px' }}>
-                        {(u as { role?: string }).role}
-                      </span>
-                    ) : null}
+                    <div className="flex flex-col items-center gap-0.5">
+                      {u.role && u.role !== 'user' ? (
+                        <span className="px-1.5 py-0.5 rounded-full font-medium"
+                          style={{ background: 'var(--brand-light)', color: 'var(--brand)', fontSize: '10px' }}>
+                          {u.role === 'super_admin' ? '超管' : '管理'}
+                        </span>
+                      ) : null}
+                      {u.status === 'banned' && (
+                        <span className="px-1.5 py-0.5 rounded-full font-medium"
+                          style={{ background: 'color-mix(in srgb, #dc2626 15%, transparent)', color: '#dc2626', fontSize: '10px' }}>
+                          已封禁
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex gap-1 justify-end">
@@ -569,9 +577,11 @@ function UserDetailPanel({
   const [editUsername, setEditUsername] = useState(user.username);
   const [editNickname, setEditNickname] = useState(user.nickname || '');
   const [editUid, setEditUid] = useState(String(user.uid ?? ''));
+  const [editRole, setEditRole] = useState((user as { role?: string }).role || 'user');
   const [editErr, setEditErr] = useState('');
   const [editOk, setEditOk] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+  const [roleLoading, setRoleLoading] = useState(false);
 
   const [games, setGames] = useState<Array<{ id: string; topic: string; mode: string; status: string; created_at: string; user_concepts: number; user_accepted: number }>>([]);
   const [concepts, setConcepts] = useState<Array<{ id: string; name: string; raw_input: string; validated: number; rejected: number; created_at: string; game_topic?: string; dynasty?: string; year?: number | null }>>([]);
@@ -680,7 +690,8 @@ function UserDetailPanel({
                 {[
                   ['UID', user.uid ?? '—'],
                   ['用户名', `@${user.username}`],
-                  ['角色', (user as { role?: string }).role || 'user'],
+                  ['状态', user.status === 'banned' ? `已封禁${user.ban_reason ? `（${user.ban_reason}）` : ''}` : '正常'],
+                  ['角色', editRole === 'super_admin' ? '超级管理员' : editRole === 'admin' ? '管理员' : '普通用户'],
                   ['昵称', user.nickname || '（未设置）'],
                   ['注册时间', new Date(user.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })],
                   ['上次登录', user.last_login_at ? new Date(user.last_login_at).toLocaleString('zh-CN') : '—'],
@@ -697,9 +708,63 @@ function UserDetailPanel({
               </dl>
             )}
 
+            {/* Role management */}
+            {!editing && (
+              <div className="pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="text-xs font-medium flex-shrink-0" style={{ color: 'var(--text-muted)' }}>用户组</label>
+                  <select
+                    className="input text-sm flex-1"
+                    value={editRole}
+                    onChange={e => setEditRole(e.target.value)}
+                  >
+                    <option value="user">普通用户 (user)</option>
+                    <option value="admin">管理员 (admin)</option>
+                    <option value="super_admin">超级管理员 (super_admin)</option>
+                  </select>
+                  <button
+                    disabled={roleLoading || editRole === ((user as { role?: string }).role || 'user')}
+                    onClick={async () => {
+                      setRoleLoading(true); setEditErr('');
+                      const res = await adminSetUserRole(user.id, editRole);
+                      setRoleLoading(false);
+                      if ('error' in res) { setEditErr(res.error); return; }
+                      onSaved({ ...user, role: editRole } as AdminUserDetail);
+                      setEditOk(true);
+                      setTimeout(() => setEditOk(false), 2000);
+                    }}
+                    className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+                  >{roleLoading ? '设置中…' : '设置角色'}</button>
+                </div>
+              </div>
+            )}
+
             {/* Danger zone */}
             {!editing && (
               <div className="pt-3 border-t flex gap-2 flex-wrap" style={{ borderColor: 'var(--border)' }}>
+                {user.status === 'banned' ? (
+                  <button
+                    onClick={async () => {
+                      const res = await adminSetUserStatus(user.id, 'active');
+                      if ('error' in res) { setEditErr(res.error); return; }
+                      onSaved({ ...user, status: 'active', ban_reason: null } as AdminUserDetail);
+                    }}
+                    className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
+                    style={{ background: 'color-mix(in srgb, #16a34a 10%, transparent)', color: '#16a34a' }}
+                  >解除封禁</button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      const reason = prompt('封禁原因（可留空）：');
+                      if (reason === null) return; // cancelled
+                      const res = await adminSetUserStatus(user.id, 'banned', reason || undefined);
+                      if ('error' in res) { setEditErr(res.error); return; }
+                      onSaved({ ...user, status: 'banned', ban_reason: reason || null } as AdminUserDetail);
+                    }}
+                    className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
+                    style={{ background: 'color-mix(in srgb, #dc2626 10%, transparent)', color: '#dc2626' }}
+                  >封禁账号</button>
+                )}
                 <button
                   onClick={async () => { await adminResetUserPassword(user.id); alert('密码已重置为 000000'); }}
                   className="text-sm px-3 py-1.5 rounded-xl font-medium transition-colors"
@@ -814,6 +879,16 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
     { key: 'total_ai_configs',  label: 'AI 配置',      nav: 'ai-config' as Tab },
   ];
 
+  const USER_STAT_CARDS = [
+    { key: 'total_users',      label: '注册用户',  color: 'var(--brand)' },
+    { key: 'admin_count',      label: '管理员',    color: '#8b5cf6' },
+    { key: 'banned_count',     label: '已封禁',    color: '#dc2626' },
+    { key: 'active_7d',        label: '7 天活跃',  color: '#16a34a' },
+    { key: 'active_30d',       label: '30 天活跃', color: '#0891b2' },
+    { key: 'new_7d',           label: '7 天新增',  color: '#ea580c' },
+    { key: 'new_30d',          label: '30 天新增', color: '#ca8a04' },
+  ];
+
   return (
     <div className="space-y-6">
       <PageHeader title="概览" subtitle="系统运行状态一览" />
@@ -838,6 +913,24 @@ function OverviewPanel({ onNavigate }: { onNavigate?: (tab: Tab) => void }) {
             )}
           </div>
         ))}
+      </div>
+
+      {/* User Stats Section */}
+      <div className="rounded-2xl shadow-sm overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+          <h3 className="font-heading font-semibold" style={{ color: 'var(--text-primary)' }}>用户统计</h3>
+          {onNavigate && (
+            <button onClick={() => onNavigate('users')} className="text-xs font-medium" style={{ color: 'var(--brand)' }}>查看全部</button>
+          )}
+        </div>
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px" style={{ background: 'var(--border-subtle)' }}>
+          {USER_STAT_CARDS.map(c => (
+            <div key={c.key} className="px-4 py-4 text-center" style={{ background: 'var(--bg-card)' }}>
+              <div className="text-2xl font-heading font-bold" style={{ color: c.color }}>{stats[c.key] ?? 0}</div>
+              <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{c.label}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="rounded-2xl shadow-sm overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>

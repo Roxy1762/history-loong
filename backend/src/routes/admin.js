@@ -73,7 +73,22 @@ router.get('/stats', (_req, res) => {
   console.log('[Admin] GET /stats');
   const stats = db.stats.get();
   const recentGames = db.listGames.all().slice(0, 10);
-  res.json({ stats, recentGames });
+
+  // User stats
+  const userStats = db.db.prepare(`
+    SELECT
+      COUNT(*) as total_users,
+      SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) as admin_count,
+      SUM(CASE WHEN role = 'super_admin' THEN 1 ELSE 0 END) as super_admin_count,
+      SUM(CASE WHEN status = 'banned' THEN 1 ELSE 0 END) as banned_count,
+      SUM(CASE WHEN last_login_at > datetime('now', '-7 days') THEN 1 ELSE 0 END) as active_7d,
+      SUM(CASE WHEN last_login_at > datetime('now', '-30 days') THEN 1 ELSE 0 END) as active_30d,
+      SUM(CASE WHEN created_at > datetime('now', '-7 days') THEN 1 ELSE 0 END) as new_7d,
+      SUM(CASE WHEN created_at > datetime('now', '-30 days') THEN 1 ELSE 0 END) as new_30d
+    FROM users
+  `).get();
+
+  res.json({ stats: { ...stats, ...userStats }, recentGames });
 });
 
 // ── Game Management ──────────────────────────────────────────────────────────
@@ -1049,6 +1064,12 @@ router.get('/users', (req, res) => {
   res.json({ users: enriched });
 });
 
+// Get all admin users (must be before /users/:id to avoid route conflict)
+router.get('/users/admins', (_req, res) => {
+  const admins = db.listAdminUsers.all();
+  res.json({ admins });
+});
+
 // Get single user detail
 router.get('/users/:id', (req, res) => {
   const user = db.getUserById.get(req.params.id);
@@ -1167,9 +1188,15 @@ router.put('/users/:id/role', (req, res) => {
   res.json(result);
 });
 
-router.get('/users/admins', (_req, res) => {
-  const admins = db.listAdminUsers.all();
-  res.json({ admins });
+// ── User ban/unban ───────────────────────────────────────────────────────────
+
+router.put('/users/:id/status', (req, res) => {
+  const { status, reason } = req.body;
+  if (!status) return res.status(400).json({ error: '缺少 status 参数' });
+  const result = authSvc.setUserStatus(req.params.id, status, reason);
+  if (result.error) return res.status(400).json({ error: result.error });
+  logAdminAction('set_user_status', 'user', req.params.id, { status, reason });
+  res.json(result);
 });
 
 // ── Security configuration ────────────────────────────────────────────────────
