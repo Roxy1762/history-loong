@@ -20,12 +20,13 @@ function enrichWithContent(doc) {
   const parsed = chunk ? parseKBContent(chunk.content, doc.title) : null;
   return {
     ...doc,
-    categories: db.getConceptCategories.all(doc.id),
+    categories:  db.getConceptCategories.all(doc.id),
     dynasty:     parsed?.dynasty     ?? null,
     period:      parsed?.period      ?? null,
     year:        parsed?.year        ?? null,
     description: parsed?.description ?? null,
     tags:        parsed?.tags        ?? [],
+    rag_content: doc.rag_content     ?? null,
   };
 }
 
@@ -120,6 +121,12 @@ function editConcept(docId, patches = {}) {
 
   const newTitle = patches.title ? String(patches.title).slice(0, 200) : doc.title;
   db.db.prepare(`UPDATE knowledge_docs SET title=? WHERE id=?`).run(newTitle, docId);
+
+  // Handle rag_content update
+  if ('rag_content' in patches) {
+    const ragVal = patches.rag_content != null ? String(patches.rag_content) : null;
+    db.db.prepare(`UPDATE knowledge_docs SET rag_content=? WHERE id=?`).run(ragVal, docId);
+  }
 
   // If any content fields are present, regenerate the chunk
   const contentKeys = ['dynasty', 'period', 'year', 'description', 'tags'];

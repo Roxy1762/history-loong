@@ -387,6 +387,7 @@ export interface CurationConcept {
   year: number | null;
   description: string | null;
   tags: string[];
+  rag_content: string | null;
 }
 
 export async function adminGetCurationPending() {
@@ -425,8 +426,15 @@ export async function adminRejectConcept(id: string) {
 export async function adminEditConcept(id: string, patches: {
   title?: string; dynasty?: string | null; period?: string | null;
   year?: number | null; description?: string | null; tags?: string[];
+  rag_content?: string | null;
 }) {
   const { data } = await api.put(`/admin/curation/concepts/${id}`, patches, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminConceptRAGSearch(id: string, query?: string, topN = 6) {
+  const { data } = await api.post<{ ok: boolean; query: string; context: string; trace: unknown }>
+    (`/admin/curation/concepts/${id}/rag-search`, { query, topN }, { headers: adminHeaders() });
   return data;
 }
 
@@ -775,5 +783,63 @@ export async function adminDeleteUserAvatar(userId: string) {
 
 export async function adminCreateUser(payload: { username: string; password: string; nickname?: string; role?: string }) {
   const { data } = await api.post<{ ok: boolean; user: AdminUserDetail }>('/admin/users', payload, { headers: adminHeaders() });
+  return data;
+}
+
+// ── Admin: User Groups ────────────────────────────────────────────────────────
+
+export interface UserGroupMember {
+  id: string;
+  uid: number;
+  username: string;
+  nickname: string | null;
+  role: string;
+  status: string;
+}
+
+export interface UserGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  created_at: string;
+  updated_at: string;
+  permissions: string[];
+  member_count?: number;
+  members?: UserGroupMember[];
+}
+
+export async function adminListGroups() {
+  const { data } = await api.get<{ groups: UserGroup[]; sections: string[] }>('/admin/groups', { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminGetGroup(id: string) {
+  const { data } = await api.get<{ group: UserGroup }>(`/admin/groups/${id}`, { headers: adminHeaders() });
+  return data.group;
+}
+
+export async function adminCreateGroup(payload: { name: string; description?: string; color?: string; permissions?: string[] }) {
+  const { data } = await api.post<{ group: UserGroup }>('/admin/groups', payload, { headers: adminHeaders() });
+  return data.group;
+}
+
+export async function adminUpdateGroup(id: string, payload: { name?: string; description?: string; color?: string; permissions?: string[] }) {
+  const { data } = await api.put<{ group: UserGroup }>(`/admin/groups/${id}`, payload, { headers: adminHeaders() });
+  return data.group;
+}
+
+export async function adminDeleteGroup(id: string) {
+  const { data } = await api.delete(`/admin/groups/${id}`, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminAddGroupMember(groupId: string, userId: string) {
+  const { data } = await api.post(`/admin/groups/${groupId}/members`, { userId }, { headers: adminHeaders() });
+  return data;
+}
+
+export async function adminRemoveGroupMember(groupId: string, userId: string) {
+  const { data } = await api.delete(`/admin/groups/${groupId}/members/${userId}`, { headers: adminHeaders() });
   return data;
 }
