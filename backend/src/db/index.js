@@ -326,6 +326,9 @@ db.exec(`
   INSERT OR IGNORE INTO system_settings (key, value) VALUES ('username_change_cooldown_days', '30');
   INSERT OR IGNORE INTO system_settings (key, value) VALUES ('admin_key', '');
   INSERT OR IGNORE INTO system_settings (key, value) VALUES ('jwt_secret', '');
+  INSERT OR IGNORE INTO system_settings (key, value) VALUES ('avatar_max_size_mb', '2');
+  INSERT OR IGNORE INTO system_settings (key, value) VALUES ('avatar_allowed_formats', 'jpg,png,gif,webp');
+  INSERT OR IGNORE INTO system_settings (key, value) VALUES ('avatar_upload_enabled', '1');
 `);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

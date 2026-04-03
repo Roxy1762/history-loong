@@ -28,8 +28,9 @@ import {
   adminGetUserGames, adminGetUserConcepts, adminClearUsernameCooldown,
   adminGetSettings, adminSetSetting,
   adminGetSecurity, adminSetAdminKey, adminSetJwtSecret, adminSetUserRole, adminSetUserStatus,
+  adminListAvatars, adminGetAvatarConfig, adminSetAvatarConfig, adminUploadUserAvatar, adminDeleteUserAvatar, adminCreateUser,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
-  type CurationConcept, type Category, type AIDecision, type AdminUserDetail,
+  type CurationConcept, type Category, type AIDecision, type AdminUserDetail, type AvatarFileInfo, type AvatarConfig,
 } from '../services/api';
 import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
@@ -79,12 +80,13 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'users' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security';
+type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security';
 
 const NAV_ITEMS: { id: Tab; label: string }[] = [
   { id: 'overview',      label: '概览' },
   { id: 'games',         label: '游戏管理' },
   { id: 'users',         label: '玩家管理' },
+  { id: 'avatars',       label: '头像管理' },
   { id: 'ai-config',     label: 'AI 配置' },
   { id: 'knowledge',     label: '知识库' },
   { id: 'ai-confirmed',  label: 'AI 确认知识库' },
@@ -180,6 +182,7 @@ export default function Admin() {
           {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
           {tab === 'games'        && <GamesPanel />}
           {tab === 'users'        && <UsersPanel />}
+          {tab === 'avatars'      && <AvatarPanel />}
           {tab === 'ai-config'    && <AIConfigPanel />}
           {tab === 'knowledge'    && <KnowledgePanel />}
           {tab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => setTab('curation')} />}
@@ -189,6 +192,386 @@ export default function Admin() {
           {tab === 'security'      && <SecurityPanel />}
         </div>
       </main>
+    </div>
+  );
+}
+
+// ── Panel: Avatar Management ──────────────────────────────────────────────────
+
+function AvatarPanel() {
+  // Sub-tabs
+  type AvatarTab = 'folder' | 'upload' | 'create' | 'config';
+  const [subTab, setSubTab] = useState<AvatarTab>('folder');
+
+  // Folder browser state
+  const [avatars, setAvatars] = useState<AvatarFileInfo[]>([]);
+  const [avatarDir, setAvatarDir] = useState('');
+  const [folderLoading, setFolderLoading] = useState(false);
+  const [folderErr, setFolderErr] = useState('');
+
+  // Per-user avatar upload state
+  const [uploadUserId, setUploadUserId] = useState('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadErr, setUploadErr] = useState('');
+  const [uploadLoading, setUploadLoading] = useState(false);
+
+  // Delete avatar state
+  const [deleteUserId, setDeleteUserId] = useState('');
+  const [deleteMsg, setDeleteMsg] = useState('');
+  const [deleteErr, setDeleteErr] = useState('');
+
+  // Create account state
+  const [createUsername, setCreateUsername] = useState('');
+  const [createPassword, setCreatePassword] = useState('');
+  const [createNickname, setCreateNickname] = useState('');
+  const [createRole, setCreateRole] = useState('user');
+  const [createMsg, setCreateMsg] = useState('');
+  const [createErr, setCreateErr] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+
+  // Config state
+  const [config, setConfig] = useState<AvatarConfig | null>(null);
+  const [configMaxSize, setConfigMaxSize] = useState('');
+  const [configFormats, setConfigFormats] = useState<string[]>([]);
+  const [configEnabled, setConfigEnabled] = useState(true);
+  const [configMsg, setConfigMsg] = useState('');
+  const [configErr, setConfigErr] = useState('');
+
+  const ALL_FORMATS = ['jpg', 'png', 'gif', 'webp'];
+
+  // Load folder
+  function loadFolder() {
+    setFolderLoading(true); setFolderErr('');
+    adminListAvatars()
+      .then(d => { setAvatars(d.avatars); setAvatarDir(d.dir); })
+      .catch(e => setFolderErr(e?.response?.data?.error || '加载失败'))
+      .finally(() => setFolderLoading(false));
+  }
+
+  // Load config
+  function loadConfig() {
+    adminGetAvatarConfig().then(c => {
+      setConfig(c);
+      setConfigMaxSize(String(c.maxSizeMb));
+      setConfigFormats(c.allowedFormats);
+      setConfigEnabled(c.enabled);
+    }).catch(() => {});
+  }
+
+  useEffect(() => {
+    if (subTab === 'folder') loadFolder();
+    if (subTab === 'config') loadConfig();
+  }, [subTab]);
+
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  async function handleUpload(e: React.FormEvent) {
+    e.preventDefault();
+    if (!uploadUserId.trim() || !uploadFile) return;
+    setUploadLoading(true); setUploadMsg(''); setUploadErr('');
+    try {
+      await adminUploadUserAvatar(uploadUserId.trim(), uploadFile);
+      setUploadMsg('头像上传成功');
+      setUploadFile(null);
+      setUploadUserId('');
+      if (subTab === 'folder') loadFolder();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setUploadErr(err?.response?.data?.error || '上传失败');
+    } finally {
+      setUploadLoading(false);
+    }
+  }
+
+  async function handleDelete(e: React.FormEvent) {
+    e.preventDefault();
+    if (!deleteUserId.trim()) return;
+    setDeleteMsg(''); setDeleteErr('');
+    try {
+      await adminDeleteUserAvatar(deleteUserId.trim());
+      setDeleteMsg('已删除头像');
+      setDeleteUserId('');
+      if (subTab === 'folder') loadFolder();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setDeleteErr(err?.response?.data?.error || '删除失败');
+    }
+  }
+
+  async function handleDeleteFile(userId: string) {
+    if (!confirm('确定删除该用户头像？')) return;
+    try {
+      await adminDeleteUserAvatar(userId);
+      loadFolder();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      alert(err?.response?.data?.error || '删除失败');
+    }
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreateLoading(true); setCreateMsg(''); setCreateErr('');
+    try {
+      await adminCreateUser({
+        username: createUsername.trim(),
+        password: createPassword,
+        nickname: createNickname.trim() || undefined,
+        role: createRole,
+      });
+      setCreateMsg(`账号 "${createUsername}" 创建成功`);
+      setCreateUsername(''); setCreatePassword(''); setCreateNickname(''); setCreateRole('user');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setCreateErr(err?.response?.data?.error || '创建失败');
+    } finally {
+      setCreateLoading(false);
+    }
+  }
+
+  async function handleSaveConfig(e: React.FormEvent) {
+    e.preventDefault();
+    setConfigMsg(''); setConfigErr('');
+    const maxSizeMb = parseFloat(configMaxSize);
+    if (!isFinite(maxSizeMb) || maxSizeMb <= 0) { setConfigErr('请输入有效的文件大小'); return; }
+    if (configFormats.length === 0) { setConfigErr('至少选择一种格式'); return; }
+    try {
+      const res = await adminSetAvatarConfig({ maxSizeMb, allowedFormats: configFormats, enabled: configEnabled });
+      setConfig(res.config);
+      setConfigMsg('配置已保存');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } } };
+      setConfigErr(err?.response?.data?.error || '保存失败');
+    }
+  }
+
+  const subNavItems: { id: AvatarTab; label: string }[] = [
+    { id: 'folder', label: '头像文件夹' },
+    { id: 'upload', label: '修改头像' },
+    { id: 'create', label: '创建账号' },
+    { id: 'config', label: '上传限制配置' },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>头像管理</h2>
+        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>管理玩家头像文件、账号及上传配置</p>
+      </div>
+
+      {/* Sub-tab bar */}
+      <div className="flex gap-1 p-1 rounded-lg" style={{ background: 'var(--bg-muted)' }}>
+        {subNavItems.map(n => (
+          <button key={n.id} onClick={() => setSubTab(n.id)}
+            className="flex-1 text-sm py-1.5 px-2 rounded-md font-medium transition-colors"
+            style={{
+              background: subTab === n.id ? 'var(--bg-card)' : 'transparent',
+              color: subTab === n.id ? 'var(--brand)' : 'var(--text-secondary)',
+              boxShadow: subTab === n.id ? '0 1px 3px var(--shadow)' : 'none',
+            }}>
+            {n.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Folder browser ── */}
+      {subTab === 'folder' && (
+        <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>头像文件夹</h3>
+              {avatarDir && <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--text-muted)' }}>{avatarDir}</p>}
+            </div>
+            <button onClick={loadFolder} className="btn-secondary text-sm px-3 py-1.5">刷新</button>
+          </div>
+          {folderErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{folderErr}</p>}
+          {folderLoading ? (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
+          ) : avatars.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>暂无头像文件</p>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>共 {avatars.length} 个文件</p>
+              <div className="grid gap-3">
+                {avatars.map(av => (
+                  <div key={av.filename} className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--bg-muted)', border: '1px solid var(--border-subtle)' }}>
+                    <img
+                      src={av.url}
+                      alt={av.filename}
+                      className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                      style={{ border: '2px solid var(--border)' }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                        {av.username ? `@${av.username}` : av.user_id}
+                        {av.nickname && <span className="ml-1 text-xs" style={{ color: 'var(--text-muted)' }}>({av.nickname})</span>}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        {av.filename} · {formatBytes(av.size)} · {new Date(av.modified_at).toLocaleString('zh-CN')}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <a href={av.url} target="_blank" rel="noreferrer"
+                        className="text-xs px-2 py-1 rounded" style={{ color: 'var(--brand)', background: 'var(--bg-card)' }}>
+                        预览
+                      </a>
+                      <button onClick={() => handleDeleteFile(av.user_id)}
+                        className="text-xs px-2 py-1 rounded" style={{ color: 'var(--seal-red)', background: 'var(--bg-card)' }}>
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Upload / modify avatar ── */}
+      {subTab === 'upload' && (
+        <div className="space-y-4">
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+            <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>上传 / 替换玩家头像</h3>
+            <form onSubmit={handleUpload} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>用户 ID</label>
+                <input className="input w-full" placeholder="输入用户 ID（如 u_xxx）"
+                  value={uploadUserId} onChange={e => setUploadUserId(e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>选择图片</label>
+                <input type="file" accept="image/*" className="block w-full text-sm"
+                  style={{ color: 'var(--text-secondary)' }}
+                  onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
+                {uploadFile && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <img src={URL.createObjectURL(uploadFile)} alt="preview"
+                      className="w-12 h-12 rounded-full object-cover" style={{ border: '2px solid var(--border)' }} />
+                    <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{uploadFile.name} ({formatBytes(uploadFile.size)})</span>
+                  </div>
+                )}
+              </div>
+              {uploadMsg && <p className="text-sm" style={{ color: 'var(--jade-green, #10b981)' }}>{uploadMsg}</p>}
+              {uploadErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{uploadErr}</p>}
+              <button type="submit" className="btn-primary px-4 py-2 text-sm" disabled={uploadLoading || !uploadUserId.trim() || !uploadFile}>
+                {uploadLoading ? '上传中…' : '上传头像'}
+              </button>
+            </form>
+          </div>
+
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+            <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>删除玩家头像</h3>
+            <form onSubmit={handleDelete} className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>用户 ID</label>
+                <input className="input w-full" placeholder="输入用户 ID"
+                  value={deleteUserId} onChange={e => setDeleteUserId(e.target.value)} />
+              </div>
+              {deleteMsg && <p className="text-sm" style={{ color: 'var(--jade-green, #10b981)' }}>{deleteMsg}</p>}
+              {deleteErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{deleteErr}</p>}
+              <button type="submit" className="px-4 py-2 text-sm rounded-lg font-medium"
+                style={{ background: 'var(--seal-red, #ef4444)', color: '#fff' }}
+                disabled={!deleteUserId.trim()}>
+                删除头像（恢复为 Emoji）
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Create account ── */}
+      {subTab === 'create' && (
+        <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>创建玩家账号</h3>
+          <form onSubmit={handleCreate} className="space-y-3 max-w-md">
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>用户名 <span style={{ color: 'var(--seal-red)' }}>*</span></label>
+              <input className="input w-full" placeholder="2–30 个字符" value={createUsername} onChange={e => setCreateUsername(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>密码 <span style={{ color: 'var(--seal-red)' }}>*</span></label>
+              <input type="password" className="input w-full" placeholder="至少 6 位" value={createPassword} onChange={e => setCreatePassword(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>昵称（可选）</label>
+              <input className="input w-full" placeholder="显示名称" value={createNickname} onChange={e => setCreateNickname(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>角色</label>
+              <select className="input w-full" value={createRole} onChange={e => setCreateRole(e.target.value)}>
+                <option value="user">普通玩家（user）</option>
+                <option value="admin">管理员（admin）</option>
+                <option value="super_admin">超级管理员（super_admin）</option>
+              </select>
+            </div>
+            {createMsg && <p className="text-sm" style={{ color: 'var(--jade-green, #10b981)' }}>{createMsg}</p>}
+            {createErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{createErr}</p>}
+            <button type="submit" className="btn-primary px-4 py-2 text-sm" disabled={createLoading || !createUsername.trim() || !createPassword}>
+              {createLoading ? '创建中…' : '创建账号'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* ── Upload config ── */}
+      {subTab === 'config' && (
+        <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>头像上传限制配置</h3>
+          {!config ? (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>加载中…</p>
+          ) : (
+            <form onSubmit={handleSaveConfig} className="space-y-4 max-w-md">
+              <div className="flex items-center gap-3">
+                <label className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>允许上传</label>
+                <button type="button" onClick={() => setConfigEnabled(!configEnabled)}
+                  className="relative inline-flex h-6 w-11 rounded-full transition-colors flex-shrink-0"
+                  style={{ background: configEnabled ? 'var(--brand)' : 'var(--bg-muted2)' }}>
+                  <span className="inline-block w-4 h-4 rounded-full bg-white shadow transform transition-transform mt-1"
+                    style={{ marginLeft: configEnabled ? '1.5rem' : '0.25rem' }} />
+                </button>
+                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{configEnabled ? '开启' : '关闭'}</span>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>最大文件大小（MB）</label>
+                <input type="number" step="0.1" min="0.1" max="50" className="input w-40"
+                  value={configMaxSize} onChange={e => setConfigMaxSize(e.target.value)} />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>允许的格式</label>
+                <div className="flex gap-3 flex-wrap">
+                  {ALL_FORMATS.map(fmt => (
+                    <label key={fmt} className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={configFormats.includes(fmt)}
+                        onChange={e => setConfigFormats(prev =>
+                          e.target.checked ? [...prev, fmt] : prev.filter(f => f !== fmt)
+                        )} />
+                      <span className="text-sm uppercase font-medium" style={{ color: 'var(--text-secondary)' }}>{fmt}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {config && (
+                <div className="text-xs p-3 rounded-lg space-y-1" style={{ background: 'var(--bg-muted)', color: 'var(--text-muted)' }}>
+                  <p>当前配置：{config.enabled ? '上传开启' : '上传关闭'} · 最大 {config.maxSizeMb} MB · 格式：{config.allowedFormats.join(', ')}</p>
+                </div>
+              )}
+
+              {configMsg && <p className="text-sm" style={{ color: 'var(--jade-green, #10b981)' }}>{configMsg}</p>}
+              {configErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{configErr}</p>}
+              <button type="submit" className="btn-primary px-4 py-2 text-sm">保存配置</button>
+            </form>
+          )}
+        </div>
+      )}
     </div>
   );
 }
