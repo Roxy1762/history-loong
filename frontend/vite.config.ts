@@ -20,6 +20,10 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      '/avatars': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
     },
   },
   build: {

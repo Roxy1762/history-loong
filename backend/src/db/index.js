@@ -301,6 +301,9 @@ try { db.exec(`ALTER TABLE users ADD COLUMN login_count INTEGER NOT NULL DEFAULT
 try { db.exec(`ALTER TABLE users ADD COLUMN username_changed_at TEXT`); } catch { /* already exists */ }
 // v2.2.0: user role system (user/admin/super_admin)
 try { db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'`); } catch { /* already exists */ }
+// v2.3.0: user status (active/banned) for ban/suspend feature
+try { db.exec(`ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`); } catch { /* already exists */ }
+try { db.exec(`ALTER TABLE users ADD COLUMN ban_reason TEXT`); } catch { /* already exists */ }
 
 // Backfill uid for existing users ordered by created_at
 db.exec(`
@@ -531,9 +534,10 @@ module.exports = {
   updateUserAvatarUrl: stmt(`UPDATE users SET avatar_url=?, avatar_type='image', updated_at=datetime('now') WHERE id=?`),
   recordUserLogin:  stmt(`UPDATE users SET last_login_at=datetime('now'), login_count=login_count+1, updated_at=datetime('now') WHERE id=?`),
   clearUsernameCooldown: stmt(`UPDATE users SET username_changed_at=NULL, updated_at=datetime('now') WHERE id=?`),
-  listUsers:        stmt(`SELECT id, uid, username, nickname, avatar_color, avatar_emoji, avatar_type, avatar_url, role, created_at, updated_at, last_login_at, login_count, username_changed_at FROM users ORDER BY uid ASC`),
+  listUsers:        stmt(`SELECT id, uid, username, nickname, avatar_color, avatar_emoji, avatar_type, avatar_url, role, status, ban_reason, created_at, updated_at, last_login_at, login_count, username_changed_at FROM users ORDER BY uid ASC`),
   deleteUser:       stmt(`DELETE FROM users WHERE id = ?`),
   setUserRole:      stmt(`UPDATE users SET role=?, updated_at=datetime('now') WHERE id=?`),
+  setUserStatus:    stmt(`UPDATE users SET status=?, ban_reason=?, updated_at=datetime('now') WHERE id=?`),
   listAdminUsers:   stmt(`SELECT id, uid, username, nickname, avatar_color, avatar_emoji, avatar_type, role FROM users WHERE role IN ('admin','super_admin') ORDER BY uid ASC`),
 
   // System settings

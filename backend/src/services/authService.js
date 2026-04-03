@@ -79,6 +79,12 @@ async function login(username, password) {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return { error: '用户名或密码错误' };
 
+  // Check if user is banned
+  if (user.status === 'banned') {
+    const reason = user.ban_reason ? `：${user.ban_reason}` : '';
+    return { error: `账号已被封禁${reason}` };
+  }
+
   // Record login time and count
   db.recordUserLogin.run(user.id);
 
@@ -183,6 +189,16 @@ function setUserRole(userId, role) {
   return { ok: true, role };
 }
 
+function setUserStatus(userId, status, reason) {
+  const validStatuses = ['active', 'banned'];
+  if (!validStatuses.includes(status)) return { error: '无效的状态' };
+  const user = db.getUserById.get(userId);
+  if (!user) return { error: '用户不存在' };
+  if (user.role === 'super_admin') return { error: '无法封禁超级管理员' };
+  db.setUserStatus.run(status, reason || null, userId);
+  return { ok: true, status, reason: reason || null };
+}
+
 // ── Middleware ────────────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
@@ -195,6 +211,10 @@ function requireAuth(req, res, next) {
 
   const user = db.getUserById.get(payload.sub);
   if (!user) return res.status(401).json({ error: '账号不存在' });
+  if (user.status === 'banned') {
+    const reason = user.ban_reason ? `：${user.ban_reason}` : '';
+    return res.status(403).json({ error: `账号已被封禁${reason}` });
+  }
 
   req.user = sanitize(user);
   req.userId = user.id;
@@ -259,7 +279,7 @@ module.exports = {
   register, login, getById,
   updateProfile, changePassword,
   listUsers, adminResetPassword, adminUpdateUser, adminDeleteUser,
-  setUserRole,
+  setUserRole, setUserStatus,
   requireAuth, requireAdminAccess, requireSuperAdmin,
   verifyToken, sanitize,
   getAdminKey, getJwtSecret,
