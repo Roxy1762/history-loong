@@ -267,6 +267,28 @@ function requireSuperAdmin(req, res, next) {
   return res.status(403).json({ error: '需要超级管理员权限' });
 }
 
+// ── Permission middleware factory ─────────────────────────────────────────────
+
+// Returns a middleware that enforces section:action permission for admin-role users.
+// Admin key users and super_admin always pass.
+// Admin-role users must have the permission (or higher) through their groups.
+function requirePermission(section, action = 'view') {
+  return function (req, res, next) {
+    // No req.adminUser means admin key was used → full access
+    if (!req.adminUser) return next();
+    // super_admin always has full access
+    if (req.adminUser.role === 'super_admin') return next();
+
+    if (req.adminUser.role === 'admin') {
+      const { buildPermissionSet, hasPermission } = require('./userGroupService');
+      const permSet = buildPermissionSet(req.adminUser.id);
+      if (hasPermission(permSet, section, action)) return next();
+    }
+
+    return res.status(403).json({ error: `权限不足：需要 ${section}:${action} 权限` });
+  };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function sanitize(user) {
@@ -280,7 +302,7 @@ module.exports = {
   updateProfile, changePassword,
   listUsers, adminResetPassword, adminUpdateUser, adminDeleteUser,
   setUserRole, setUserStatus,
-  requireAuth, requireAdminAccess, requireSuperAdmin,
+  requireAuth, requireAdminAccess, requireSuperAdmin, requirePermission,
   verifyToken, sanitize,
   getAdminKey, getJwtSecret,
 };

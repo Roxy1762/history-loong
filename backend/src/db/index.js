@@ -347,6 +347,16 @@ db.exec(`
   );
 `);
 
+// v2.5.0: migrate group_permissions from plain section names to section:action format
+try {
+  // Convert any permission that has no colon (old format) to section:view
+  db.exec(`
+    UPDATE group_permissions
+    SET section = section || ':view'
+    WHERE section NOT LIKE '%:%'
+  `);
+} catch { /* already migrated or table doesn't exist */ }
+
 // v2.1.1: system settings key-value store
 db.exec(`
   CREATE TABLE IF NOT EXISTS system_settings (

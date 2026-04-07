@@ -11,8 +11,8 @@ function useDebounce<T>(value: T, delay: number): T {
 }
 import { useNavigate } from 'react-router-dom';
 import {
-  setAdminKey, getAdminKey,
-  adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
+  setAdminKey, getAdminKey, setAdminToken, getAdminToken, clearAdminAuth,
+  adminGetMe, adminGetStats, adminListAIConfigs, adminCreateAIConfig, adminUpdateAIConfig,
   adminActivateAIConfig, adminTestAIConfig, adminDeleteAIConfig,
   adminListDocs, adminUploadDoc, adminAddTextDoc, adminDeleteDoc, adminVectorizeDoc, adminRevectorizeDoc, adminRevectorizeAll, adminRechunkDoc, adminCheckEmbedding, adminCheckRerank, adminCheckAuxiliary,
   adminListGames, adminGetGame, adminFinishGame, adminDeleteGame,
@@ -34,24 +34,60 @@ import {
   adminAddGroupMember, adminRemoveGroupMember,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail, type AvatarFileInfo, type AvatarConfig,
-  type UserGroup, type UserGroupMember,
+  type UserGroup, type UserGroupMember, type PermissionDef, type AdminMe,
 } from '../services/api';
+import { authLogin } from '../services/api';
 import type { Game, GameModeConfig, Concept } from '../types';
 import axios from 'axios';
 
-// ── Login screen ──────────────────────────────────────────────────────────────
+// ── Login screen (dual mode: admin key OR account) ────────────────────────────
 
-function LoginScreen({ onLogin }: { onLogin: () => void }) {
+function LoginScreen({ onLogin }: { onLogin: (me: AdminMe) => void }) {
+  const [mode, setMode] = useState<'key' | 'account'>(() =>
+    getAdminToken() ? 'account' : 'key'
+  );
+  // Admin key fields
   const [key, setKey] = useState('');
+  // Account fields
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
-  async function submit(e: React.FormEvent) {
+
+  async function submitKey(e: React.FormEvent) {
     e.preventDefault();
-    setAdminKey(key);
+    setErr('');
+    setLoading(true);
+    setAdminKey(key.trim());
     try {
-      await adminGetStats();
-      onLogin();
+      const me = await adminGetMe();
+      onLogin(me);
     } catch {
       setErr('密钥错误，请重试');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function submitAccount(e: React.FormEvent) {
+    e.preventDefault();
+    setErr('');
+    setLoading(true);
+    try {
+      const res = await authLogin(username.trim(), password);
+      if ('error' in res) { setErr(res.error); return; }
+      if (res.user.role !== 'admin' && res.user.role !== 'super_admin') {
+        setErr('该账号没有管理员权限');
+        return;
+      }
+      setAdminToken(res.token);
+      const me = await adminGetMe();
+      onLogin(me);
+    } catch {
+      setErr('登录失败，请重试');
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -63,20 +99,68 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           <h1 className="text-2xl font-heading font-bold" style={{ color: 'var(--text-primary)' }}>后台管理</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>History-Loong Admin</p>
         </div>
-        <form onSubmit={submit} className="space-y-4">
-          <input
-            type="password"
-            className="input text-center py-3"
-            placeholder="管理员密钥"
-            value={key}
-            onChange={e => setKey(e.target.value)}
-            autoFocus
-          />
-          {err && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{err}</p>}
-          <button className="btn-primary w-full py-3 font-heading">
-            登录
-          </button>
-        </form>
+
+        {/* Mode switcher */}
+        <div className="flex rounded-lg overflow-hidden mb-5" style={{ border: '1px solid var(--border)' }}>
+          {(['key', 'account'] as const).map(m => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => { setMode(m); setErr(''); }}
+              className="flex-1 py-2 text-sm font-medium transition-colors"
+              style={mode === m
+                ? { background: 'var(--brand)', color: '#fff' }
+                : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }
+              }
+            >
+              {m === 'key' ? '管理员密钥' : '账号登录'}
+            </button>
+          ))}
+        </div>
+
+        {mode === 'key' ? (
+          <form onSubmit={submitKey} className="space-y-4">
+            <input
+              type="password"
+              className="input text-center py-3"
+              placeholder="管理员密钥"
+              value={key}
+              onChange={e => setKey(e.target.value)}
+              autoFocus
+            />
+            {err && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{err}</p>}
+            <button className="btn-primary w-full py-3 font-heading" disabled={loading}>
+              {loading ? '验证中…' : '登录'}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={submitAccount} className="space-y-3">
+            <input
+              type="text"
+              className="input py-3"
+              placeholder="用户名"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              autoFocus
+              autoComplete="username"
+            />
+            <input
+              type="password"
+              className="input py-3"
+              placeholder="密码"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            {err && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{err}</p>}
+            <button className="btn-primary w-full py-3 font-heading" disabled={loading}>
+              {loading ? '登录中…' : '登录'}
+            </button>
+            <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              需要 admin 或 super_admin 角色
+            </p>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -86,19 +170,19 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
 type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security' | 'user-groups';
 
-const NAV_ITEMS: { id: Tab; label: string }[] = [
-  { id: 'overview',      label: '概览' },
-  { id: 'games',         label: '游戏管理' },
-  { id: 'users',         label: '玩家管理' },
-  { id: 'avatars',       label: '头像管理' },
-  { id: 'user-groups',   label: '用户组' },
-  { id: 'ai-config',     label: 'AI 配置' },
-  { id: 'knowledge',     label: '知识库' },
-  { id: 'ai-confirmed',  label: 'AI 确认知识库' },
-  { id: 'curation',      label: '知识策展' },
-  { id: 'ai-decisions',  label: 'AI 完整回复' },
-  { id: 'logs',          label: '服务器日志' },
-  { id: 'security',      label: '🔐 安全设置' },
+const NAV_ITEMS: { id: Tab; label: string; perm: string }[] = [
+  { id: 'overview',      label: '概览',          perm: 'overview:view' },
+  { id: 'games',         label: '游戏管理',       perm: 'games:view' },
+  { id: 'users',         label: '玩家管理',       perm: 'users:view' },
+  { id: 'avatars',       label: '头像管理',       perm: 'avatars:view' },
+  { id: 'user-groups',   label: '用户组',         perm: 'user-groups:view' },
+  { id: 'ai-config',     label: 'AI 配置',        perm: 'ai-config:view' },
+  { id: 'knowledge',     label: '知识库',         perm: 'knowledge:view' },
+  { id: 'ai-confirmed',  label: 'AI 确认知识库',  perm: 'ai-confirmed:view' },
+  { id: 'curation',      label: '知识策展',       perm: 'curation:view' },
+  { id: 'ai-decisions',  label: 'AI 完整回复',    perm: 'ai-decisions:view' },
+  { id: 'logs',          label: '服务器日志',     perm: 'logs:view' },
+  { id: 'security',      label: '🔐 安全设置',   perm: 'security:view' },
 ];
 
 // ── Main Admin shell ──────────────────────────────────────────────────────────
@@ -106,21 +190,55 @@ const NAV_ITEMS: { id: Tab; label: string }[] = [
 export default function Admin() {
   const navigate = useNavigate();
   const [authed, setAuthed] = useState(false);
+  const [adminMe, setAdminMe] = useState<AdminMe | null>(null);
   const [tab, setTab] = useState<Tab>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Build permission set: null means full access (key or super_admin)
+  const permSet: Set<string> | null = adminMe?.permissions
+    ? new Set(adminMe.permissions)
+    : null;
+
+  function canSee(perm: string): boolean {
+    if (!permSet) return true; // full access
+    // Check exact match or higher action in hierarchy
+    const [section, action] = perm.split(':');
+    const hierarchy = ['view', 'edit', 'manage'];
+    const idx = hierarchy.indexOf(action);
+    for (let i = idx; i < hierarchy.length; i++) {
+      if (permSet.has(`${section}:${hierarchy[i]}`)) return true;
+    }
+    return false;
+  }
+
+  const visibleNav = NAV_ITEMS.filter(item => canSee(item.perm));
+
   useEffect(() => {
-    if (getAdminKey()) {
-      adminGetStats().then(() => setAuthed(true)).catch(() => {});
+    // Auto-restore session: try admin key first, then saved token
+    const key = getAdminKey();
+    const token = getAdminToken();
+    if (key || token) {
+      adminGetMe()
+        .then(me => { setAdminMe(me); setAuthed(true); })
+        .catch(() => { clearAdminAuth(); });
     }
   }, []);
 
-  if (!authed) return <LoginScreen onLogin={() => setAuthed(true)} />;
+  if (!authed) return <LoginScreen onLogin={me => { setAdminMe(me); setAuthed(true); }} />;
+
+  function handleLogout() {
+    clearAdminAuth();
+    setAdminMe(null);
+    setAuthed(false);
+  }
 
   function handleTabChange(t: Tab) {
     setTab(t);
     setSidebarOpen(false);
   }
+
+  // Ensure current tab is visible; fall back to first visible tab
+  const currentTab = visibleNav.find(n => n.id === tab) ? tab : (visibleNav[0]?.id ?? 'overview');
 
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-page)' }}>
@@ -144,22 +262,32 @@ export default function Admin() {
           </button>
         </div>
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.map(item => (
+          {visibleNav.map(item => (
             <button
               key={item.id}
               onClick={() => handleTabChange(item.id)}
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
               style={{
-                background: tab === item.id ? 'var(--brand)' : 'transparent',
-                color: tab === item.id ? '#fff' : 'var(--nav-text)',
+                background: currentTab === item.id ? 'var(--brand)' : 'transparent',
+                color: currentTab === item.id ? '#fff' : 'var(--nav-text)',
               }}>
               {item.label}
             </button>
           ))}
         </nav>
         <div className="p-4 space-y-2" style={{ borderTop: '1px solid color-mix(in srgb, var(--nav-text) 15%, transparent)' }}>
+          {/* Identity badge */}
+          {adminMe?.user && (
+            <div className="px-2 py-1.5 rounded-lg text-xs" style={{ background: 'color-mix(in srgb, var(--nav-text) 10%, transparent)', color: 'color-mix(in srgb, var(--nav-text) 70%, transparent)' }}>
+              <div className="font-medium truncate">{adminMe.user.nickname || adminMe.user.username}</div>
+              <div className="opacity-70">{adminMe.user.role === 'super_admin' ? '超级管理员' : '管理员'}</div>
+            </div>
+          )}
+          {!adminMe?.user && (
+            <div className="px-2 py-1 text-xs" style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}>密钥模式</div>
+          )}
           <button
-            onClick={() => { setAdminKey(''); setAuthed(false); }}
+            onClick={handleLogout}
             className="w-full text-xs transition-colors"
             style={{ color: 'color-mix(in srgb, var(--nav-text) 50%, transparent)' }}
           >
@@ -180,22 +308,22 @@ export default function Admin() {
             </svg>
           </button>
           <h1 className="font-heading font-bold text-sm" style={{ color: 'var(--text-primary)' }}>
-            {NAV_ITEMS.find(n => n.id === tab)?.label || '后台管理'}
+            {visibleNav.find(n => n.id === currentTab)?.label || '后台管理'}
           </h1>
         </div>
         <div className="max-w-5xl mx-auto p-4 md:p-6">
-          {tab === 'overview'     && <OverviewPanel onNavigate={setTab} />}
-          {tab === 'games'        && <GamesPanel />}
-          {tab === 'users'        && <UsersPanel />}
-          {tab === 'avatars'      && <AvatarPanel />}
-          {tab === 'ai-config'    && <AIConfigPanel />}
-          {tab === 'knowledge'    && <KnowledgePanel />}
-          {tab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => setTab('curation')} />}
-          {tab === 'curation'      && <CurationPanel />}
-          {tab === 'ai-decisions'  && <AIDecisionsPanel />}
-          {tab === 'logs'          && <LogsPanel />}
-          {tab === 'security'      && <SecurityPanel />}
-          {tab === 'user-groups'   && <UserGroupsPanel />}
+          {currentTab === 'overview'     && <OverviewPanel onNavigate={t => { if (canSee(NAV_ITEMS.find(n=>n.id===t)?.perm??'')) setTab(t); }} />}
+          {currentTab === 'games'        && <GamesPanel />}
+          {currentTab === 'users'        && <UsersPanel />}
+          {currentTab === 'avatars'      && <AvatarPanel />}
+          {currentTab === 'ai-config'    && <AIConfigPanel />}
+          {currentTab === 'knowledge'    && <KnowledgePanel />}
+          {currentTab === 'ai-confirmed' && <AIConfirmedPanel onNavigateCuration={() => canSee('curation:view') && setTab('curation')} />}
+          {currentTab === 'curation'      && <CurationPanel />}
+          {currentTab === 'ai-decisions'  && <AIDecisionsPanel />}
+          {currentTab === 'logs'          && <LogsPanel />}
+          {currentTab === 'security'      && <SecurityPanel />}
+          {currentTab === 'user-groups'   && <UserGroupsPanel />}
         </div>
       </main>
     </div>
@@ -5138,24 +5266,23 @@ function LogsPanel() {
 
 // ── Panel: User Groups ────────────────────────────────────────────────────────
 
-const SECTION_LABELS: Record<string, string> = {
-  'overview': '概览',
-  'games': '游戏管理',
-  'users': '玩家管理',
-  'avatars': '头像管理',
-  'user-groups': '用户组',
-  'ai-config': 'AI 配置',
-  'knowledge': '知识库',
-  'ai-confirmed': 'AI 确认知识库',
-  'curation': '知识策展',
-  'ai-decisions': 'AI 完整回复',
-  'logs': '服务器日志',
-  'security': '安全设置',
+/** Returns label for a permission id from the server-supplied defs, or falls back to the id string. */
+function getPermLabel(permId: string, defs: PermissionDef[]): string {
+  const d = defs.find(p => p[0] === permId);
+  return d ? d[3] : permId;
+}
+
+/** Section display names for grouping permissions */
+const SECTION_NAMES: Record<string, string> = {
+  'overview': '概览', 'games': '游戏管理', 'users': '玩家管理', 'avatars': '头像管理',
+  'ai-config': 'AI 配置', 'knowledge': '知识库', 'ai-confirmed': 'AI 确认知识库',
+  'curation': '知识策展', 'ai-decisions': 'AI 完整回复', 'logs': '服务器日志',
+  'security': '安全设置', 'user-groups': '用户组',
 };
 
 function UserGroupsPanel() {
   const [groups, setGroups] = useState<UserGroup[]>([]);
-  const [sections, setSections] = useState<string[]>([]);
+  const [permDefs, setPermDefs] = useState<PermissionDef[]>([]);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
   const [editTarget, setEditTarget] = useState<UserGroup | null>(null);
@@ -5172,7 +5299,7 @@ function UserGroupsPanel() {
   const reload = useCallback(() => {
     setLoading(true);
     adminListGroups()
-      .then(d => { setGroups(d.groups); setSections(d.sections); })
+      .then(d => { setGroups(d.groups); setPermDefs(d.permissions ?? []); })
       .catch(() => showMsg('加载失败', true))
       .finally(() => setLoading(false));
   }, []);
@@ -5263,7 +5390,7 @@ function UserGroupsPanel() {
                         ? <span className="text-xs text-slate-400 italic">无权限</span>
                         : g.permissions.map(s => (
                           <span key={s} className="text-xs px-1.5 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded">
-                            {SECTION_LABELS[s] ?? s}
+                            {getPermLabel(s, permDefs)}
                           </span>
                         ))
                       }
@@ -5338,7 +5465,7 @@ function UserGroupsPanel() {
       {(showCreate || editTarget) && (
         <GroupEditModal
           group={editTarget}
-          sections={sections}
+          permDefs={permDefs}
           onClose={() => { setShowCreate(false); setEditTarget(null); }}
           onSaved={() => { setShowCreate(false); setEditTarget(null); reload(); showMsg(editTarget ? '已保存' : '用户组已创建'); }}
         />
@@ -5348,10 +5475,10 @@ function UserGroupsPanel() {
 }
 
 function GroupEditModal({
-  group, sections, onClose, onSaved,
+  group, permDefs, onClose, onSaved,
 }: {
   group: UserGroup | null;
-  sections: string[];
+  permDefs: PermissionDef[];
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -5362,13 +5489,16 @@ function GroupEditModal({
   const [saving,      setSaving]      = useState(false);
   const [err,         setErr]         = useState('');
 
-  function togglePerm(section: string) {
+  function togglePerm(permId: string) {
     setPerms(prev => {
       const next = new Set(prev);
-      if (next.has(section)) next.delete(section); else next.add(section);
+      if (next.has(permId)) next.delete(permId); else next.add(permId);
       return next;
     });
   }
+
+  // Group permDefs by section for display
+  const sections = Array.from(new Set(permDefs.map(p => p[1])));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -5389,7 +5519,7 @@ function GroupEditModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-lg font-bold text-slate-800">{group ? '编辑用户组' : '新建用户组'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
@@ -5408,18 +5538,39 @@ function GroupEditModal({
             </div>
           </FormField>
           <div>
-            <label className="block text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-              后台板块权限
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-secondary)' }}>
+              细粒度权限配置
             </label>
-            <p className="text-xs text-slate-400 mb-2">勾选该用户组成员可访问的后台板块（管理员密钥登录不受此限制）</p>
-            <div className="grid grid-cols-2 gap-1.5">
-              {sections.map(s => (
-                <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer border transition-colors text-sm
-                  ${perms.has(s) ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'}`}>
-                  <input type="checkbox" checked={perms.has(s)} onChange={() => togglePerm(s)} className="accent-indigo-600" />
-                  {SECTION_LABELS[s] ?? s}
-                </label>
-              ))}
+            <p className="text-xs text-slate-400 mb-3">管理员密钥登录拥有全部权限，此配置仅对账号登录的管理员生效。</p>
+            <div className="space-y-3">
+              {sections.map(section => {
+                const sectionPerms = permDefs.filter(p => p[1] === section);
+                const sectionLabel = SECTION_NAMES[section] ?? section;
+                return (
+                  <div key={section} className="rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-50 border-b border-slate-200">
+                      {sectionLabel}
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {sectionPerms.map(([permId, , , label, desc]) => (
+                        <label key={permId} className={`flex items-start gap-3 px-3 py-2.5 cursor-pointer transition-colors
+                          ${perms.has(permId) ? 'bg-indigo-50' : 'bg-white hover:bg-slate-50'}`}>
+                          <input
+                            type="checkbox"
+                            checked={perms.has(permId)}
+                            onChange={() => togglePerm(permId)}
+                            className="mt-0.5 accent-indigo-600 flex-shrink-0"
+                          />
+                          <div>
+                            <span className={`text-sm font-medium ${perms.has(permId) ? 'text-indigo-700' : 'text-slate-700'}`}>{label}</span>
+                            <p className="text-xs text-slate-400 mt-0.5">{desc}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
           {err && <p className="text-sm text-red-500">{err}</p>}
