@@ -4,17 +4,40 @@ import type { Game, Concept, Message, GameModeConfig, ExportFormat } from '../ty
 const BASE = '/api';
 const api = axios.create({ baseURL: BASE });
 
-// ── Admin key storage ─────────────────────────────────────────────────────────
+// ── Admin auth storage (dual mode: admin key OR account Bearer token) ─────────
 
-let _adminKey = localStorage.getItem('admin_key') || '';
+let _adminKey   = localStorage.getItem('admin_key')   || '';
+let _adminToken = localStorage.getItem('admin_token') || '';
 
+/** Log in via admin key (clears any saved account token) */
 export function setAdminKey(key: string) {
   _adminKey = key;
   localStorage.setItem('admin_key', key);
+  _adminToken = '';
+  localStorage.removeItem('admin_token');
 }
-export function getAdminKey() { return _adminKey; }
 
-function adminHeaders() {
+/** Log in via account Bearer token (clears any saved admin key) */
+export function setAdminToken(token: string) {
+  _adminToken = token;
+  localStorage.setItem('admin_token', token);
+  _adminKey = '';
+  localStorage.removeItem('admin_key');
+}
+
+export function getAdminKey()   { return _adminKey; }
+export function getAdminToken() { return _adminToken; }
+
+/** Clear all admin auth state (logout) */
+export function clearAdminAuth() {
+  _adminKey = '';
+  _adminToken = '';
+  localStorage.removeItem('admin_key');
+  localStorage.removeItem('admin_token');
+}
+
+function adminHeaders(): Record<string, string> {
+  if (_adminToken) return { Authorization: `Bearer ${_adminToken}` };
   return { 'x-admin-key': _adminKey };
 }
 
@@ -99,6 +122,19 @@ export async function exportGame(gameId: string, format: ExportFormat) {
 export async function getExportFormats() {
   const { data } = await api.get<{ formats: string[] }>('/export/formats/list');
   return data.formats;
+}
+
+// ── Admin: Identity & permissions ─────────────────────────────────────────────
+
+export interface AdminMe {
+  loginMode: 'key' | 'account';
+  user: UserAccount | null;
+  permissions: string[] | null; // null means full access (key or super_admin)
+}
+
+export async function adminGetMe(): Promise<AdminMe> {
+  const { data } = await api.get('/admin/me', { headers: adminHeaders() });
+  return data as AdminMe;
 }
 
 // ── Admin: Stats ──────────────────────────────────────────────────────────────
@@ -535,6 +571,8 @@ export interface UserAccount {
   avatar_emoji: string;
   avatar_type: 'text' | 'emoji' | 'image';
   avatar_url: string | null;
+  role: string;
+  status: string;
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
@@ -809,8 +847,11 @@ export interface UserGroup {
   members?: UserGroupMember[];
 }
 
+/** [id, section, action, label, description] */
+export type PermissionDef = [string, string, string, string, string];
+
 export async function adminListGroups() {
-  const { data } = await api.get<{ groups: UserGroup[]; sections: string[] }>('/admin/groups', { headers: adminHeaders() });
+  const { data } = await api.get<{ groups: UserGroup[]; permissions: PermissionDef[] }>('/admin/groups', { headers: adminHeaders() });
   return data;
 }
 

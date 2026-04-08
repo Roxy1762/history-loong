@@ -94,6 +94,8 @@ function resolveUser(idParam) {
 
 // ── Auth middleware (key OR admin-role user token) ────────────────────────────
 
+const rp = (section, action) => authSvc.requirePermission(section, action);
+
 router.use((req, res, next) => {
   const key = req.headers['x-admin-key'] || req.query.key;
   const adminKey = authSvc.getAdminKey();
@@ -115,6 +117,22 @@ router.use((req, res, next) => {
 
   console.warn(`[Admin] Unauthorized request to ${req.method} ${req.path}`);
   return res.status(401).json({ error: '未授权，请提供管理员密钥或使用管理员账号登录' });
+});
+
+// ── Current admin identity & permissions ──────────────────────────────────────
+
+router.get('/me', (req, res) => {
+  if (!req.adminUser) {
+    // Admin key login: full access, no user account
+    return res.json({ loginMode: 'key', user: null, permissions: null });
+  }
+  const groupSvcLocal = require('../services/userGroupService');
+  const permSet = groupSvcLocal.buildPermissionSet(req.adminUser.id);
+  res.json({
+    loginMode: 'account',
+    user: req.adminUser,
+    permissions: [...permSet],
+  });
 });
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
@@ -319,7 +337,7 @@ router.put('/games/:id/concepts/:conceptId', (req, res) => {
   res.json({ message: '概念已更新', concept: payload });
 });
 
-router.post('/games/:id/finish', (req, res) => {
+router.post('/games/:id/finish', rp('games', 'manage'), (req, res) => {
   const id = req.params.id.toUpperCase();
   console.log(`[Admin] POST /games/${id}/finish`);
   const game = db.getGame.get(id);
@@ -504,7 +522,7 @@ router.post('/games/:id/restore', (req, res) => {
   res.json({ message: '游戏已恢复为进行中状态' });
 });
 
-router.delete('/games/:id', (req, res) => {
+router.delete('/games/:id', rp('games', 'manage'), (req, res) => {
   const id = req.params.id.toUpperCase();
   console.log(`[Admin] DELETE /games/${id}`);
   const game = db.getGame.get(id);
@@ -549,7 +567,7 @@ router.get('/ai-configs', (_req, res) => {
   res.json({ configs });
 });
 
-router.post('/ai-configs', (req, res) => {
+router.post('/ai-configs', rp('ai-config', 'edit'), (req, res) => {
   const { name, provider_type, base_url, api_key, model, extra = {} } = req.body;
   if (!name || !provider_type || !api_key || !model) {
     return res.status(400).json({ error: '缺少必要字段：name, provider_type, api_key, model' });
@@ -564,7 +582,7 @@ router.post('/ai-configs', (req, res) => {
   res.json({ id, message: '创建成功' });
 });
 
-router.put('/ai-configs/:id', (req, res) => {
+router.put('/ai-configs/:id', rp('ai-config', 'edit'), (req, res) => {
   const { name, provider_type, base_url, api_key, model, extra = {}, system_prompt } = req.body;
   const existing = db.getAIConfig.get(req.params.id);
   if (!existing) return res.status(404).json({ error: '配置不存在' });
@@ -588,7 +606,7 @@ router.put('/ai-configs/:id', (req, res) => {
   res.json({ message: '更新成功' });
 });
 
-router.post('/ai-configs/:id/activate', (req, res) => {
+router.post('/ai-configs/:id/activate', rp('ai-config', 'edit'), (req, res) => {
   const existing = db.getAIConfig.get(req.params.id);
   if (!existing) return res.status(404).json({ error: '配置不存在' });
 
@@ -598,7 +616,7 @@ router.post('/ai-configs/:id/activate', (req, res) => {
   res.json({ message: '已激活' });
 });
 
-router.delete('/ai-configs/:id', (req, res) => {
+router.delete('/ai-configs/:id', rp('ai-config', 'edit'), (req, res) => {
   console.log(`[Admin] AI config deleted id=${req.params.id}`);
   db.deleteAIConfig.run(req.params.id);
   res.json({ message: '已删除' });
@@ -631,7 +649,7 @@ router.get('/knowledge', (_req, res) => {
   res.json({ docs });
 });
 
-router.post('/knowledge/upload', upload.single('file'), (req, res) => {
+router.post('/knowledge/upload', rp('knowledge', 'edit'), upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: '请上传 .txt 或 .md 文件（最大 5MB）' });
   }
@@ -654,7 +672,7 @@ router.post('/knowledge/upload', upload.single('file'), (req, res) => {
   res.json({ message: '上传成功', docId: result.docId, chunks: result.chunks, strategy: result.strategy });
 });
 
-router.post('/knowledge/text', (req, res) => {
+router.post('/knowledge/text', rp('knowledge', 'edit'), (req, res) => {
   const { title, content, strategy } = req.body;
   if (!title || !content) {
     return res.status(400).json({ error: '请提供 title 和 content' });
@@ -668,7 +686,7 @@ router.post('/knowledge/text', (req, res) => {
   res.json({ message: '添加成功', docId: result.docId, chunks: result.chunks, strategy: result.strategy });
 });
 
-router.delete('/knowledge/:id', (req, res) => {
+router.delete('/knowledge/:id', rp('knowledge', 'edit'), (req, res) => {
   const doc = db.getDoc.get(req.params.id);
   if (!doc) return res.status(404).json({ error: '文档不存在' });
 
@@ -934,7 +952,7 @@ router.get('/curation/concepts', (req, res) => {
   res.json({ concepts: items });
 });
 
-router.post('/curation/concepts/:id/approve', (req, res) => {
+router.post('/curation/concepts/:id/approve', rp('curation', 'manage'), (req, res) => {
   try {
     const result = curationSvc.approveConcept(req.params.id);
     logAdminAction('kb_approve', 'knowledge', req.params.id, {});
@@ -944,13 +962,13 @@ router.post('/curation/concepts/:id/approve', (req, res) => {
   }
 });
 
-router.post('/curation/concepts/approve-all', (_req, res) => {
+router.post('/curation/concepts/approve-all', rp('curation', 'manage'), (_req, res) => {
   const result = curationSvc.approveAll();
   logAdminAction('kb_approve_all', 'knowledge', null, result);
   res.json(result);
 });
 
-router.post('/curation/concepts/:id/archive', (req, res) => {
+router.post('/curation/concepts/:id/archive', rp('curation', 'manage'), (req, res) => {
   try {
     const result = curationSvc.archiveConcept(req.params.id);
     logAdminAction('kb_archive', 'knowledge', req.params.id, {});
@@ -960,7 +978,7 @@ router.post('/curation/concepts/:id/archive', (req, res) => {
   }
 });
 
-router.delete('/curation/concepts/:id', (req, res) => {
+router.delete('/curation/concepts/:id', rp('curation', 'manage'), (req, res) => {
   try {
     const result = curationSvc.rejectConcept(req.params.id);
     logAdminAction('kb_delete', 'knowledge', req.params.id, {});
@@ -1147,7 +1165,7 @@ router.get('/users/:id', (req, res) => {
 });
 
 // Update user (username, nickname, uid)
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', rp('users', 'edit'), async (req, res) => {
   const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const { username, nickname, uid } = req.body || {};
@@ -1188,7 +1206,7 @@ router.get('/users/:id/concepts', (req, res) => {
   res.json({ concepts: concepts.map(c => ({ ...c, tags: parseArray(c.tags, []), extra: parseObject(c.extra, {}) })) });
 });
 
-router.post('/users/:id/reset-password', async (req, res) => {
+router.post('/users/:id/reset-password', rp('users', 'edit'), async (req, res) => {
   const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const { newPassword } = req.body || {};
@@ -1238,7 +1256,7 @@ router.put('/settings/:key', (req, res) => {
   res.json({ ok: true, key, value: db.getSetting.get(key)?.value });
 });
 
-router.delete('/users/:id', (req, res) => {
+router.delete('/users/:id', rp('users', 'manage'), (req, res) => {
   const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const result = authSvc.adminDeleteUser(user.id);
@@ -1249,7 +1267,7 @@ router.delete('/users/:id', (req, res) => {
 
 // ── User role management ──────────────────────────────────────────────────────
 
-router.put('/users/:id/role', (req, res) => {
+router.put('/users/:id/role', rp('users', 'manage'), (req, res) => {
   const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const { role } = req.body;
@@ -1262,7 +1280,7 @@ router.put('/users/:id/role', (req, res) => {
 
 // ── User ban/unban ───────────────────────────────────────────────────────────
 
-router.put('/users/:id/status', (req, res) => {
+router.put('/users/:id/status', rp('users', 'manage'), (req, res) => {
   const user = resolveUser(req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   const { status, reason } = req.body;
@@ -1291,7 +1309,7 @@ router.get('/security', (_req, res) => {
 });
 
 // Update admin key (requires existing admin key or super_admin role)
-router.post('/security/admin-key', (req, res) => {
+router.post('/security/admin-key', rp('security', 'edit'), (req, res) => {
   const { newKey } = req.body;
   if (!newKey || newKey.trim().length < 8) {
     return res.status(400).json({ error: '管理员密钥至少 8 位' });
@@ -1302,7 +1320,7 @@ router.post('/security/admin-key', (req, res) => {
 });
 
 // Update JWT secret (requires existing admin key or super_admin role)
-router.post('/security/jwt-secret', (req, res) => {
+router.post('/security/jwt-secret', rp('security', 'edit'), (req, res) => {
   const { newSecret } = req.body;
   if (!newSecret || newSecret.trim().length < 16) {
     return res.status(400).json({ error: 'JWT 密钥至少 16 位' });
@@ -1455,7 +1473,7 @@ router.post('/users', async (req, res) => {
 const groupSvc = require('../services/userGroupService');
 
 router.get('/groups', (_req, res) => {
-  res.json({ groups: groupSvc.listGroups(), sections: groupSvc.ALL_SECTIONS });
+  res.json({ groups: groupSvc.listGroups(), permissions: groupSvc.ALL_PERMISSIONS });
 });
 
 router.get('/groups/:id', (req, res) => {
@@ -1464,7 +1482,7 @@ router.get('/groups/:id', (req, res) => {
   res.json({ group: g });
 });
 
-router.post('/groups', (req, res) => {
+router.post('/groups', rp('user-groups', 'manage'), (req, res) => {
   try {
     const { name, description, color, permissions } = req.body || {};
     const g = groupSvc.createGroup(name, description, color, permissions);
@@ -1475,7 +1493,7 @@ router.post('/groups', (req, res) => {
   }
 });
 
-router.put('/groups/:id', (req, res) => {
+router.put('/groups/:id', rp('user-groups', 'manage'), (req, res) => {
   try {
     const { name, description, color, permissions } = req.body || {};
     const g = groupSvc.updateGroup(req.params.id, { name, description, color, permissions });
@@ -1486,7 +1504,7 @@ router.put('/groups/:id', (req, res) => {
   }
 });
 
-router.delete('/groups/:id', (req, res) => {
+router.delete('/groups/:id', rp('user-groups', 'manage'), (req, res) => {
   try {
     groupSvc.deleteGroup(req.params.id);
     logAdminAction('group_delete', 'group', req.params.id, {});
@@ -1496,7 +1514,7 @@ router.delete('/groups/:id', (req, res) => {
   }
 });
 
-router.post('/groups/:id/members', (req, res) => {
+router.post('/groups/:id/members', rp('user-groups', 'manage'), (req, res) => {
   try {
     const user = resolveUser(req.body?.userId);
     if (!user) return res.status(404).json({ error: '用户不存在' });
@@ -1508,7 +1526,7 @@ router.post('/groups/:id/members', (req, res) => {
   }
 });
 
-router.delete('/groups/:id/members/:userId', (req, res) => {
+router.delete('/groups/:id/members/:userId', rp('user-groups', 'manage'), (req, res) => {
   try {
     const user = resolveUser(req.params.userId);
     if (!user) return res.status(404).json({ error: '用户不存在' });
