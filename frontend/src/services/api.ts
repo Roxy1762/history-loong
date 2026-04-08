@@ -571,6 +571,8 @@ export interface UserAccount {
   avatar_emoji: string;
   avatar_type: 'text' | 'emoji' | 'image';
   avatar_url: string | null;
+  role: string;
+  status: string;
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
