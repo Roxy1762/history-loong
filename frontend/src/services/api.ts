@@ -149,7 +149,7 @@ export async function adminGetStats() {
 export interface AIConfig {
   id: string;
   name: string;
-  provider_type: 'anthropic' | 'openai-compatible' | 'google' | string;
+  provider_type: 'anthropic' | 'openai-compatible' | 'google' | 'deepseek' | string;
   base_url: string | null;
   api_key: string;
   model: string;

@@ -146,6 +146,75 @@ async function callGoogle(config, prompt, maxTokens) {
   }
 }
 
+async function callDeepSeek(config, prompt, maxTokens, options = {}) {
+  const base = (config.base_url || 'https://api.deepseek.com').replace(/\/$/, '');
+  const url = base.includes('/chat/completions') ? base : `${base}/chat/completions`;
+
+  const messages = [];
+  if (config.system_prompt) {
+    messages.push({ role: 'system', content: config.system_prompt });
+  }
+  messages.push({ role: 'user', content: prompt });
+
+  const extra = config.extra || {};
+  // 'disabled' by default — thinking mode costs more tokens and is slower
+  const thinkingMode = extra.deepseek_thinking === 'enabled' ? 'enabled' : 'disabled';
+  const reasoningEffort = extra.deepseek_reasoning_effort || 'high';
+
+  const requestBody = {
+    model: config.model || 'deepseek-v4-pro',
+    messages,
+    thinking: { type: thinkingMode },
+  };
+  if (maxTokens) requestBody.max_tokens = maxTokens;
+  // temperature is silently ignored in thinking mode; skip it for explicitness
+  if (thinkingMode !== 'enabled') requestBody.temperature = 0.2;
+  if (thinkingMode === 'enabled') requestBody.reasoning_effort = reasoningEffort;
+
+  // JSON Output: only when caller signals JSON is expected (prompt must contain "json")
+  if (options.jsonMode) requestBody.response_format = { type: 'json_object' };
+
+  // FIM and 对话前缀续写 require the /beta base URL — not used here (chat completions only)
+
+  const timeoutMs = thinkingMode === 'enabled' ? 120000 : 60000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.api_key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      const errMsg = `DeepSeek API ${resp.status}: ${body.slice(0, 300)}`;
+      console.error(`[AI][DeepSeek] error at ${url}: ${errMsg}`);
+      throw new Error(errMsg);
+    }
+    const data = await resp.json();
+    const message = data?.choices?.[0]?.message;
+    if (!message) throw new Error('DeepSeek returned empty response');
+    if (message.reasoning_content) {
+      console.log(`[AI][DeepSeek] thinking used, reasoning_content length: ${String(message.reasoning_content).length}`);
+    }
+    const content = message.content;
+    if (!content) throw new Error('DeepSeek returned empty content');
+    return content.trim();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`DeepSeek 请求超时（${timeoutMs / 1000}秒），请检查网络连接或 API 地址`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callGLM(config, prompt, maxTokens) {
   const rawBase = (config.base_url || 'https://open.bigmodel.cn/api/paas/v4').replace(/\/$/, '');
   const url = rawBase.includes('/chat/completions')
@@ -203,6 +272,7 @@ const PROVIDER_HANDLERS = {
   'openai-compatible': callOpenAICompatible,
   google: callGoogle,
   glm: callGLM,
+  deepseek: callDeepSeek,
 };
 
 function registerProviderHandler(type, fn) {
@@ -272,8 +342,8 @@ function resolveConfig() {
 
 // ── Core call ─────────────────────────────────────────────────────────────────
 
-async function complete(prompt, maxTokens = 300) {
-  return completeWithFailover(prompt, maxTokens);
+async function complete(prompt, maxTokens = 300, options = {}) {
+  return completeWithFailover(prompt, maxTokens, options);
 }
 
 async function testConfig(configRow) {
@@ -283,7 +353,7 @@ async function testConfig(configRow) {
   return text;
 }
 
-async function completeWithFailover(prompt, maxTokens = 300) {
+async function completeWithFailover(prompt, maxTokens = 300, options = {}) {
   const configs = resolveConfigs();
   if (!configs.length) {
     throw new Error('未配置 AI 服务，请在后台管理界面添加 AI 配置');
@@ -299,7 +369,7 @@ async function completeWithFailover(prompt, maxTokens = 300) {
     }
 
     try {
-      const result = await handler(config, prompt, maxTokens);
+      const result = await handler(config, prompt, maxTokens, options);
       console.log(`[AI] Success with config ${i} (${config.name || config.id})`);
       return result;
     } catch (err) {
@@ -583,7 +653,7 @@ ${kb}验证「${concept}」是否为与该主题相关的有效历史概念，�
 无效：{"valid":false,"reason":"原因"}
 year：BC负数，AD正数，时间段取起始，不确定null。difficulty：概念冷僻程度1(常见)~5(冷僻)。`;
 
-  const text = await completeWithFailover(prompt, 1024);
+  const text = await completeWithFailover(prompt, 1024, { jsonMode: true });
   let result = null;
   try { result = extractJSON(text); } catch { result = null; }
   const aux = getAuxiliaryConfig();
@@ -676,7 +746,7 @@ async function batchValidateConcepts(concepts, topic, knowledgeContext = '') {
 ${list}
 格式：[{"index":1,"valid":true,"name":"名","year":-356,"dynasty":"朝","period":"时","description":"≤30字","tags":["t"],"difficulty":3},{"index":2,"valid":false,"reason":"原因"}]`;
 
-      const text = await completeWithFailover(prompt, 1024);
+      const text = await completeWithFailover(prompt, 1024, { jsonMode: true });
       const arr = extractJSON(text);
       if (!Array.isArray(arr)) throw new Error('Batch AI returned non-array');
       const active = resolveConfig();
@@ -733,7 +803,7 @@ async function generateChallengeCards(topic, count = 10, existingConcepts = []) 
 6. 卡片内容必须是可以在时间轴上体现的历史概念`;
 
   try {
-    const text = await completeWithFailover(prompt, 1024);
+    const text = await completeWithFailover(prompt, 1024, { jsonMode: true });
     const arr = extractJSON(text);
     if (Array.isArray(arr) && arr.length > 0) {
       return arr.map((c, i) => ({

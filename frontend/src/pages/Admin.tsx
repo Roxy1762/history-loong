@@ -2717,6 +2717,23 @@ function writePipelineExtra(existingExtra: Record<string, unknown>, next: {
   return merged;
 }
 
+function readDeepSeekExtra(extra: Record<string, unknown> | null | undefined) {
+  return {
+    thinking:        (extra?.deepseek_thinking as string) || 'disabled',
+    reasoningEffort: (extra?.deepseek_reasoning_effort as string) || 'high',
+  };
+}
+
+function writeDeepSeekExtra(existingExtra: Record<string, unknown>, next: {
+  thinking: string;
+  reasoningEffort: string;
+}) {
+  const merged = { ...existingExtra };
+  merged.deepseek_thinking         = next.thinking;
+  merged.deepseek_reasoning_effort = next.reasoningEffort;
+  return merged;
+}
+
 // ── Pipeline visual configurator component ───────────────────────────────────
 
 interface PipelineStep {
@@ -2904,8 +2921,8 @@ function AIConfigPanel() {
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl
-                      ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : cfg.provider_type === 'glm' ? 'bg-cyan-50' : 'bg-indigo-50'}`}>
-                      {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : cfg.provider_type === 'glm' ? '💙' : '🔷'}
+                      ${cfg.provider_type === 'anthropic' ? 'bg-orange-50' : cfg.provider_type === 'google' ? 'bg-blue-50' : cfg.provider_type === 'glm' ? 'bg-cyan-50' : cfg.provider_type === 'deepseek' ? 'bg-teal-50' : 'bg-indigo-50'}`}>
+                      {cfg.provider_type === 'anthropic' ? '🔶' : cfg.provider_type === 'google' ? '🌐' : cfg.provider_type === 'glm' ? '💙' : cfg.provider_type === 'deepseek' ? '🐋' : '🔷'}
                     </div>
                     <div>
                       <div className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
@@ -2918,7 +2935,7 @@ function AIConfigPanel() {
                         )}
                       </div>
                       <div className="text-xs text-slate-500 mt-0.5">
-                        {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.provider_type === 'glm' ? '智谱AI (BigModel)' : cfg.base_url}
+                        {cfg.provider_type === 'anthropic' ? 'Anthropic Claude' : cfg.provider_type === 'google' ? 'Google AI Studio' : cfg.provider_type === 'glm' ? '智谱AI (BigModel)' : cfg.provider_type === 'deepseek' ? 'DeepSeek' : cfg.base_url}
                         <span className="ml-2 font-mono">{cfg.model}</span>
                       </div>
                     </div>
@@ -3027,6 +3044,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   const initialKnowledge = readKnowledgeExtra(initial?.extra);
   const initialAux = readAuxExtra(initial?.extra);
   const initialPipeline = readPipelineExtra(initial?.extra);
+  const initialDeepSeek = readDeepSeekExtra(initial?.extra);
 
   const [form, setForm] = useState({
     name:          initial?.name          ?? '',
@@ -3084,6 +3102,10 @@ function AIConfigForm({ initial, onClose, onSaved }: {
     kbLocalValidate: initialPipeline.kbLocalValidate,
     kbAutoIngest:    initialPipeline.kbAutoIngest,
   });
+  const [deepseek, setDeepSeek] = useState({
+    thinking:        initialDeepSeek.thinking,
+    reasoningEffort: initialDeepSeek.reasoningEffort,
+  });
   const [glmApiPath, setGlmApiPath] = useState(initialGlmPath);
   const [saving, setSaving] = useState(false);
   const [checkingEmbedding, setCheckingEmbedding] = useState(false);
@@ -3101,7 +3123,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
 
   const PRESETS: { label: string; base_url: string; model: string }[] = [
     { label: 'OpenAI',    base_url: 'https://api.openai.com/v1',         model: 'gpt-4o' },
-    { label: 'DeepSeek',  base_url: 'https://api.deepseek.com/v1',       model: 'deepseek-chat' },
+    { label: 'DeepSeek',  base_url: 'https://api.deepseek.com',           model: 'deepseek-v4-pro' },
     { label: 'Qwen',      base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-max' },
     { label: 'Moonshot',  base_url: 'https://api.moonshot.cn/v1',        model: 'moonshot-v1-8k' },
     { label: 'Ollama',    base_url: 'http://localhost:11434/v1',          model: 'llama3' },
@@ -3133,7 +3155,10 @@ function AIConfigForm({ initial, onClose, onSaved }: {
       setKnowledge(normalizedKnowledge);
       const mergedKnowledgeExtra = writeKnowledgeExtra(initial?.extra || {}, normalizedKnowledge, initialKnowledge.apiKey);
       const mergedAuxExtra = writeAuxExtra(mergedKnowledgeExtra, aux, initialAux.apiKey);
-      const mergedExtra = writePipelineExtra(mergedAuxExtra, pipeline);
+      const mergedPipelineExtra = writePipelineExtra(mergedAuxExtra, pipeline);
+      const mergedExtra = form.provider_type === 'deepseek'
+        ? writeDeepSeekExtra(mergedPipelineExtra, deepseek)
+        : mergedPipelineExtra;
 
       const payload: Partial<AIConfig> & { system_prompt?: string } = {
         ...form,
@@ -3244,7 +3269,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
   }
 
   // All providers support custom base_url (for proxy/self-hosted scenarios)
-  const needsBaseUrl = form.provider_type === 'openai-compatible';
+  const needsBaseUrl = form.provider_type === 'openai-compatible' || form.provider_type === 'deepseek';
   const supportsCustomUrl = ['anthropic', 'google', 'glm'].includes(form.provider_type);
 
   return (
@@ -3258,6 +3283,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           <FormField label="提供商类型">
             <select className="input" value={form.provider_type} onChange={e => update('provider_type', e.target.value)}>
               <option value="openai-compatible">OpenAI Compatible（通用）</option>
+              <option value="deepseek">DeepSeek（深度求索）</option>
               <option value="anthropic">Anthropic Claude（原生）</option>
               <option value="google">Google AI Studio（Gemini）</option>
               <option value="glm">智谱AI（BigModel）</option>
@@ -3266,7 +3292,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
         </div>
 
         {/* OpenAI-compatible: full base_url field with presets */}
-        {needsBaseUrl && (
+        {form.provider_type === 'openai-compatible' && (
           <FormField label="Base URL（API 地址）">
             <div className="space-y-2">
               <input className="input font-mono text-sm" placeholder="https://api.openai.com/v1" value={form.base_url} onChange={e => update('base_url', e.target.value)} required />
@@ -3274,6 +3300,23 @@ function AIConfigForm({ initial, onClose, onSaved }: {
                 {PRESETS.filter(p => p.label !== 'GLM').map(p => (
                   <button key={p.label} type="button" onClick={() => setForm(f => ({ ...f, base_url: p.base_url, model: p.model }))}
                     className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-100 hover:text-indigo-700 transition-colors">
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </FormField>
+        )}
+
+        {/* DeepSeek: base_url field with model presets */}
+        {form.provider_type === 'deepseek' && (
+          <FormField label="API 地址（可选，留空使用官方）">
+            <div className="space-y-2">
+              <input className="input font-mono text-sm" placeholder="https://api.deepseek.com" value={form.base_url} onChange={e => update('base_url', e.target.value)} />
+              <div className="flex flex-wrap gap-1">
+                {[{ label: 'deepseek-v4-pro', model: 'deepseek-v4-pro' }, { label: 'deepseek-v4-flash', model: 'deepseek-v4-flash' }].map(p => (
+                  <button key={p.label} type="button" onClick={() => setForm(f => ({ ...f, model: p.model }))}
+                    className="text-xs px-2 py-0.5 bg-teal-50 text-teal-700 rounded-full border border-teal-200 hover:bg-teal-100 transition-colors">
                     {p.label}
                   </button>
                 ))}
@@ -3341,6 +3384,51 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           </div>
         )}
 
+        {form.provider_type === 'deepseek' && (
+          <>
+            <div className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-xl px-3 py-2">
+              💡 DeepSeek：填入 DeepSeek API Key，推荐模型 <code>deepseek-v4-pro</code>（旗舰）或 <code>deepseek-v4-flash</code>（快速低价）。支持 JSON Output、Tool Calls，支持可选的思考模式（推理链）。
+            </div>
+            <div className="border border-teal-100 rounded-xl overflow-hidden">
+              <div className="px-4 py-3 bg-teal-50 border-b border-teal-100">
+                <div className="text-sm font-semibold text-teal-800">🧠 DeepSeek 思考模式</div>
+                <p className="text-xs text-teal-700 mt-0.5">
+                  思考模式让模型在回答前进行链式推理，准确率更高但速度慢、消耗更多 Token。非思考模式下支持全部功能（JSON Output、Tool Calls、对话前缀续写 Beta、FIM 补全 Beta）。
+                </p>
+              </div>
+              <div className="p-4 space-y-3 bg-white">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <FormField label="思考模式">
+                    <select className="input" value={deepseek.thinking}
+                      onChange={e => setDeepSeek(v => ({ ...v, thinking: e.target.value }))}>
+                      <option value="disabled">关闭（非思考模式，速度快）</option>
+                      <option value="enabled">开启（思考模式，推理更深入）</option>
+                    </select>
+                  </FormField>
+                  {deepseek.thinking === 'enabled' && (
+                    <FormField label="推理强度">
+                      <select className="input" value={deepseek.reasoningEffort}
+                        onChange={e => setDeepSeek(v => ({ ...v, reasoningEffort: e.target.value }))}>
+                        <option value="high">high（标准，适合大多数场景）</option>
+                        <option value="max">max（最强，适合复杂推理）</option>
+                      </select>
+                    </FormField>
+                  )}
+                </div>
+                {deepseek.thinking === 'enabled' ? (
+                  <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                    ⚠️ 思考模式：temperature 参数无效（已自动跳过）；请求超时延长至 120 秒；支持 JSON Output 与 Tool Calls；FIM 补全与对话前缀续写仅非思考模式可用。
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                    非思考模式下支持全部功能：JSON Output、Tool Calls、对话前缀续写（Beta）、FIM 补全（Beta）；temperature = 0.2 生效。
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
         {form.provider_type === 'glm' && (
           <div className="text-xs text-slate-500 bg-cyan-50 border border-cyan-100 rounded-xl px-3 py-2">
             💡 智谱AI (GLM)：填入 BigModel API Key，模型推荐 <code>glm-4.5-flash</code>。API 主机 + 路径共同构成完整请求地址，支持自定义路径。
@@ -3354,7 +3442,8 @@ function AIConfigForm({ initial, onClose, onSaved }: {
           <FormField label="模型名称">
             <input className="input font-mono text-sm" placeholder={
               form.provider_type === 'google' ? 'gemini-2.0-flash' :
-              form.provider_type === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'
+              form.provider_type === 'anthropic' ? 'claude-sonnet-4-6' :
+              form.provider_type === 'deepseek' ? 'deepseek-v4-pro' : 'gpt-4o'
             } value={form.model} onChange={e => update('model', e.target.value)} required />
           </FormField>
         </div>
@@ -3677,6 +3766,7 @@ function AIConfigForm({ initial, onClose, onSaved }: {
               <FormField label="Provider Type">
                 <select className="input text-sm" value={aux.providerType} onChange={e => setAux(v => ({ ...v, providerType: e.target.value }))}>
                   <option value="openai-compatible">openai-compatible</option>
+                  <option value="deepseek">deepseek</option>
                   <option value="anthropic">anthropic</option>
                   <option value="google">google</option>
                   <option value="glm">glm</option>
