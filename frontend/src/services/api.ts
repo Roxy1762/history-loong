@@ -884,3 +884,91 @@ export async function adminRemoveGroupMember(groupId: string, userId: string) {
   const { data } = await api.delete(`/admin/groups/${groupId}/members/${userId}`, { headers: adminHeaders() });
   return data;
 }
+
+// ── Server Migration ──────────────────────────────────────────────────────────
+
+export interface MigrationToken {
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+  note: string;
+  ttlSec?: number;
+}
+
+export interface MigrationSummary {
+  ok: boolean;
+  summary: { tables: Record<string, number>; avatars: number };
+  note?: string;
+}
+
+export async function adminMigrationSummary() {
+  const { data } = await api.get<{ version: number; counts: Record<string, number> }>(
+    '/admin/migration/summary',
+    { headers: adminHeaders() }
+  );
+  return data;
+}
+
+/** Download the full snapshot file (triggers a browser download). */
+export async function adminMigrationExport() {
+  const response = await api.get('/admin/migration/export', {
+    headers: adminHeaders(),
+    responseType: 'blob',
+  });
+  const disposition = (response.headers['content-disposition'] as string) || '';
+  const m = disposition.match(/filename="?([^";\n]+)"?/i);
+  const filename = m?.[1] || `history-loong-snapshot_${Date.now()}.json`;
+  const blob = new Blob([response.data], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { filename };
+}
+
+/** Upload a previously-exported snapshot to fully restore this server. */
+export async function adminMigrationImport(file: File): Promise<MigrationSummary> {
+  const form = new FormData();
+  form.append('snapshot', file);
+  const { data } = await api.post<MigrationSummary>('/admin/migration/import', form, {
+    headers: { ...adminHeaders() },
+  });
+  return data;
+}
+
+/** Pull a snapshot from a remote source server using a token and import it. */
+export async function adminMigrationPull(sourceUrl: string, token: string): Promise<MigrationSummary> {
+  const { data } = await api.post<MigrationSummary>(
+    '/admin/migration/pull',
+    { sourceUrl, token },
+    { headers: adminHeaders() }
+  );
+  return data;
+}
+
+export async function adminMigrationListTokens() {
+  const { data } = await api.get<{ tokens: MigrationToken[] }>('/admin/migration/tokens', {
+    headers: adminHeaders(),
+  });
+  return data.tokens;
+}
+
+export async function adminMigrationCreateToken(ttlMinutes: number, note = '') {
+  const { data } = await api.post<MigrationToken>(
+    '/admin/migration/tokens',
+    { ttlMinutes, note },
+    { headers: adminHeaders() }
+  );
+  return data;
+}
+
+export async function adminMigrationRevokeToken(token: string) {
+  const { data } = await api.delete(`/admin/migration/tokens/${encodeURIComponent(token)}`, {
+    headers: adminHeaders(),
+  });
+  return data;
+}

@@ -34,6 +34,7 @@ const curationSvc = require('../services/curationService');
 const { GAME_MODES, COMBINABLE_MODES } = require('../plugins');
 const { parseArray, parseObject } = require('../utils/json');
 const { normalizeGameSettings } = require('../utils/gameSettings');
+const { adminRouter: migrationAdminRouter } = require('./migration');
 
 const router = express.Router();
 const upload = multer({
@@ -134,6 +135,10 @@ router.get('/me', (req, res) => {
     permissions: [...permSet],
   });
 });
+
+// ── Server Migration (full export/import) ─────────────────────────────────────
+
+router.use('/migration', migrationAdminRouter);
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 

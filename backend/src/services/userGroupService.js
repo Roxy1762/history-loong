@@ -35,6 +35,7 @@ const ALL_PERMISSIONS = [
   ['security:edit',         'security',      'edit',   '修改安全设置',       '更改管理员密钥和JWT密钥（仅超级管理员）'],
   ['user-groups:view',      'user-groups',   'view',   '查看用户组',         '查看用户组列表和成员'],
   ['user-groups:manage',    'user-groups',   'manage', '管理用户组',         '创建、编辑、删除用户组及管理成员'],
+  ['migration:manage',      'migration',     'manage', '服务器迁移',         '导出/导入完整服务器数据并管理迁移 Token'],
 ];
 
 // Map of valid permission IDs for fast lookup
