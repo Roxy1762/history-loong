@@ -32,6 +32,9 @@ import {
   adminConceptRAGSearch,
   adminListGroups, adminGetGroup, adminCreateGroup, adminUpdateGroup, adminDeleteGroup,
   adminAddGroupMember, adminRemoveGroupMember,
+  adminMigrationSummary, adminMigrationExport, adminMigrationImport, adminMigrationPull,
+  adminMigrationListTokens, adminMigrationCreateToken, adminMigrationRevokeToken,
+  type MigrationToken,
   type AIConfig, type KnowledgeDoc, type AdminGame, type LogEntry, type AIConfirmedDoc,
   type CurationConcept, type Category, type AIDecision, type AdminUserDetail, type AvatarFileInfo, type AvatarConfig,
   type UserGroup, type UserGroupMember, type PermissionDef, type AdminMe,
@@ -168,7 +171,7 @@ function LoginScreen({ onLogin }: { onLogin: (me: AdminMe) => void }) {
 
 // ── Sidebar navigation ────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security' | 'user-groups';
+type Tab = 'overview' | 'games' | 'users' | 'avatars' | 'ai-config' | 'knowledge' | 'ai-confirmed' | 'curation' | 'ai-decisions' | 'logs' | 'security' | 'user-groups' | 'migration';
 
 const NAV_ITEMS: { id: Tab; label: string; perm: string }[] = [
   { id: 'overview',      label: '概览',          perm: 'overview:view' },
@@ -182,6 +185,7 @@ const NAV_ITEMS: { id: Tab; label: string; perm: string }[] = [
   { id: 'curation',      label: '知识策展',       perm: 'curation:view' },
   { id: 'ai-decisions',  label: 'AI 完整回复',    perm: 'ai-decisions:view' },
   { id: 'logs',          label: '服务器日志',     perm: 'logs:view' },
+  { id: 'migration',     label: '🚚 服务器迁移', perm: 'migration:manage' },
   { id: 'security',      label: '🔐 安全设置',   perm: 'security:view' },
 ];
 
@@ -324,6 +328,7 @@ export default function Admin() {
           {currentTab === 'logs'          && <LogsPanel />}
           {currentTab === 'security'      && <SecurityPanel />}
           {currentTab === 'user-groups'   && <UserGroupsPanel />}
+          {currentTab === 'migration'     && <MigrationPanel />}
         </div>
       </main>
     </div>
@@ -5709,6 +5714,437 @@ function InfoBox({ children }: { children: React.ReactNode }) {
   return (
     <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-700">
       ℹ️ {children}
+    </div>
+  );
+}
+
+// ── Panel: Server Migration ──────────────────────────────────────────────────
+
+function MigrationPanel() {
+  type Mode = 'export' | 'import' | 'online';
+  const [mode, setMode] = useState<Mode>('export');
+
+  // Summary
+  const [summary, setSummary] = useState<{ counts: Record<string, number> } | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  // Export state
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
+  const [exportErr, setExportErr] = useState('');
+
+  // Import (file upload)
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importErr, setImportErr] = useState('');
+  const [importResult, setImportResult] = useState<{ tables: Record<string, number>; avatars: number } | null>(null);
+  const [importNote, setImportNote] = useState('');
+
+  // Online migration (pull) state
+  const [pullUrl, setPullUrl] = useState('');
+  const [pullToken, setPullToken] = useState('');
+  const [pulling, setPulling] = useState(false);
+  const [pullErr, setPullErr] = useState('');
+
+  // Tokens
+  const [tokens, setTokens] = useState<MigrationToken[]>([]);
+  const [tokensLoading, setTokensLoading] = useState(false);
+  const [tokenTtl, setTokenTtl] = useState(30);
+  const [tokenNote, setTokenNote] = useState('');
+  const [tokenCreating, setTokenCreating] = useState(false);
+  const [tokenErr, setTokenErr] = useState('');
+
+  function loadSummary() {
+    setSummaryLoading(true);
+    adminMigrationSummary()
+      .then(d => setSummary({ counts: d.counts }))
+      .catch(() => setSummary(null))
+      .finally(() => setSummaryLoading(false));
+  }
+
+  function loadTokens() {
+    setTokensLoading(true);
+    adminMigrationListTokens()
+      .then(setTokens)
+      .catch(() => setTokens([]))
+      .finally(() => setTokensLoading(false));
+  }
+
+  useEffect(() => { loadSummary(); }, []);
+  useEffect(() => { if (mode === 'export' || mode === 'online') loadTokens(); }, [mode]);
+
+  async function handleExport() {
+    setExporting(true); setExportErr(''); setExportMsg('');
+    try {
+      const { filename } = await adminMigrationExport();
+      setExportMsg(`已导出：${filename}`);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setExportErr(e?.response?.data?.error || '导出失败');
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleImport(e: React.FormEvent) {
+    e.preventDefault();
+    if (!importFile) return;
+    if (!confirm('导入将清空当前服务器全部数据并替换为文件内容。该操作不可撤销，确定继续？')) return;
+
+    setImporting(true); setImportErr(''); setImportResult(null); setImportNote('');
+    try {
+      const res = await adminMigrationImport(importFile);
+      setImportResult(res.summary);
+      setImportNote(res.note || '');
+      // Auth state on this server has been replaced — current session is likely invalid.
+      // Force a logout so the user re-authenticates with the migrated credentials.
+      setTimeout(() => {
+        clearAdminAuth();
+        window.location.reload();
+      }, 4000);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setImportErr(e?.response?.data?.error || '导入失败');
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  async function handlePull(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pullUrl.trim() || !pullToken.trim()) return;
+    if (!confirm('在线迁移将清空当前服务器全部数据。确定继续？')) return;
+
+    setPulling(true); setPullErr(''); setImportResult(null); setImportNote('');
+    try {
+      const res = await adminMigrationPull(pullUrl.trim(), pullToken.trim());
+      setImportResult(res.summary);
+      setImportNote(res.note || '');
+      setTimeout(() => {
+        clearAdminAuth();
+        window.location.reload();
+      }, 4000);
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setPullErr(e?.response?.data?.error || '在线迁移失败');
+    } finally {
+      setPulling(false);
+    }
+  }
+
+  async function handleCreateToken(e: React.FormEvent) {
+    e.preventDefault();
+    setTokenCreating(true); setTokenErr('');
+    try {
+      await adminMigrationCreateToken(tokenTtl, tokenNote);
+      setTokenNote('');
+      loadTokens();
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { error?: string } } };
+      setTokenErr(e?.response?.data?.error || '生成失败');
+    } finally {
+      setTokenCreating(false);
+    }
+  }
+
+  async function handleRevokeToken(token: string) {
+    if (!confirm('撤销该 Token 后将立即失效，确定继续？')) return;
+    await adminMigrationRevokeToken(token);
+    loadTokens();
+  }
+
+  async function copyToClipboard(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert('已复制到剪贴板');
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); alert('已复制到剪贴板'); } catch { alert(text); }
+      document.body.removeChild(ta);
+    }
+  }
+
+  function formatTtl(t: MigrationToken) {
+    if (typeof t.ttlSec !== 'number') return '';
+    if (t.ttlSec <= 0) return '已过期';
+    const m = Math.floor(t.ttlSec / 60);
+    const s = t.ttlSec % 60;
+    if (m >= 60) return `${Math.floor(m / 60)} 小时 ${m % 60} 分钟`;
+    if (m >= 1) return `${m} 分 ${s} 秒`;
+    return `${s} 秒`;
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="服务器迁移" subtitle="将本服务器的全部数据完整迁移到另一台部署。" />
+
+      <InfoBox>
+        迁移文件包含：游戏、玩家、概念、消息、AI 配置、用户与密码、知识库、向量化数据、用户组、权限、系统设置以及全部头像文件。
+        导入会<strong>清空目标服务器现有数据</strong>，并完全替换为源数据。请提前在目标端做好备份。
+      </InfoBox>
+
+      {/* Mode switcher */}
+      <div className="flex rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+        {([
+          { id: 'export',  label: '📤 导出' },
+          { id: 'import',  label: '📥 导入文件' },
+          { id: 'online',  label: '🌐 在线迁移' },
+        ] as const).map(t => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setMode(t.id as Mode)}
+            className="flex-1 px-3 py-2.5 text-sm font-medium transition-colors"
+            style={mode === t.id
+              ? { background: 'var(--brand)', color: '#fff' }
+              : { background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Summary card */}
+      <div className="rounded-2xl p-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>当前服务器数据概览</h3>
+          <button onClick={loadSummary} className="text-xs hover:underline" style={{ color: 'var(--brand)' }}>
+            {summaryLoading ? '加载中…' : '刷新'}
+          </button>
+        </div>
+        {summary ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 text-xs">
+            {Object.entries(summary.counts).map(([table, n]) => (
+              <div key={table} className="rounded-lg px-3 py-2" style={{ background: 'var(--bg-muted)' }}>
+                <div className="font-medium" style={{ color: 'var(--text-primary)' }}>{n}</div>
+                <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{table}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{summaryLoading ? '加载中…' : '暂无数据'}</p>
+        )}
+      </div>
+
+      {/* Export panel */}
+      {mode === 'export' && (
+        <div className="space-y-6">
+          <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+            <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>下载完整快照</h3>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              下载一个 JSON 文件，包含整个服务器状态。
+              将该文件在目标服务器的“导入文件”页面上传即可完成迁移。
+            </p>
+            <button onClick={handleExport} disabled={exporting} className="btn-primary px-6 py-2.5">
+              {exporting ? '正在导出…' : '⬇️ 导出快照文件'}
+            </button>
+            {exportMsg && <p className="text-sm" style={{ color: 'var(--brand)' }}>{exportMsg}</p>}
+            {exportErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{exportErr}</p>}
+          </div>
+
+          <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>在线迁移 Token</h3>
+                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                  生成一个临时 Token 给目标服务器使用，目标服务器即可远程拉取本服务器的快照。
+                  Token 有效期可配置，过期即失效。
+                </p>
+              </div>
+              <button onClick={loadTokens} className="text-xs hover:underline" style={{ color: 'var(--brand)' }}>
+                {tokensLoading ? '加载中…' : '刷新'}
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateToken} className="flex flex-wrap items-end gap-3">
+              <FormField label="有效期（分钟）">
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={tokenTtl}
+                  onChange={e => setTokenTtl(Math.max(1, Math.min(1440, Number(e.target.value) || 30)))}
+                  className="input w-28"
+                />
+              </FormField>
+              <FormField label="备注（可选）">
+                <input
+                  type="text"
+                  value={tokenNote}
+                  onChange={e => setTokenNote(e.target.value)}
+                  placeholder="例：迁移到新服务器"
+                  className="input w-64"
+                />
+              </FormField>
+              <button type="submit" disabled={tokenCreating} className="btn-primary px-4 py-2">
+                {tokenCreating ? '生成中…' : '生成 Token'}
+              </button>
+            </form>
+            {tokenErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{tokenErr}</p>}
+
+            {tokens.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>暂无有效 Token</p>
+            ) : (
+              <div className="space-y-2">
+                {tokens.map(t => (
+                  <div key={t.token} className="rounded-lg p-3 flex flex-col gap-2" style={{ background: 'var(--bg-muted)' }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-mono text-xs break-all" style={{ color: 'var(--text-primary)' }}>{t.token}</div>
+                        <div className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
+                          剩余 {formatTtl(t)} · 过期：{new Date(t.expiresAt).toLocaleString()}
+                          {t.note ? ` · ${t.note}` : ''}
+                        </div>
+                      </div>
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button onClick={() => copyToClipboard(t.token)} className="text-xs px-2 py-1 rounded hover:underline" style={{ color: 'var(--brand)' }}>
+                          复制 Token
+                        </button>
+                        <button onClick={() => copyToClipboard(`${window.location.origin}|${t.token}`)} className="text-xs px-2 py-1 rounded hover:underline" style={{ color: 'var(--brand)' }}>
+                          复制地址+Token
+                        </button>
+                        <button onClick={() => handleRevokeToken(t.token)} className="text-xs px-2 py-1 rounded hover:underline" style={{ color: 'var(--seal-red)' }}>
+                          撤销
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              告诉目标服务器管理员：本服务器地址 <code className="font-mono">{window.location.origin}</code> 与上面的 Token，
+              他在“在线迁移”页面填入即可完成迁移。
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Import (file) panel */}
+      {mode === 'import' && (
+        <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>从文件恢复</h3>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            上传源服务器导出的 <code className="font-mono">history-loong-snapshot_*.json</code>。
+            <strong style={{ color: 'var(--seal-red)' }}>该操作会清空当前服务器全部数据</strong>，请谨慎操作。
+          </p>
+          <form onSubmit={handleImport} className="space-y-3">
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={e => setImportFile(e.target.files?.[0] || null)}
+              className="block text-sm"
+            />
+            {importFile && (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                已选择：{importFile.name}（{(importFile.size / 1024 / 1024).toFixed(2)} MB）
+              </p>
+            )}
+            <button type="submit" disabled={!importFile || importing} className="btn-primary px-6 py-2.5">
+              {importing ? '正在导入…（请勿关闭页面）' : '⬆️ 导入并覆盖当前数据'}
+            </button>
+          </form>
+          {importErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{importErr}</p>}
+          {importResult && (
+            <ImportResultBlock result={importResult} note={importNote} />
+          )}
+        </div>
+      )}
+
+      {/* Online pull panel */}
+      {mode === 'online' && (
+        <div className="rounded-2xl p-5 space-y-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}>
+          <h3 className="font-semibold" style={{ color: 'var(--text-primary)' }}>从源服务器在线拉取</h3>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            请源服务器管理员在“导出”页面生成 Token，然后在此填写源服务器地址 + Token。
+            <strong style={{ color: 'var(--seal-red)' }}>该操作会清空当前服务器全部数据</strong>。
+          </p>
+          <form onSubmit={handlePull} className="space-y-3">
+            <FormField label="源服务器地址（含协议）">
+              <input
+                type="url"
+                value={pullUrl}
+                onChange={e => setPullUrl(e.target.value)}
+                placeholder="https://old-server.example.com"
+                className="input"
+              />
+            </FormField>
+            <FormField label="临时迁移 Token">
+              <input
+                type="text"
+                value={pullToken}
+                onChange={e => setPullToken(e.target.value)}
+                placeholder="mig_xxxxxxxxxxxx"
+                className="input font-mono"
+              />
+            </FormField>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              提示：如果源端复制了“地址+Token”，可粘贴到任一字段，使用 <code>|</code> 分隔会被自动拆分。
+            </p>
+            <PasteHelper onParse={(u, t) => { if (u) setPullUrl(u); if (t) setPullToken(t); }} />
+            <button type="submit" disabled={!pullUrl || !pullToken || pulling} className="btn-primary px-6 py-2.5">
+              {pulling ? '正在迁移…（请勿关闭页面）' : '🌐 从源服务器拉取并覆盖'}
+            </button>
+          </form>
+          {pullErr && <p className="text-sm" style={{ color: 'var(--seal-red)' }}>{pullErr}</p>}
+          {importResult && (
+            <ImportResultBlock result={importResult} note={importNote} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PasteHelper({ onParse }: { onParse: (url: string, token: string) => void }) {
+  const [combo, setCombo] = useState('');
+  function handleApply() {
+    const parts = combo.split('|').map(s => s.trim()).filter(Boolean);
+    if (parts.length === 2) onParse(parts[0], parts[1]);
+    else if (parts.length === 1) {
+      // best effort: token if starts with mig_, else url
+      if (parts[0].startsWith('mig_')) onParse('', parts[0]);
+      else onParse(parts[0], '');
+    }
+    setCombo('');
+  }
+  return (
+    <div className="flex gap-2">
+      <input
+        type="text"
+        value={combo}
+        onChange={e => setCombo(e.target.value)}
+        placeholder="粘贴 地址|Token 一键填入"
+        className="input flex-1 text-sm"
+      />
+      <button type="button" onClick={handleApply} className="px-3 py-1.5 text-sm rounded-lg" style={{ background: 'var(--bg-muted)', color: 'var(--text-secondary)' }}>
+        解析
+      </button>
+    </div>
+  );
+}
+
+function ImportResultBlock({ result, note }: { result: { tables: Record<string, number>; avatars: number }; note?: string }) {
+  const total = Object.values(result.tables).reduce((a, b) => a + b, 0);
+  return (
+    <div className="rounded-xl p-3 space-y-2" style={{ background: 'var(--bg-muted)' }}>
+      <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+        ✅ 导入成功：共写入 {total} 行数据，{result.avatars} 个头像文件。
+      </p>
+      {note && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{note}</p>}
+      <details>
+        <summary className="text-xs cursor-pointer" style={{ color: 'var(--text-muted)' }}>查看每张表的导入数量</summary>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1 mt-2 text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>
+          {Object.entries(result.tables).map(([t, n]) => (
+            <div key={t}>{t}: {n}</div>
+          ))}
+        </div>
+      </details>
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>页面将在 4 秒后自动退出登录并刷新…</p>
     </div>
   );
 }
